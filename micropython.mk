@@ -1,6 +1,7 @@
 # Source list for MicroPython / metalpython extmod glue.
 # Expect this repo checked out as $(WASMMOD_DIR), default extmod/wasmmod.
 WASMMOD_DIR ?= extmod/wasmmod
+WAMR_DIR ?= $(WASMMOD_DIR)/third_party/wamr
 
 SRC_WASMMOD = \
 	$(WASMMOD_DIR)/wasmmod.c \

@@ -5,10 +5,11 @@
 #   make -C extmod/wasmmod/examples test-engines
 #
 # Engine rounds use separate ports/unix BUILD dirs so configs do not clobber.
-# AOT needs a wamrc built from the same lib/wamr (AOT binary version must match).
+# AOT needs a wamrc built from the same nested WAMR (AOT binary version must match).
 
 include find_top.mk
 UNIX = $(TOP)/ports/unix
+WAMR_DIR = $(WASMMOD_ROOT)/third_party/wamr
 # MATRIX=1 pulls host_matrix.rs + wasm.c_call / host_*_triple.
 HOST_COMMON = MICROPY_PY_WASM=1 MICROPY_PY_WASM_MATRIX=1 MICROPY_PY_BTREE=0 MICROPY_PY_FFI=0
 
@@ -39,13 +40,17 @@ packs:
 
 all: packs
 
-# Build wamrc from lib/wamr so .aot matches the linked AOT loader.
+# Build wamrc from nested WAMR so .aot matches the linked AOT loader.
 wamrc:
 	@if [ -z "$(LLVM_CMAKE_DIR)" ]; then \
 		echo "FAIL: llvm-config not found (needed to build matching wamrc)"; \
 		exit 1; \
 	fi
-	cmake -S $(TOP)/lib/wamr/wamr-compiler -B $(WAMRC_BUILD) \
+	@if [ ! -f "$(WAMR_DIR)/wamr-compiler/CMakeLists.txt" ]; then \
+		echo "FAIL: WAMR missing at $(WAMR_DIR) — git submodule update --init --recursive"; \
+		exit 1; \
+	fi
+	cmake -S $(WAMR_DIR)/wamr-compiler -B $(WAMRC_BUILD) \
 		-DWAMR_BUILD_WITH_CUSTOM_LLVM=1 \
 		-DLLVM_DIR=$(LLVM_CMAKE_DIR)
 	cmake --build $(WAMRC_BUILD) -j$$(nproc)

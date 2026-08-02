@@ -18,6 +18,7 @@ drop-in for a git submodule at `extmod/wasmmod`
 | `docs/PACK.md` | Pack / imports section format |
 | `examples/` | Guest packs + call-matrix smoke (`hello`, `client`, `mixed`, `bridge`) |
 | `tools/` | Host-agnostic pack/sign CLIs (`wasm_pack.py`, `wasm_sign.py`) |
+| `third_party/wamr` | Nested [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) submodule |
 
 Planned split (non-breaking): `core/` + `hosts/micropython/` (+ later
 `hosts/cpython/`). Pack section names are still MicroPython-branded
@@ -28,11 +29,12 @@ Planned split (non-breaking): `core/` + `hosts/micropython/` (+ later
 ```bash
 # from a MicroPython / metalpython tree
 git submodule add https://github.com/pymergetic/wasmmod.git extmod/wasmmod
+git submodule update --init --recursive extmod/wasmmod
 ```
 
 Enable with `MICROPY_PY_WASM=1` (and optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT}`).
-Requires the `lib/wamr` submodule. See the host tree’s `extmod/extmod.mk` /
-`extmod.cmake` for WAMR link flags.
+WAMR lives at `third_party/wamr` (nested). Host glue still cmake-builds it
+(`extmod/extmod.mk` / `extmod.cmake`).
 
 ## Examples
 
