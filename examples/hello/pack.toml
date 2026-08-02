@@ -9,7 +9,10 @@ comment = "Minimal freestanding demo: native hello/add + optional py/ tree."
 
 [python]
 mount = "py"
-freeze = true                 # embed as .mpy bytecode (mpy-cross)
+# Default: embed .py source only. Uncomment to freeze bytecode (mpy-cross):
+# freeze = true
+# Future multi-host (fat pack); leave commented until targets land:
+# targets = ["upy:mpy6:sib31", "upy:mpy6:sib63", "cpy:cp312"]
 
 [native]
 dir = "."

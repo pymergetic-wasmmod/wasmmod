@@ -11,7 +11,9 @@ sources = ["bridge.c", "lib.rs"]
 
 [python]
 mount = "py"
-freeze = true
+# Default: embed .py source only. Uncomment to freeze bytecode:
+# freeze = true
+# targets = ["upy:mpy6:sib31", "cpy:cp312"]
 
 [lifecycle]
 load = "mp_pack_load"

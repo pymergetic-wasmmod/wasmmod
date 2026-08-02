@@ -574,7 +574,7 @@ def main() -> int:
         "--freeze",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Compile mounted .py to .mpy before embed (default: on; pack.toml [python].freeze overrides)",
+        help="Compile mounted .py to .mpy before embed (default: off / source-only; pack.toml [python].freeze)",
     )
     ap.add_argument(
         "--mpy-cross",
@@ -609,7 +609,7 @@ def main() -> int:
     pack_imports: list[tuple[str, str]] = []
     mounts: list[Path] = list(args.mount)
     pkg_name: str | None = args.name
-    # Default: freeze .py → .mpy. pack.toml [python].freeze wins unless CLI set.
+    # Default: source-only (.py). Opt in via pack.toml freeze=true or --freeze.
     freeze: bool | None = args.freeze
     manifest_freeze: bool | None = None
 
@@ -643,7 +643,7 @@ def main() -> int:
         raise SystemExit(f"wasm_pack: not a source, pack dir, or pack.toml: {inp}")
 
     if freeze is None:
-        freeze = True if manifest_freeze is None else manifest_freeze
+        freeze = False if manifest_freeze is None else manifest_freeze
 
     # CLI --export without pack.toml metadata → auto-arity table entries.
     if args.export and not pack_exports:
