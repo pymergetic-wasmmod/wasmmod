@@ -15,7 +15,6 @@ unload = "mp_pack_unload"
 
 [[exports]]
 func = "use_hello"
-sig = "i32"
 
 [[imports]]
 module = "hello"

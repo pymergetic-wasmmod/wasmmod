@@ -31,8 +31,6 @@ unload = ""
 
 [[exports]]
 func = "hello"
-sig = "i32"
 
 [[exports]]
 func = "add"
-sig = "i32_i32_i32"

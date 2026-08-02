@@ -12,8 +12,6 @@ sources = ["shim.c", "lib.rs"]
 [[exports]]
 func = "mixed_answer"
 export = "mixed_answer"
-sig = "i32"
 
 [[exports]]
 func = "mixed_i64"
-sig = "i64_i64"

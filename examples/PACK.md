@@ -129,16 +129,12 @@ unload = "mp_pack_unload"
 
 # Published into sys.modules as accessors (→ micropython.pack exports[] v2)
 [[exports]]
-module = ""                   # "" = package root (mypkg.add)
-func = "add"
-export = "add"                # wasm export; default = func
-sig = "i32_i32_i32"           # see signature tags
+func = "add"                  # Python attr; Wasm export defaults to same name
 
 [[exports]]
-module = "sub"
+module = "sub"                # optional: nest under mypkg.sub
 func = "ping"
-export = "sub_ping"
-sig = "i32"
+export = "sub_ping"           # optional: when Wasm export ≠ func
 
 # Guest→guest needs (→ micropython.imports)
 [[imports]]
@@ -159,11 +155,9 @@ mount = "py"
 
 [[exports]]
 func = "hello"
-sig = "i32"
 
 [[exports]]
 func = "add"
-sig = "i32_i32_i32"
 ```
 
 (`module` / `export` default to `""` / `func` when omitted.)
