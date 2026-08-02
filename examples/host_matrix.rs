@@ -23,7 +23,7 @@
 // THE SOFTWARE.
 
 //! Call-matrix-only host Rust helpers (not part of the default wasm loader).
-//! Built when `MICROPY_PY_WASM_MATRIX=1` (see examples/wasmmod/Makefile).
+//! Built when `MICROPY_PY_WASM_MATRIX=1` (see examples/Makefile).
 
 #![no_std]
 

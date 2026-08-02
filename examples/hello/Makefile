@@ -1,13 +1,11 @@
 # Build hello.wasm for the MicroPython wasm loader demo.
 #
-#   make -C examples/wasmmod/hello
+#   make -C extmod/wasmmod/examples/hello
 #   make -C ports/unix MICROPY_PY_WASM=1
-#   ports/unix/build-standard/micropython -c \
-#     'import wasm; m=wasm.load_pack("examples/wasmmod/hello/hello.wasm"); print(m.hello(), m.greet())'
 #
 # Pack format: see ../PACK.md
 
-TOP = ../../..
+include ../find_top.mk
 WASM_PACK = $(TOP)/tools/wasm_pack.py
 OUT = hello.wasm
 

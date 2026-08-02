@@ -1,8 +1,8 @@
 # Build bridge.wasm (depends on hello + mixed at runtime).
 #
-#   make -C examples/wasmmod/bridge
+#   make -C extmod/wasmmod/examples/bridge
 
-TOP = ../../..
+include ../find_top.mk
 WASM_PACK = $(TOP)/tools/wasm_pack.py
 OUT = bridge.wasm
 

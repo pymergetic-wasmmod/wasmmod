@@ -1,15 +1,15 @@
 # Build all wasmmod demos and run the explained call-matrix smoke.
 #
-#   make -C examples/wasmmod              # build packs (.wasm)
-#   make -C examples/wasmmod test         # interp host + matrix
-#   make -C examples/wasmmod test-engines # interp + AOT + Fast JIT + LLVM JIT
+#   make -C extmod/wasmmod/examples test
+#   make -C examples/wasmmod test          # via metalpython symlink
+#   make -C extmod/wasmmod/examples test-engines
 #
 # Engine rounds use separate ports/unix BUILD dirs so configs do not clobber.
 # AOT needs a wamrc built from the same lib/wamr (AOT binary version must match).
 
-TOP = ../..
+include find_top.mk
 UNIX = $(TOP)/ports/unix
-# MATRIX=1 pulls examples/wasmmod/host_matrix.rs + wasm.c_call / host_*_triple.
+# MATRIX=1 pulls host_matrix.rs + wasm.c_call / host_*_triple.
 HOST_COMMON = MICROPY_PY_WASM=1 MICROPY_PY_WASM_MATRIX=1 MICROPY_PY_BTREE=0 MICROPY_PY_FFI=0
 
 MPY_INTERP = $(UNIX)/build-wasm/micropython

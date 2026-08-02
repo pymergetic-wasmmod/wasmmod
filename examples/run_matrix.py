@@ -24,8 +24,8 @@
 
 # Wasm call-matrix smoke: host↔guest / guest↔guest × C / RS / Py.
 #
-#   make -C examples/wasmmod test
-#   ports/unix/build-standard/micropython examples/wasmmod/run_matrix.py
+#   make -C extmod/wasmmod/examples test
+#   ports/unix/build-wasm/micropython extmod/wasmmod/examples/run_matrix.py
 #
 # Output: lang×lang tables (index numbers) + detailed call list.
 
@@ -40,7 +40,7 @@ except ImportError:
 try:
     HERE = __file__.rsplit("/", 1)[0]
 except AttributeError:
-    HERE = "examples/wasmmod"
+    HERE = "extmod/wasmmod/examples"
 
 
 def p(path):

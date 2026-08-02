@@ -1,9 +1,9 @@
 # Build client.wasm (imports hello.hello).
 #
-#   make -C examples/wasmmod/hello
-#   make -C examples/wasmmod/client
+#   make -C extmod/wasmmod/examples/hello
+#   make -C extmod/wasmmod/examples/client
 
-TOP = ../../..
+include ../find_top.mk
 WASM_PACK = $(TOP)/tools/wasm_pack.py
 OUT = client.wasm
 

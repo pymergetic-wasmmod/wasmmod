@@ -16,7 +16,7 @@ drop-in for a git submodule at `extmod/wasmmod`
 | `fetch.*` | Byte loader (currently MicroPython reader-backed) |
 | `wasmmod.c`, `finder.*`, `host.*` | MicroPython host (`wasm` module, import hook, host slots/handles) |
 | `docs/PACK.md` | Pack / imports section format |
-| `examples/` | Guest packs + call-matrix smoke |
+| `examples/` | Guest packs + call-matrix smoke (`hello`, `client`, `mixed`, `bridge`) |
 
 Planned split (non-breaking): `core/` + `hosts/micropython/` (+ later
 `hosts/cpython/`). Pack section names are still MicroPython-branded
@@ -35,9 +35,10 @@ Requires the `lib/wamr` submodule. See the host tree’s `extmod/extmod.mk` /
 
 ## Examples
 
+From a MicroPython / metalpython tree with this repo as `extmod/wasmmod`:
+
 ```bash
-# after building a unix port with MICROPY_PY_WASM=1 and MATRIX helpers
-make -C examples MICROPY_UNIX=../path/to/micropython test
+make -C extmod/wasmmod/examples test
 ```
 
 ## License
