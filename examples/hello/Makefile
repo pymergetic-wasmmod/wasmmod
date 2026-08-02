@@ -6,7 +6,6 @@
 # Pack format: see ../PACK.md
 
 include ../find_top.mk
-WASM_PACK = $(TOP)/tools/wasm_pack.py
 OUT = hello.wasm
 
 .PHONY: all clean

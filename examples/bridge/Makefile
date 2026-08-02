@@ -3,7 +3,6 @@
 #   make -C extmod/wasmmod/examples/bridge
 
 include ../find_top.mk
-WASM_PACK = $(TOP)/tools/wasm_pack.py
 OUT = bridge.wasm
 
 .PHONY: all clean

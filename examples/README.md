@@ -73,8 +73,8 @@ Set `WASM_CC` / `WASM_LD` if needed. Mixed/bridge also need a Rust
 `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`).
 
 ```sh
-# Pack from manifest
-python3 tools/wasm_pack.py extmod/wasmmod/examples/hello -o hello.wasm
+# Pack from manifest (tool lives in the wasmmod repo)
+python3 extmod/wasmmod/tools/wasm_pack.py extmod/wasmmod/examples/hello -o hello.wasm
 ```
 
 ## Author

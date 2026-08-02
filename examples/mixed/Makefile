@@ -1,5 +1,4 @@
 include ../find_top.mk
-WASM_PACK = $(TOP)/tools/wasm_pack.py
 OUT = mixed.wasm
 
 .PHONY: all clean

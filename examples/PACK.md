@@ -375,7 +375,7 @@ Recommended shipping layouts:
 Tooling:
 
 ```sh
-python3 tools/wasm_pack.py hello/ -o hello.wasm
+python3 tools/wasm_pack.py examples/hello/ -o hello.wasm
 wamrc -o hello.aot hello.wasm          # target-specific flags as needed
 # optional: wasm_pack --write-mpack hello.mpack
 ```
@@ -677,10 +677,10 @@ tools/wasm_pack.py [pack.toml | pack dir | sources…]
 ```
 
 CLI may stay source-oriented for smoke tests; directory + `pack.toml` is
-the normal pack author path (see `examples/wasmmod/hello/pack.toml`):
+the normal pack author path (see `examples/hello/pack.toml`):
 
 ```sh
-python3 tools/wasm_pack.py examples/wasmmod/hello -o hello.wasm
+python3 tools/wasm_pack.py examples/hello -o hello.wasm
 ```
 
 ## Loader API (proposed Python surface)

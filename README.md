@@ -17,6 +17,7 @@ drop-in for a git submodule at `extmod/wasmmod`
 | `wasmmod.c`, `finder.*`, `host.*` | MicroPython host (`wasm` module, import hook, host slots/handles) |
 | `docs/PACK.md` | Pack / imports section format |
 | `examples/` | Guest packs + call-matrix smoke (`hello`, `client`, `mixed`, `bridge`) |
+| `tools/` | Host-agnostic pack/sign CLIs (`wasm_pack.py`, `wasm_sign.py`) |
 
 Planned split (non-breaking): `core/` + `hosts/micropython/` (+ later
 `hosts/cpython/`). Pack section names are still MicroPython-branded
