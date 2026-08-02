@@ -37,6 +37,7 @@
 #define MP_WASM_PACK_KIND_PY 1
 #define MP_WASM_PACK_KIND_MPY 2
 #define MP_WASM_PACK_KIND_RAW 3
+#define MP_WASM_PACK_KIND_PYC 4 /* CPython bytecode; ignored by MicroPython loader */
 
 // Signature tags (see examples/wasmmod/PACK.md). 0..8 = N i32 args -> i32.
 // 255 = resolve arity from the Wasm type at bind time.

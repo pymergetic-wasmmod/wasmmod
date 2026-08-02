@@ -39,6 +39,7 @@
 #include "py/objmodule.h"
 #include "py/persistentcode.h"
 #include "py/runtime.h"
+#include "py/smallint.h"
 
 #if MICROPY_PY_WASM
 
@@ -394,18 +395,48 @@ static void bind_export_cb(const char *name, uint32_t nparams, uint32_t nresults
         MP_OBJ_NEW_QSTR(qstr_from_str(name)), f);
 }
 
+// Logical module path length: strip host tags / extensions.
+//   util.py                         → util
+//   util.upy.mpy6.sib31.mpy         → util
+//   util.cpy.cp312.pyc              → util
+//   sub/mod.upy.mpy6.sib63.mpy      → sub/mod
+static size_t pack_logical_path_len(const char *path, size_t path_len) {
+    for (size_t i = 0; i + 5 <= path_len; ++i) {
+        if (path[i] != '.') {
+            continue;
+        }
+        if (i + 5 <= path_len && memcmp(path + i, ".upy.", 5) == 0) {
+            return i;
+        }
+        if (i + 5 <= path_len && memcmp(path + i, ".cpy.", 5) == 0) {
+            return i;
+        }
+    }
+    if (path_len >= 3 && memcmp(path + path_len - 3, ".py", 3) == 0) {
+        return path_len - 3;
+    }
+    if (path_len >= 4 && memcmp(path + path_len - 4, ".mpy", 4) == 0) {
+        return path_len - 4;
+    }
+    if (path_len >= 4 && memcmp(path + path_len - 4, ".pyc", 4) == 0) {
+        return path_len - 4;
+    }
+    return path_len;
+}
+
+static bool pack_logical_eq(const char *a, size_t a_len, const char *b, size_t b_len) {
+    size_t la = pack_logical_path_len(a, a_len);
+    size_t lb = pack_logical_path_len(b, b_len);
+    return la == lb && memcmp(a, b, la) == 0;
+}
+
 static void path_to_dotted(const char *root, size_t root_len, const char *path, size_t path_len, vstr_t *out) {
     vstr_init(out, root_len + path_len + 4);
     vstr_add_strn(out, root, root_len);
     if (path_len == 0) {
         return;
     }
-    size_t n = path_len;
-    if (n >= 3 && path[n - 3] == '.' && path[n - 2] == 'p' && path[n - 1] == 'y') {
-        n -= 3;
-    } else if (n >= 4 && path[n - 4] == '.' && path[n - 3] == 'm' && path[n - 2] == 'p' && path[n - 1] == 'y') {
-        n -= 4;
-    }
+    size_t n = pack_logical_path_len(path, path_len);
     if (n == 8 && memcmp(path, "__init__", 8) == 0) {
         return;
     }
@@ -417,6 +448,86 @@ static void path_to_dotted(const char *root, size_t root_len, const char *path, 
         char c = path[i];
         vstr_add_char(out, c == '/' ? '.' : c);
     }
+}
+
+// Score a pack file for this MicroPython host. <0 → skip.
+// Prefer compatible .mpy (higher sib that still fits), else .py. Ignore .pyc.
+static int score_pack_file_for_upy_host(const mp_wasm_pack_file_t *f) {
+    const char *path = f->path;
+    size_t path_len = f->path_len;
+
+    for (size_t i = 0; i + 5 <= path_len; ++i) {
+        if (memcmp(path + i, ".cpy.", 5) == 0) {
+            return -1;
+        }
+    }
+
+    if (f->kind == MP_WASM_PACK_KIND_PYC) {
+        return -1;
+    }
+
+    if (f->kind == MP_WASM_PACK_KIND_PY) {
+        return 1;
+    }
+
+    if (f->kind != MP_WASM_PACK_KIND_MPY) {
+        return -1;
+    }
+
+    #if MICROPY_PERSISTENT_CODE_LOAD
+    if (f->data_len < 4 || f->data[0] != 'M' || f->data[1] != MPY_VERSION) {
+        return -1;
+    }
+    // Native arch in feature byte: only accept bytecode (arch == 0) for now.
+    if (MPY_FEATURE_DECODE_ARCH(f->data[2]) != MP_NATIVE_ARCH_NONE) {
+        return -1;
+    }
+    if (f->data[3] > MP_SMALL_INT_BITS) {
+        return -1;
+    }
+
+    // Tagged: ….upy.mpy6.sib31.mpy — prefer highest sib that still fits host.
+    const char *tag = NULL;
+    size_t tag_len = 0;
+    for (size_t i = 0; i + 5 <= path_len; ++i) {
+        if (memcmp(path + i, ".upy.", 5) == 0) {
+            tag = path + i + 5;
+            tag_len = path_len - (i + 5);
+            break;
+        }
+    }
+    if (tag != NULL && tag_len >= 8 && memcmp(tag, "mpy", 3) == 0) {
+        unsigned mpy_ver = 0;
+        size_t p = 3;
+        while (p < tag_len && tag[p] >= '0' && tag[p] <= '9') {
+            mpy_ver = mpy_ver * 10u + (unsigned)(tag[p] - '0');
+            ++p;
+        }
+        const char *sibp = NULL;
+        for (size_t j = 0; j + 4 < tag_len; ++j) {
+            if (tag[j] == '.' && j + 4 < tag_len && memcmp(tag + j, ".sib", 4) == 0) {
+                sibp = tag + j + 4;
+                break;
+            }
+        }
+        unsigned sib = 0;
+        if (sibp != NULL) {
+            while (*sibp >= '0' && *sibp <= '9') {
+                sib = sib * 10u + (unsigned)(*sibp - '0');
+                ++sibp;
+            }
+        }
+        if (mpy_ver != MPY_VERSION || sib == 0 || sib > (unsigned)MP_SMALL_INT_BITS) {
+            return -1;
+        }
+        return 100 + (int)sib;
+    }
+    // Legacy untagged .mpy
+    return 50 + (int)f->data[3];
+    #else
+    (void)f;
+    return -1;
+    #endif
 }
 
 static void exec_py_into_module(mp_obj_t module_obj, const char *src_name, const uint8_t *data, uint32_t len) {
@@ -503,10 +614,9 @@ static void link_module_to_parent(const char *dotted_name) {
 }
 
 static bool path_is_package_init(const char *path, size_t path_len) {
-    return (path_len == 11 && memcmp(path, "__init__.py", 11) == 0)
-        || (path_len > 12 && memcmp(path + path_len - 12, "/__init__.py", 12) == 0)
-        || (path_len == 12 && memcmp(path, "__init__.mpy", 12) == 0)
-        || (path_len > 13 && memcmp(path + path_len - 13, "/__init__.mpy", 13) == 0);
+    size_t n = pack_logical_path_len(path, path_len);
+    return (n == 8 && memcmp(path, "__init__", 8) == 0)
+        || (n > 9 && memcmp(path + n - 9, "/__init__", 9) == 0);
 }
 
 static const char *stem_from_path(const char *path, char *buf, size_t buf_len) {
@@ -674,11 +784,42 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
     bind_pack_exports(root, wmod, pack_name, have_pack ? &info : NULL);
 
     if (have_pack) {
+        // Pick one file per logical module: best upy .mpy, else .py (ignore .pyc).
+        uint32_t *best_idx = m_new(uint32_t, info.n_files ? info.n_files : 1);
+        int *best_score = m_new(int, info.n_files ? info.n_files : 1);
+        uint32_t n_best = 0;
         for (uint32_t i = 0; i < info.n_files; ++i) {
             const mp_wasm_pack_file_t *f = &info.files[i];
-            if (f->kind != MP_WASM_PACK_KIND_PY && f->kind != MP_WASM_PACK_KIND_MPY) {
+            if (f->kind != MP_WASM_PACK_KIND_PY
+                && f->kind != MP_WASM_PACK_KIND_MPY
+                && f->kind != MP_WASM_PACK_KIND_PYC) {
                 continue;
             }
+            int score = score_pack_file_for_upy_host(f);
+            if (score < 0) {
+                continue;
+            }
+            uint32_t slot = n_best;
+            bool found = false;
+            for (uint32_t j = 0; j < n_best; ++j) {
+                const mp_wasm_pack_file_t *g = &info.files[best_idx[j]];
+                if (pack_logical_eq(f->path, f->path_len, g->path, g->path_len)) {
+                    slot = j;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                best_idx[n_best] = i;
+                best_score[n_best] = score;
+                n_best++;
+            } else if (score > best_score[slot]) {
+                best_idx[slot] = i;
+                best_score[slot] = score;
+            }
+        }
+        for (uint32_t j = 0; j < n_best; ++j) {
+            const mp_wasm_pack_file_t *f = &info.files[best_idx[j]];
             vstr_t dotted;
             path_to_dotted(pack_name, strlen(pack_name), f->path, f->path_len, &dotted);
             const char *dotted_name = vstr_null_terminated_str(&dotted);

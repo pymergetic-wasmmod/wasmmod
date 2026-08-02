@@ -111,8 +111,13 @@ impl = ["c", "rs"]            # subset of: "c" | "cpp" | "rs"
 
 [python]
 mount = "py"                  # directory tree → micropython.pack files[]
-# freeze = true               # opt-in: compile .py → .mpy (default is source-only)
-# targets = ["upy:mpy6:sib31"]  # future: host-tagged bytecode set
+keep_source = true            # keep .py beside bytecode (recommended)
+# freeze = true               # opt-in bytecode (default source-only)
+# targets = [                 # host-tagged names in the pack section
+#   "upy:mpy6:sib31",
+#   "upy:mpy6:sib63",
+#   "cpy:cp312",
+# ]
 
 [native]
 dir = "native"                # default; all sources linked into one wasm

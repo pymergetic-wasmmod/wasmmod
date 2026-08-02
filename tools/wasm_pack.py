@@ -56,12 +56,21 @@ IMPORTS_VERSION = 1
 KIND_PY = 1
 KIND_MPY = 2
 KIND_RAW = 3
+KIND_PYC = 4
 
 SIG_AUTO = 255
 C_EXTS = {".c"}
 CXX_EXTS = {".cc", ".cpp", ".cxx", ".C"}
 RS_EXTS = {".rs"}
 
+# Host-tagged bytecode targets (see docs/PACK.md).
+DEFAULT_PYTHON_TARGETS = (
+    "upy:mpy6:sib31",
+    "upy:mpy6:sib63",
+    "cpy:cp312",
+    "cpy:cp313",
+    "cpy:cp314",
+)
 
 def sig_tag(sig: str | None) -> int:
     """Map pack.toml sig strings to binder tags.
@@ -187,7 +196,76 @@ def kind_for_path(path: str) -> int:
         return KIND_PY
     if path.endswith(".mpy"):
         return KIND_MPY
+    if path.endswith(".pyc"):
+        return KIND_PYC
     return KIND_RAW
+
+
+class PythonTarget:
+    """Parsed `upy:mpy6:sib31` / `cpy:cp312` (optional native: `upy:mpy6:sub3:archx64:sib31`)."""
+
+    __slots__ = ("host", "mpy_ver", "sib", "sub", "arch", "cp", "raw")
+
+    def __init__(
+        self,
+        host: str,
+        *,
+        mpy_ver: int | None = None,
+        sib: int | None = None,
+        sub: int | None = None,
+        arch: str | None = None,
+        cp: int | None = None,
+        raw: str = "",
+    ) -> None:
+        self.host = host
+        self.mpy_ver = mpy_ver
+        self.sib = sib
+        self.sub = sub
+        self.arch = arch
+        self.cp = cp
+        self.raw = raw
+
+    def tagged_path(self, py_rel: str) -> str:
+        stem = py_rel[: -3] if py_rel.endswith(".py") else py_rel
+        if self.host == "upy":
+            parts = [f"upy", f"mpy{self.mpy_ver}"]
+            if self.sub is not None:
+                parts.append(f"sub{self.sub}")
+            if self.arch:
+                parts.append(f"arch{self.arch}")
+            parts.append(f"sib{self.sib}")
+            return stem + "." + ".".join(parts) + ".mpy"
+        return f"{stem}.cpy.cp{self.cp}.pyc"
+
+
+def parse_python_target(spec: str) -> PythonTarget:
+    s = spec.strip()
+    if not s:
+        raise SystemExit("wasm_pack: empty python target")
+    parts = s.split(":")
+    host = parts[0]
+    if host == "upy":
+        mpy_ver = sib = sub = None
+        arch = None
+        for p in parts[1:]:
+            if p.startswith("mpy") and p[3:].isdigit():
+                mpy_ver = int(p[3:])
+            elif p.startswith("sib") and p[3:].isdigit():
+                sib = int(p[3:])
+            elif p.startswith("sub") and p[3:].isdigit():
+                sub = int(p[3:])
+            elif p.startswith("arch") and len(p) > 4:
+                arch = p[4:]
+            else:
+                raise SystemExit(f"wasm_pack: bad upy target field {p!r} in {spec!r}")
+        if mpy_ver is None or sib is None:
+            raise SystemExit(f"wasm_pack: upy target needs mpyN and sibN: {spec!r}")
+        return PythonTarget("upy", mpy_ver=mpy_ver, sib=sib, sub=sub, arch=arch, raw=s)
+    if host == "cpy":
+        if len(parts) != 2 or not parts[1].startswith("cp") or not parts[1][2:].isdigit():
+            raise SystemExit(f"wasm_pack: cpy target like cpy:cp312 expected, got {spec!r}")
+        return PythonTarget("cpy", cp=int(parts[1][2:]), raw=s)
+    raise SystemExit(f"wasm_pack: unknown python target host in {spec!r}")
 
 
 def find_mpy_cross() -> str | None:
@@ -206,49 +284,118 @@ def find_mpy_cross() -> str | None:
     return shutil.which("mpy-cross")
 
 
-def freeze_py_to_mpy(rel: str, data: bytes, mpy_cross: str, opt: str) -> bytes:
+def find_cpython(cp: int) -> str | None:
+    """Map cp312 → python3.12 binary if present."""
+    major, minor = divmod(cp, 100)  # 312 → (3, 12)
+    ver = f"{major}.{minor}"
+    env = os.environ.get(f"PYTHON{major}{minor}") or os.environ.get(f"PYTHON_{ver}")
+    candidates = [env, f"python{ver}", f"python{major}.{minor}", "python3"]
+    for c in candidates:
+        if not c:
+            continue
+        path = c if (os.sep in c and Path(c).is_file()) else shutil.which(c)
+        if not path:
+            continue
+        try:
+            out = subprocess.check_output(
+                [path, "-c", "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
+                text=True,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        if out == ver:
+            return path
+    return None
+
+
+def freeze_py_to_mpy(
+    rel: str,
+    data: bytes,
+    mpy_cross: str,
+    opt: str,
+    *,
+    sib: int,
+    arch: str | None = None,
+) -> bytes:
     """Compile .py source bytes to .mpy via mpy-cross."""
     import tempfile
 
     with tempfile.TemporaryDirectory(prefix="wasm_pack_mpy_") as td:
         td_path = Path(td)
-        # Preserve basename so -s embedding stays readable.
         base = Path(rel).name
         if not base.endswith(".py"):
             base = base + ".py"
         py_path = td_path / base
         mpy_path = td_path / (Path(base).stem + ".mpy")
         py_path.write_bytes(data)
-        cmd = [
-            mpy_cross,
-            f"-O{opt}",
-            "-o",
-            str(mpy_path),
-            "-s",
-            rel,
-            str(py_path),
-        ]
+        cmd = [mpy_cross, f"-O{opt}", f"-msmall-int-bits={sib}"]
+        if arch:
+            cmd += [f"-march={arch}", "-X", "emit=native"]
+        cmd += ["-o", str(mpy_path), "-s", rel, str(py_path)]
         print("+", " ".join(cmd), file=sys.stderr)
         try:
             subprocess.check_call(cmd)
         except subprocess.CalledProcessError as e:
-            raise SystemExit(f"wasm_pack: mpy-cross failed for {rel}") from e
+            raise SystemExit(f"wasm_pack: mpy-cross failed for {rel} (sib={sib})") from e
         return mpy_path.read_bytes()
+
+def freeze_py_to_pyc(rel: str, data: bytes, python: str) -> bytes:
+    """Compile .py to .pyc with a specific CPython."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="wasm_pack_pyc_") as td:
+        td_path = Path(td)
+        base = Path(rel).name
+        if not base.endswith(".py"):
+            base = base + ".py"
+        py_path = td_path / base
+        pyc_path = td_path / (Path(base).stem + ".pyc")
+        py_path.write_bytes(data)
+        script = (
+            "import py_compile, sys; "
+            f"py_compile.compile({str(py_path)!r}, cfile={str(pyc_path)!r}, "
+            "doraise=True, optimize=0)"
+        )
+        cmd = [python, "-c", script]
+        print("+", python, "-c", f"py_compile {rel}", file=sys.stderr)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            raise SystemExit(f"wasm_pack: py_compile failed for {rel} with {python}") from e
+        return pyc_path.read_bytes()
 
 
 def collect_mounts(
     mount_dirs: list[Path],
     *,
-    freeze: bool = False,
+    targets: list[PythonTarget] | None = None,
+    keep_source: bool = True,
     mpy_cross: str | None = None,
     opt: str = "2",
 ) -> list[tuple[str, int, bytes]]:
+    """Embed mount tree; optionally emit host-tagged bytecode beside .py."""
     files: list[tuple[str, int, bytes]] = []
-    if freeze and not mpy_cross:
+    targets = targets or []
+    need_mpy = any(t.host == "upy" for t in targets)
+    if need_mpy and not mpy_cross:
         raise SystemExit(
-            "wasm_pack: freeze requires mpy-cross "
+            "wasm_pack: upy targets require mpy-cross "
             "(build mpy-cross, or set MPY_CROSS=/path/to/mpy-cross)"
         )
+    cpy_bins: dict[int, str] = {}
+    for t in targets:
+        if t.host == "cpy":
+            assert t.cp is not None
+            if t.cp not in cpy_bins:
+                bin_ = find_cpython(t.cp)
+                if bin_ is None:
+                    print(
+                        f"wasm_pack: skip target {t.raw}: no CPython {t.cp // 100}.{t.cp % 100}",
+                        file=sys.stderr,
+                    )
+                else:
+                    cpy_bins[t.cp] = bin_
+
     for root in mount_dirs:
         root = root.resolve()
         if not root.is_dir():
@@ -261,11 +408,25 @@ def collect_mounts(
                 raise SystemExit(f"wasm_pack: refusing path {rel}")
             data = path.read_bytes()
             kind = kind_for_path(rel)
-            if freeze and kind == KIND_PY:
-                data = freeze_py_to_mpy(rel, data, mpy_cross, opt)  # type: ignore[arg-type]
-                rel = rel[: -3] + ".mpy" if rel.endswith(".py") else rel + ".mpy"
-                kind = KIND_MPY
-            files.append((rel, kind, data))
+            if kind == KIND_PY:
+                if keep_source or not targets:
+                    files.append((rel, KIND_PY, data))
+                for t in targets:
+                    if t.host == "upy":
+                        assert t.sib is not None
+                        blob = freeze_py_to_mpy(
+                            rel, data, mpy_cross, opt, sib=t.sib, arch=t.arch  # type: ignore[arg-type]
+                        )
+                        files.append((t.tagged_path(rel), KIND_MPY, blob))
+                    elif t.host == "cpy":
+                        assert t.cp is not None
+                        py = cpy_bins.get(t.cp)
+                        if py is None:
+                            continue
+                        blob = freeze_py_to_pyc(rel, data, py)
+                        files.append((t.tagged_path(rel), KIND_PYC, blob))
+            else:
+                files.append((rel, kind, data))
     return files
 
 
@@ -464,10 +625,12 @@ def manifest_to_build(
     list[Path],
     str,
     bool | None,
+    list[str] | None,
+    bool | None,
 ]:
-    """Return (sources, link_exports, pack_exports, imports, mounts, name, freeze).
+    """Return sources…, name, freeze, target_specs, keep_source.
 
-    freeze is None when [python].freeze is omitted (CLI / default apply).
+    None fields mean “use CLI / tool defaults”.
     """
     name = data.get("name")
     if not name or not isinstance(name, str):
@@ -549,7 +712,31 @@ def manifest_to_build(
     if "freeze" in py:
         freeze = bool(py.get("freeze"))
 
-    return sources, link_exports, pack_exports, imports, mounts, name, freeze
+    target_specs: list[str] | None = None
+    if "targets" in py:
+        raw_t = py.get("targets")
+        if raw_t is None:
+            target_specs = []
+        elif isinstance(raw_t, list) and all(isinstance(x, str) for x in raw_t):
+            target_specs = list(raw_t)
+        else:
+            raise SystemExit("wasm_pack: python.targets must be a list of strings")
+
+    keep_source: bool | None = None
+    if "keep_source" in py:
+        keep_source = bool(py.get("keep_source"))
+
+    return (
+        sources,
+        link_exports,
+        pack_exports,
+        imports,
+        mounts,
+        name,
+        freeze,
+        target_specs,
+        keep_source,
+    )
 
 
 def main() -> int:
@@ -574,7 +761,20 @@ def main() -> int:
         "--freeze",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Compile mounted .py to .mpy before embed (default: off / source-only; pack.toml [python].freeze)",
+        help="Emit bytecode targets (default: off; pack.toml freeze/targets)",
+    )
+    ap.add_argument(
+        "--python-target",
+        action="append",
+        default=[],
+        dest="python_targets",
+        help="Bytecode target e.g. upy:mpy6:sib31 or cpy:cp312 (repeatable)",
+    )
+    ap.add_argument(
+        "--keep-source",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Keep .py beside bytecode (default: on when targets are set)",
     )
     ap.add_argument(
         "--mpy-cross",
@@ -609,9 +809,11 @@ def main() -> int:
     pack_imports: list[tuple[str, str]] = []
     mounts: list[Path] = list(args.mount)
     pkg_name: str | None = args.name
-    # Default: source-only (.py). Opt in via pack.toml freeze=true or --freeze.
+    # Default: source-only. Opt in via freeze/targets / --freeze / --python-target.
     freeze: bool | None = args.freeze
     manifest_freeze: bool | None = None
+    manifest_targets: list[str] | None = None
+    manifest_keep: bool | None = None
 
     for inp in args.inputs:
         path = Path(inp)
@@ -619,9 +821,17 @@ def main() -> int:
         if resolved is not None:
             root, manifest = resolved
             data = load_toml(manifest)
-            m_sources, m_link, m_pack, m_imports, m_mounts, m_name, m_freeze = manifest_to_build(
-                root, data
-            )
+            (
+                m_sources,
+                m_link,
+                m_pack,
+                m_imports,
+                m_mounts,
+                m_name,
+                m_freeze,
+                m_targets,
+                m_keep,
+            ) = manifest_to_build(root, data)
             sources.extend(m_sources)
             for e in m_link:
                 if e not in link_exports:
@@ -635,6 +845,10 @@ def main() -> int:
                 pkg_name = m_name
             if m_freeze is not None:
                 manifest_freeze = m_freeze
+            if m_targets is not None:
+                manifest_targets = m_targets
+            if m_keep is not None:
+                manifest_keep = m_keep
             print(f"manifest {manifest}", file=sys.stderr)
             continue
         if path.is_file():
@@ -642,8 +856,30 @@ def main() -> int:
             continue
         raise SystemExit(f"wasm_pack: not a source, pack dir, or pack.toml: {inp}")
 
+    target_specs: list[str] = list(args.python_targets)
+    if not target_specs and manifest_targets is not None:
+        target_specs = list(manifest_targets)
+
     if freeze is None:
-        freeze = False if manifest_freeze is None else manifest_freeze
+        if target_specs:
+            freeze = True
+        else:
+            freeze = False if manifest_freeze is None else manifest_freeze
+
+    if freeze and not target_specs:
+        target_specs = list(DEFAULT_PYTHON_TARGETS)
+
+    if not freeze:
+        target_specs = []
+
+    targets = [parse_python_target(s) for s in target_specs]
+    keep_source = True
+    if args.keep_source is not None:
+        keep_source = args.keep_source
+    elif manifest_keep is not None:
+        keep_source = manifest_keep
+    elif not targets:
+        keep_source = True
 
     # CLI --export without pack.toml metadata → auto-arity table entries.
     if args.export and not pack_exports:
@@ -663,17 +899,24 @@ def main() -> int:
         name = pkg_name or out.stem
         mpy_cross = args.mpy_cross or find_mpy_cross()
         files = (
-            collect_mounts(mounts, freeze=freeze, mpy_cross=mpy_cross, opt=args.O)
+            collect_mounts(
+                mounts,
+                targets=targets,
+                keep_source=keep_source,
+                mpy_cross=mpy_cross,
+                opt=args.O,
+            )
             if mounts
             else []
         )
         n_mpy = sum(1 for _, k, _ in files if k == KIND_MPY)
         n_py = sum(1 for _, k, _ in files if k == KIND_PY)
+        n_pyc = sum(1 for _, k, _ in files if k == KIND_PYC)
         payload = build_pack_payload(name, files, pack_exports or None)
         raw = append_custom_section(raw, SECTION_NAME, payload)
         print(
             f"packed section {SECTION_NAME!r}: name={name!r} files={len(files)} "
-            f"(py={n_py} mpy={n_mpy} freeze={freeze}) "
+            f"(py={n_py} mpy={n_mpy} pyc={n_pyc} targets={len(targets)}) "
             f"exports={len(pack_exports)} payload={len(payload)}B",
             file=sys.stderr,
         )
