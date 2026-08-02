@@ -8,6 +8,8 @@
 # AOT needs a wamrc built from the same nested WAMR (AOT binary version must match).
 
 include find_top.mk
+# test-engines uses bash arrays / PIPESTATUS for live tee + exit status.
+SHELL := /bin/bash
 UNIX = $(TOP)/ports/unix
 WAMR_DIR = $(WASMMOD_ROOT)/third_party/wamr
 # MATRIX=1 pulls host_matrix.rs + wasm.c_call / host_*_triple.
@@ -95,10 +97,78 @@ test-jit: packs
 		echo "      Fast JIT already covers in-process JIT without full LLVM."; \
 	fi
 
-# Full engine sweep: interp + AOT + Fast JIT; LLVM JIT if the host can link it.
-test-engines: test test-aot test-fast-jit test-jit
-	@echo ""
-	@echo "ENGINE ROUNDS DONE (interp + AOT + Fast JIT; LLVM JIT if not skipped)"
+# Full engine sweep with a final summary table (continues after a failing round).
+ENGINE_SUMMARY ?= $(CURDIR)/.engine-summary
+test-engines: packs
+	@rm -f $(ENGINE_SUMMARY); \
+	ec=0; \
+	record() { printf '%s|%s|%s\n' "$$1" "$$2" "$$3" >> $(ENGINE_SUMMARY); }; \
+	banner() { \
+		echo ""; \
+		echo "################################################################"; \
+		echo "# Engine: $$1"; \
+		echo "################################################################"; \
+	}; \
+	run_matrix() { \
+		name="$$1"; mpy="$$2"; \
+		if [ ! -x "$$mpy" ]; then record "$$name" SKIP "no binary"; return 0; fi; \
+		out=$$(mktemp); \
+		set +e; \
+		"$$mpy" $(CURDIR)/run_matrix.py 2>&1 | tee "$$out"; \
+		st=$${PIPESTATUS[0]}; \
+		set -e; \
+		if [ "$$st" -eq 0 ]; then \
+			n=$$(sed -n 's/^\([0-9][0-9]*\) cases OK$$/\1/p' "$$out" | tail -1); \
+			[ -n "$$n" ] || n="?"; \
+			record "$$name" PASS "$$n"; \
+		else \
+			record "$$name" FAIL ""; \
+			ec=1; \
+		fi; \
+		rm -f "$$out"; \
+	}; \
+	banner "Interp"; \
+	if $(MAKE) host; then run_matrix "Interp" "$(MPY_INTERP)"; \
+	else record "Interp" FAIL "host build"; ec=1; fi; \
+	banner "AOT"; \
+	if $(MAKE) aot-packs host-aot; then run_matrix "AOT" "$(MPY_AOT)"; \
+	else record "AOT" FAIL "build"; ec=1; fi; \
+	banner "Fast JIT"; \
+	if $(MAKE) host-fast-jit; then run_matrix "Fast JIT" "$(MPY_FJIT)"; \
+	else record "Fast JIT" FAIL "host build"; ec=1; fi; \
+	banner "LLVM JIT"; \
+	if $(MAKE) host-jit; then \
+		run_matrix "LLVM JIT" "$(MPY_JIT)"; \
+	else \
+		echo ""; \
+		echo "SKIP test-jit: LLVM JIT host build failed."; \
+		echo "      Needs llvm-config (+ libcurl/libedit/zstd cmake deps) and linkable -lLLVM."; \
+		echo "      Fast JIT already covers in-process JIT without full LLVM."; \
+		record "LLVM JIT" SKIP "host build"; \
+	fi; \
+	echo ""; \
+	echo "================================================================"; \
+	echo "Engine summary"; \
+	echo "================================================================"; \
+	printf "%-12s %s\n" "Engine" "Result"; \
+	echo "------------ ----------------"; \
+	while IFS='|' read -r name st detail; do \
+		case "$$st" in \
+			PASS) printf "%-12s PASS (%s cases OK)\n" "$$name" "$$detail" ;; \
+			FAIL) if [ -n "$$detail" ]; then printf "%-12s FAIL (%s)\n" "$$name" "$$detail"; \
+			      else printf "%-12s FAIL\n" "$$name"; fi ;; \
+			SKIP) printf "%-12s SKIP (%s)\n" "$$name" "$$detail" ;; \
+			*)    printf "%-12s %s %s\n" "$$name" "$$st" "$$detail" ;; \
+		esac; \
+	done < $(ENGINE_SUMMARY); \
+	echo "----------------------------------------------------------------"; \
+	pass=$$(grep -c '|PASS|' $(ENGINE_SUMMARY) || true); \
+	fail=$$(grep -c '|FAIL|' $(ENGINE_SUMMARY) || true); \
+	skip=$$(grep -c '|SKIP|' $(ENGINE_SUMMARY) || true); \
+	echo "$$pass passed, $$fail failed, $$skip skipped"; \
+	if [ "$$fail" -eq 0 ]; then echo "ALL ENGINES OK"; else echo "ENGINE FAILURES"; fi; \
+	rm -f $(ENGINE_SUMMARY); \
+	exit $$ec
 
 clean:
 	$(MAKE) -C hello clean
