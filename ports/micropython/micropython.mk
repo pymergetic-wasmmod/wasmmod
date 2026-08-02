@@ -1,5 +1,10 @@
 # MicroPython / metalpython make fragment for wasmmod + nested WAMR.
 # Included from extmod/extmod.mk when MICROPY_PY_WASM=1.
+#
+# Enable from the command line (no mpconfig.h / mpconfigport.mk edits needed):
+#   make MICROPY_PY_WASM=1
+# Optional: MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX} MICROPY_WASM_VERIFY
+# C defaults (optional): ports/micropython/mpconfig_wasm.h
 
 WASMMOD_DIR ?= extmod/wasmmod
 WAMR_DIR ?= $(WASMMOD_DIR)/third_party/wamr

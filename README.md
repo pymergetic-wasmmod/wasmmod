@@ -29,7 +29,7 @@ git submodule add https://github.com/pymergetic/wasmmod.git extmod/wasmmod
 git submodule update --init --recursive extmod/wasmmod
 ```
 
-Host tree only needs thin includes + config knobs:
+Host tree only needs thin includes (no `py/mpconfig.h` / `mpconfigport.mk` edits):
 
 ```make
 # extmod/extmod.mk
@@ -45,7 +45,9 @@ if(MICROPY_PY_WASM)
 endif()
 ```
 
-Enable with `MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).
+Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).
+Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`
+from a port `mpconfigport.h` — not required when using the make fragment.
 
 ## Examples
 
