@@ -1,14 +1,2 @@
-# Source list for MicroPython / metalpython extmod glue.
-# Expect this repo checked out as $(WASMMOD_DIR), default extmod/wasmmod.
-WASMMOD_DIR ?= extmod/wasmmod
-WAMR_DIR ?= $(WASMMOD_DIR)/third_party/wamr
-
-SRC_WASMMOD = \
-	$(WASMMOD_DIR)/wasmmod.c \
-	$(WASMMOD_DIR)/fetch.c \
-	$(WASMMOD_DIR)/finder.c \
-	$(WASMMOD_DIR)/forward.c \
-	$(WASMMOD_DIR)/host.c \
-	$(WASMMOD_DIR)/pack.c \
-	$(WASMMOD_DIR)/runtime.c \
-	$(WASMMOD_DIR)/verify.c
+# Compat shim — prefer ports/micropython/micropython.mk
+include $(dir $(lastword $(MAKEFILE_LIST)))ports/micropython/micropython.mk
