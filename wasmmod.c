@@ -33,8 +33,11 @@
 
 #include "py/builtin.h"
 #include "py/compile.h"
+#include "py/emitglue.h"
 #include "py/mperrno.h"
+#include "py/nlr.h"
 #include "py/objmodule.h"
+#include "py/persistentcode.h"
 #include "py/runtime.h"
 
 #if MICROPY_PY_WASM
@@ -422,6 +425,47 @@ static void exec_py_into_module(mp_obj_t module_obj, const char *src_name, const
     mp_parse_compile_execute(lex, MP_PARSE_FILE_INPUT, globals, globals);
 }
 
+#if MICROPY_PERSISTENT_CODE_LOAD
+static void exec_mpy_into_module(mp_obj_t module_obj, const char *src_name, const uint8_t *data, uint32_t len) {
+    mp_module_context_t *context = (mp_module_context_t *)MP_OBJ_TO_PTR(module_obj);
+    mp_compiled_module_t cm;
+    cm.context = context;
+    mp_raw_code_load_mem(data, len, &cm);
+
+    #if MICROPY_MODULE___FILE__
+    mp_store_attr(module_obj, MP_QSTR___file__, MP_OBJ_NEW_QSTR(qstr_from_str(src_name)));
+    #else
+    (void)src_name;
+    #endif
+
+    mp_obj_dict_t *mod_globals = context->module.globals;
+    nlr_jump_callback_node_globals_locals_t ctx;
+    ctx.globals = mp_globals_get();
+    ctx.locals = mp_locals_get();
+    mp_globals_set(mod_globals);
+    mp_locals_set(mod_globals);
+    nlr_push_jump_callback(&ctx.callback, mp_globals_locals_set_from_nlr_jump_callback);
+    mp_obj_t module_fun = mp_make_function_from_proto_fun(cm.rc, context, NULL);
+    mp_call_function_0(module_fun);
+    nlr_pop_jump_callback(true);
+}
+#endif
+
+static void exec_pack_file_into_module(mp_obj_t module_obj, const char *src_name, const mp_wasm_pack_file_t *f) {
+    if (f->kind == MP_WASM_PACK_KIND_PY) {
+        exec_py_into_module(module_obj, src_name, f->data, f->data_len);
+        return;
+    }
+    #if MICROPY_PERSISTENT_CODE_LOAD
+    if (f->kind == MP_WASM_PACK_KIND_MPY) {
+        exec_mpy_into_module(module_obj, src_name, f->data, f->data_len);
+        return;
+    }
+    #endif
+    mp_raise_msg_varg(&mp_type_ValueError,
+        MP_ERROR_TEXT("wasm pack file kind %d not supported"), (int)f->kind);
+}
+
 static void ensure_parent_packages(const char *full_name) {
     size_t len = strlen(full_name);
     for (size_t i = 0; i < len; ++i) {
@@ -460,7 +504,9 @@ static void link_module_to_parent(const char *dotted_name) {
 
 static bool path_is_package_init(const char *path, size_t path_len) {
     return (path_len == 11 && memcmp(path, "__init__.py", 11) == 0)
-        || (path_len > 12 && memcmp(path + path_len - 12, "/__init__.py", 12) == 0);
+        || (path_len > 12 && memcmp(path + path_len - 12, "/__init__.py", 12) == 0)
+        || (path_len == 12 && memcmp(path, "__init__.mpy", 12) == 0)
+        || (path_len > 13 && memcmp(path + path_len - 13, "/__init__.mpy", 13) == 0);
 }
 
 static const char *stem_from_path(const char *path, char *buf, size_t buf_len) {
@@ -630,7 +676,7 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
     if (have_pack) {
         for (uint32_t i = 0; i < info.n_files; ++i) {
             const mp_wasm_pack_file_t *f = &info.files[i];
-            if (f->kind != MP_WASM_PACK_KIND_PY) {
+            if (f->kind != MP_WASM_PACK_KIND_PY && f->kind != MP_WASM_PACK_KIND_MPY) {
                 continue;
             }
             vstr_t dotted;
@@ -651,7 +697,7 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
             vstr_add_str(&src_name, pack_name);
             vstr_add_char(&src_name, ':');
             vstr_add_strn(&src_name, f->path, f->path_len);
-            exec_py_into_module(mod, vstr_null_terminated_str(&src_name), f->data, f->data_len);
+            exec_pack_file_into_module(mod, vstr_null_terminated_str(&src_name), f);
             link_module_to_parent(dotted_name);
             vstr_clear(&src_name);
             vstr_clear(&dotted);

@@ -190,8 +190,65 @@ def kind_for_path(path: str) -> int:
     return KIND_RAW
 
 
-def collect_mounts(mount_dirs: list[Path]) -> list[tuple[str, int, bytes]]:
+def find_mpy_cross() -> str | None:
+    env = os.environ.get("MPY_CROSS")
+    if env and Path(env).is_file():
+        return env
+    here = Path(__file__).resolve()
+    # tools/ → wasmmod → extmod → repo root (typical submodule layout)
+    for parent in here.parents:
+        for cand in (
+            parent / "mpy-cross" / "build" / "mpy-cross",
+            parent / "mpy-cross" / "mpy-cross",
+        ):
+            if cand.is_file() and os.access(cand, os.X_OK):
+                return str(cand)
+    return shutil.which("mpy-cross")
+
+
+def freeze_py_to_mpy(rel: str, data: bytes, mpy_cross: str, opt: str) -> bytes:
+    """Compile .py source bytes to .mpy via mpy-cross."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="wasm_pack_mpy_") as td:
+        td_path = Path(td)
+        # Preserve basename so -s embedding stays readable.
+        base = Path(rel).name
+        if not base.endswith(".py"):
+            base = base + ".py"
+        py_path = td_path / base
+        mpy_path = td_path / (Path(base).stem + ".mpy")
+        py_path.write_bytes(data)
+        cmd = [
+            mpy_cross,
+            f"-O{opt}",
+            "-o",
+            str(mpy_path),
+            "-s",
+            rel,
+            str(py_path),
+        ]
+        print("+", " ".join(cmd), file=sys.stderr)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            raise SystemExit(f"wasm_pack: mpy-cross failed for {rel}") from e
+        return mpy_path.read_bytes()
+
+
+def collect_mounts(
+    mount_dirs: list[Path],
+    *,
+    freeze: bool = False,
+    mpy_cross: str | None = None,
+    opt: str = "2",
+) -> list[tuple[str, int, bytes]]:
     files: list[tuple[str, int, bytes]] = []
+    if freeze and not mpy_cross:
+        raise SystemExit(
+            "wasm_pack: freeze requires mpy-cross "
+            "(build mpy-cross, or set MPY_CROSS=/path/to/mpy-cross)"
+        )
     for root in mount_dirs:
         root = root.resolve()
         if not root.is_dir():
@@ -203,7 +260,12 @@ def collect_mounts(mount_dirs: list[Path]) -> list[tuple[str, int, bytes]]:
             if rel.startswith("../") or "/../" in f"/{rel}/":
                 raise SystemExit(f"wasm_pack: refusing path {rel}")
             data = path.read_bytes()
-            files.append((rel, kind_for_path(rel), data))
+            kind = kind_for_path(rel)
+            if freeze and kind == KIND_PY:
+                data = freeze_py_to_mpy(rel, data, mpy_cross, opt)  # type: ignore[arg-type]
+                rel = rel[: -3] + ".mpy" if rel.endswith(".py") else rel + ".mpy"
+                kind = KIND_MPY
+            files.append((rel, kind, data))
     return files
 
 
@@ -401,8 +463,12 @@ def manifest_to_build(
     list[tuple[str, str]],
     list[Path],
     str,
+    bool | None,
 ]:
-    """Return (sources, link_exports, pack_exports, imports, mounts, name)."""
+    """Return (sources, link_exports, pack_exports, imports, mounts, name, freeze).
+
+    freeze is None when [python].freeze is omitted (CLI / default apply).
+    """
     name = data.get("name")
     if not name or not isinstance(name, str):
         raise SystemExit("wasm_pack: pack.toml missing string 'name'")
@@ -479,7 +545,11 @@ def manifest_to_build(
         if m.is_dir():
             mounts.append(m)
 
-    return sources, link_exports, pack_exports, imports, mounts, name
+    freeze: bool | None = None
+    if "freeze" in py:
+        freeze = bool(py.get("freeze"))
+
+    return sources, link_exports, pack_exports, imports, mounts, name, freeze
 
 
 def main() -> int:
@@ -499,6 +569,17 @@ def main() -> int:
         default=[],
         type=Path,
         help="Directory of .py/.mpy/assets to embed (repeatable)",
+    )
+    ap.add_argument(
+        "--freeze",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Compile mounted .py to .mpy before embed (default: on; pack.toml [python].freeze overrides)",
+    )
+    ap.add_argument(
+        "--mpy-cross",
+        default=os.environ.get("MPY_CROSS"),
+        help="mpy-cross binary (default: MPY_CROSS or discover next to host tree)",
     )
     ap.add_argument(
         "--no-pack-section",
@@ -528,6 +609,9 @@ def main() -> int:
     pack_imports: list[tuple[str, str]] = []
     mounts: list[Path] = list(args.mount)
     pkg_name: str | None = args.name
+    # Default: freeze .py → .mpy. pack.toml [python].freeze wins unless CLI set.
+    freeze: bool | None = args.freeze
+    manifest_freeze: bool | None = None
 
     for inp in args.inputs:
         path = Path(inp)
@@ -535,7 +619,7 @@ def main() -> int:
         if resolved is not None:
             root, manifest = resolved
             data = load_toml(manifest)
-            m_sources, m_link, m_pack, m_imports, m_mounts, m_name = manifest_to_build(
+            m_sources, m_link, m_pack, m_imports, m_mounts, m_name, m_freeze = manifest_to_build(
                 root, data
             )
             sources.extend(m_sources)
@@ -549,12 +633,17 @@ def main() -> int:
                     mounts.append(m)
             if pkg_name is None:
                 pkg_name = m_name
+            if m_freeze is not None:
+                manifest_freeze = m_freeze
             print(f"manifest {manifest}", file=sys.stderr)
             continue
         if path.is_file():
             sources.append(str(path.resolve()))
             continue
         raise SystemExit(f"wasm_pack: not a source, pack dir, or pack.toml: {inp}")
+
+    if freeze is None:
+        freeze = True if manifest_freeze is None else manifest_freeze
 
     # CLI --export without pack.toml metadata → auto-arity table entries.
     if args.export and not pack_exports:
@@ -572,11 +661,19 @@ def main() -> int:
     want_section = (not args.no_pack_section) and (mounts or pkg_name or pack_exports)
     if want_section:
         name = pkg_name or out.stem
-        files = collect_mounts(mounts) if mounts else []
+        mpy_cross = args.mpy_cross or find_mpy_cross()
+        files = (
+            collect_mounts(mounts, freeze=freeze, mpy_cross=mpy_cross, opt=args.O)
+            if mounts
+            else []
+        )
+        n_mpy = sum(1 for _, k, _ in files if k == KIND_MPY)
+        n_py = sum(1 for _, k, _ in files if k == KIND_PY)
         payload = build_pack_payload(name, files, pack_exports or None)
         raw = append_custom_section(raw, SECTION_NAME, payload)
         print(
             f"packed section {SECTION_NAME!r}: name={name!r} files={len(files)} "
+            f"(py={n_py} mpy={n_mpy} freeze={freeze}) "
             f"exports={len(pack_exports)} payload={len(payload)}B",
             file=sys.stderr,
         )

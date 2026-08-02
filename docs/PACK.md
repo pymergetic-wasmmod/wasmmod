@@ -111,7 +111,7 @@ impl = ["c", "rs"]            # subset of: "c" | "cpp" | "rs"
 
 [python]
 mount = "py"                  # directory tree → micropython.pack files[]
-# freeze = true               # future: compile .py → .mpy before embed
+freeze = true                 # compile .py → .mpy (mpy-cross) before embed (default)
 
 [native]
 dir = "native"                # default; all sources linked into one wasm
@@ -672,8 +672,9 @@ tools/wasm_pack.py [pack.toml | pack dir | sources…]
   0. read pack.toml (if present / if given a directory)
   1. compile native sources (impl / globs / sources list) → objects
   2. wasm-ld → linked.wasm (exports from [[exports]] + lifecycle)
-  3. append micropython.pack  (name + [python].mount tree [+ exports v2])
-  4. append micropython.imports from [[imports]]
+  3. freeze [python].mount .py → .mpy via mpy-cross (default; --no-freeze keeps source)
+  4. append micropython.pack  (name + tree [+ exports v2]; kind=2 for .mpy)
+  5. append micropython.imports from [[imports]]
 ```
 
 CLI may stay source-oriented for smoke tests; directory + `pack.toml` is

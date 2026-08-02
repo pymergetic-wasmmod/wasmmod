@@ -11,6 +11,7 @@ sources = ["bridge.c", "lib.rs"]
 
 [python]
 mount = "py"
+freeze = true
 
 [lifecycle]
 load = "mp_pack_load"

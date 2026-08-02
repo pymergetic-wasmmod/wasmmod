@@ -9,6 +9,7 @@ comment = "Minimal freestanding demo: native hello/add + optional py/ tree."
 
 [python]
 mount = "py"
+freeze = true                 # embed as .mpy bytecode (mpy-cross)
 
 [native]
 dir = "."
