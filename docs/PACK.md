@@ -746,25 +746,28 @@ Keep optional and boring for upstream:
   blob; Python is the multi-level namespace.
 
 
-## File layout
+## File layout (as submodule at `extmod/wasmmod`)
 
 | Path | Role |
 |------|------|
-| `extmod/wasmmod/` | Loader (`wasmmod`, runtime, pack, forward, host, finder, fetch, verify) |
-| `extmod/extmod.mk` / `.cmake` | Gate + link `libiwasm` |
-| `py/mpconfig.h` | `MICROPY_PY_WASM` / `_AOT` / `MICROPY_WASM_VERIFY` (default 0) |
-| `ports/unix/mpconfigport.mk` | Unix knobs (default off) |
-| `.gitmodules` + `lib/wamr` | WAMR submodule |
-| `tools/wasm_pack.py` / `wasm_sign.py` | Pack / sign tooling |
-| `examples/wasmmod/` | Demos + `run_matrix.py` + this doc |
-| `tests/extmod/wasm_*.py` | CI tests (planned) |
-| `docs/library/wasm.rst` | User docs (planned) |
+| `extmod/wasmmod/` | Loader + pack/runtime/forward/host/finder/fetch/verify |
+| `extmod/wasmmod/third_party/wamr` | Nested WAMR submodule |
+| `extmod/wasmmod/ports/micropython/` | Make/CMake glue; optional `mpconfig_wasm.h` |
+| `extmod/wasmmod/tools/` | `wasm_pack.py` / `wasm_sign.py` |
+| `extmod/wasmmod/examples/` | Demos + `run_matrix.py` |
+| Host `extmod/extmod.mk` / `.cmake` | Thin `include` when `MICROPY_PY_WASM` |
+| Host `examples/wasmmod` | Optional symlink → `extmod/wasmmod/examples` |
+
+Host **does not** need `py/mpconfig.h` or `ports/unix/mpconfigport.mk` edits;
+enable with `make MICROPY_PY_WASM=1`.
 
 ### PR hygiene
 
 - Feature entirely behind `MICROPY_PY_WASM` (default off).
 - Port hooks stay weak/`#ifndef` defaults (`MALLOC`, `FETCH`, `VERIFY`,
   `EXPORT_PUBLISH`).
+- Python bytecode selection stays in the **port** loader (upy vs cpy); shared
+  code only parses the pack and runs WAMR.
 
 ## Author
 

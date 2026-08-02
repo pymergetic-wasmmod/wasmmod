@@ -15,8 +15,8 @@ drop-in for a git submodule at `extmod/wasmmod`
 | `pack.*`, `runtime.*`, `forward.*`, `verify.*` | Portable core (pack format, WAMR load, guest→guest forwarders, trust) |
 | `fetch.*` | Byte loader (currently MicroPython reader-backed) |
 | `wasmmod.c`, `finder.*`, `host.*` | MicroPython host (`wasm` module, import hook, host slots/handles) |
-| `ports/micropython/` | Make/CMake fragments for MicroPython hosts |
-| `ports/cpython/` | (planned) CPython extension glue |
+| `ports/micropython/` | Make/CMake fragments + optional `mpconfig_wasm.h` |
+| `ports/cpython/` | (planned) CPython extension glue — port picks `.pyc` / `.py` |
 | `docs/PACK.md` | Pack / imports section format |
 | `examples/` | Guest packs + call-matrix smoke (`hello`, `client`, `mixed`, `bridge`) |
 | `tools/` | Host-agnostic pack/sign CLIs (`wasm_pack.py`, `wasm_sign.py`) |
@@ -49,11 +49,34 @@ Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JI
 Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`
 from a port `mpconfigport.h` — not required when using the make fragment.
 
-## Examples
+Optional host trampolines (metalpython): `tools/wasm_pack.py` / `tools/wasm_sign.py`
+→ `extmod/wasmmod/tools/…`.
+
+## Build & test (unix host)
+
+From the **host** MicroPython / metalpython tree (submodule already at
+`extmod/wasmmod`). Cold worktree once:
 
 ```bash
-make -C extmod/wasmmod/examples test
+make -C ports/unix submodules
+make -C mpy-cross BUILD=build -j"$(nproc)"   # needed for pack freeze (.mpy)
 ```
+
+Then:
+
+```bash
+# Interpreter matrix (packs + build-wasm + run_matrix.py)
+make -C extmod/wasmmod/examples test
+
+# All engines: interp + AOT + Fast JIT (+ LLVM JIT if linkable)
+make -C extmod/wasmmod/examples test-engines
+
+# Same via metalpython symlink (if present)
+make -C examples/wasmmod test-engines
+```
+
+Details, manual smoke, and pack.toml notes: [examples/README.md](examples/README.md).
+Pack format: [docs/PACK.md](docs/PACK.md).
 
 ## License
 
