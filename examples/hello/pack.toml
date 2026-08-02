@@ -1,0 +1,28 @@
+# MicroPython wasm pack manifest (see ../PACK.md).
+# Pack manifest (see ../PACK.md).
+
+type = "package"
+name = "hello"
+version = "0.1.0"
+impl = ["c"]
+comment = "Minimal freestanding demo: native hello/add + optional py/ tree."
+
+[python]
+mount = "py"
+
+[native]
+dir = "."
+# Explicit until the tree grows a native/ folder:
+sources = ["hello.c"]
+
+[lifecycle]
+load = ""
+unload = ""
+
+[[exports]]
+func = "hello"
+sig = "i32"
+
+[[exports]]
+func = "add"
+sig = "i32_i32_i32"

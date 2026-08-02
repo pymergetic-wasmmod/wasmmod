@@ -1,0 +1,19 @@
+# Tiny mixed C + Rust pack (C ABI at the Wasm boundary).
+type = "package"
+name = "mixed"
+version = "0.1.0"
+impl = ["c", "rs"]
+comment = "Smoke for multi-language native link in wasm_pack."
+
+[native]
+dir = "."
+sources = ["shim.c", "lib.rs"]
+
+[[exports]]
+func = "mixed_answer"
+export = "mixed_answer"
+sig = "i32"
+
+[[exports]]
+func = "mixed_i64"
+sig = "i64_i64"

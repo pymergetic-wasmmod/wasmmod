@@ -1,0 +1,9 @@
+{
+  "include": ["."],
+  "exclude": ["**/.*", "**/*.wasm"],
+  "stubPath": "typings",
+  "extraPaths": ["typings"],
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none",
+  "pythonVersion": "3.11"
+}

@@ -1,0 +1,11 @@
+*.o
+*.a
+*.wasm
+*.wat
+__pycache__/
+*.pyc
+.venv/
+target/
+build/
+*.swp
+.DS_Store

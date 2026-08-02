@@ -1,0 +1,216 @@
+# Full call-matrix bridge: C+RS natives, guest→guest, guest→host, rich types.
+type = "package"
+name = "bridge"
+version = "0.1.0"
+impl = ["c", "rs"]
+comment = "Py-callable bridge covering C/RS/host/peer + i64/f32/f64/mem/handles."
+
+[native]
+dir = "."
+sources = ["bridge.c", "lib.rs"]
+
+[python]
+mount = "py"
+
+[lifecycle]
+load = "mp_pack_load"
+unload = "mp_pack_unload"
+
+# --- Rust exports ---
+[[exports]]
+func = "rs_square"
+sig = "i32_i32"
+
+[[exports]]
+func = "rs_add3"
+sig = "i32_i32_i32_i32"
+
+[[exports]]
+func = "rs_via_hello"
+sig = "i32"
+
+[[exports]]
+func = "rs_via_host"
+sig = "i32_i32"
+
+[[exports]]
+func = "rs_via_i64"
+sig = "i64_i64"
+
+[[exports]]
+func = "rs_via_f32"
+sig = "f32_f32"
+
+[[exports]]
+func = "rs_via_f64"
+sig = "f64_f64"
+
+[[exports]]
+func = "rs_scale_add_f64"
+sig = "f64_f64_f64_f64"
+
+[[exports]]
+func = "rs_via_host_i64"
+sig = "i64_i64"
+
+[[exports]]
+func = "rs_via_host_f32"
+sig = "f32_f32"
+
+[[exports]]
+func = "rs_via_host_f64"
+sig = "f64_f64"
+
+[[exports]]
+func = "rs_via_mixed_i64"
+sig = "i64_i64"
+
+[[exports]]
+func = "rs_via_buf"
+sig = "i32"
+
+[[exports]]
+func = "rs_via_mem"
+sig = "i32"
+
+[[exports]]
+func = "rs_via_handle"
+sig = "i32_i32"
+
+[[exports]]
+func = "rs_via_square"
+sig = "i32_i32"
+
+[[exports]]
+func = "rs_via_add3"
+sig = "i32_i32"
+
+[[exports]]
+func = "rs_via_host_c"
+sig = "i32_i32"
+
+[[exports]]
+func = "rs_via_host_rs"
+sig = "i32_i32"
+
+[[exports]]
+func = "rs_via_pack_py"
+sig = "i32"
+
+[[exports]]
+func = "rs_via_peer_py"
+sig = "i32"
+
+# --- C exports ---
+[[exports]]
+func = "via_i64"
+sig = "i64_i64"
+
+[[exports]]
+func = "via_f32"
+sig = "f32_f32"
+
+[[exports]]
+func = "via_f64"
+sig = "f64_f64"
+
+[[exports]]
+func = "add3"
+sig = "i32_i32_i32_i32"
+
+[[exports]]
+func = "scale_add_f64"
+sig = "f64_f64_f64_f64"
+
+[[exports]]
+func = "via_host_i64"
+sig = "i64_i64"
+
+[[exports]]
+func = "via_host_f32"
+sig = "f32_f32"
+
+[[exports]]
+func = "via_host_f64"
+sig = "f64_f64"
+
+[[exports]]
+func = "via_mixed_i64"
+sig = "i64_i64"
+
+[[exports]]
+func = "via_rs"
+sig = "i32_i32"
+
+[[exports]]
+func = "via_c_self"
+sig = "i32_i32"
+
+[[exports]]
+func = "via_hello"
+sig = "i32"
+
+[[exports]]
+func = "via_mixed"
+sig = "i32"
+
+[[exports]]
+func = "via_host"
+sig = "i32_i32"
+
+[[exports]]
+func = "via_host0"
+sig = "i32"
+
+[[exports]]
+func = "via_host_c"
+sig = "i32_i32"
+
+[[exports]]
+func = "via_host_rs"
+sig = "i32_i32"
+
+[[exports]]
+func = "via_pack_py"
+sig = "i32"
+
+[[exports]]
+func = "via_peer_py"
+sig = "i32"
+
+[[exports]]
+func = "via_buf"
+sig = "i32"
+
+[[exports]]
+func = "via_mem"
+sig = "i32"
+
+[[exports]]
+func = "via_handle"
+sig = "i32_i32"
+
+[[exports]]
+func = "via_mem_out"
+sig = "i32_i32"
+
+[[exports]]
+func = "matrix"
+sig = "i32_i32"
+
+[[exports]]
+func = "matrix_rich"
+sig = "i64_i64"
+
+# Guest→guest only (host imports are C/RS attributes, not listed here).
+[[imports]]
+module = "hello"
+func = "hello"
+
+[[imports]]
+module = "mixed"
+func = "mixed_answer"
+
+[[imports]]
+module = "mixed"
+func = "mixed_i64"

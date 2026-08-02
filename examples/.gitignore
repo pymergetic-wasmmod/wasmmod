@@ -1,0 +1,6 @@
+# Pack build outputs (rebuild with make -C <pack>)
+*.wasm
+*.aot
+*.mpack
+*.sig
+.*.o
