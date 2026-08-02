@@ -14,7 +14,9 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/runtime.c \
 	$(WASMMOD_DIR)/verify.c
 
-SRC_EXTMOD += $(SRC_WASMMOD)
+# Included after extmod.mk's PY_O += SRC_EXTMOD_C, so append objects here.
+PY_O += $(addprefix $(BUILD)/, $(SRC_WASMMOD:.c=.o))
+SRC_QSTR += $(SRC_WASMMOD)
 
 # Nested WAMR: top-level `make submodules` is not recursive by default.
 GIT_SUBMODULES += $(WASMMOD_DIR)
