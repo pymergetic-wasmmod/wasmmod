@@ -28,3 +28,4 @@ $(error cannot find host tree (ports/unix + py/mpconfig.h) from $(CURDIR))
 endif
 
 WASM_PACK ?= $(WASMMOD_ROOT)/tools/wasm_pack.py
+WASM_SIGN ?= $(WASMMOD_ROOT)/tools/wasm_sign.py

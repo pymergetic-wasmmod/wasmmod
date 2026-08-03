@@ -24,12 +24,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """
-Detach-sign a .wasm/.aot with ECDSA-P256+SHA256 for MICROPY_WASM_VERIFY.
+Sign .wasm / .aot for MICROPY_WASM_VERIFY (ECDSA-P256 + SHA-256).
 
-Uses openssl if available (from this repo root):
-  tools/wasm_sign.py gen-key -o testkey
-  tools/wasm_sign.py sign --key testkey.pem hello.wasm
-  # emits hello.wasm.sig; public key: testkey.pub.der for wasm.add_trust()
+PKI (preferred):
+  tools/wasm_sign.py gen-pki -o .keys/pki              # root CA + signing leaf
+  tools/wasm_sign.py gen-pki -o .keys/pki --sub-ca     # root → sub-CA → leaf
+  tools/wasm_sign.py sign --key .keys/pki/leaf.key.pem \\
+      --cert .keys/pki/leaf.crt.der [--chain .keys/pki/chain.der] packs/hello.wasm
+  # → hello.wasm.sig + hello.wasm.crt (leaf [+ intermediates])
+  # Trust on device: wasm.add_trust(open("root.crt.der","rb").read())
+
+Raw pubkey (still supported):
+  tools/wasm_sign.py gen-key -o .keys/dev
+  tools/wasm_sign.py sign --key .keys/dev.pem packs/hello.wasm
+
+Requires openssl.
 """
 
 from __future__ import annotations
@@ -37,7 +46,13 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
+
+SIG_SECTION = "wasmmod.sig"
+# Embedded / future: magic + sig + optional cert chain (leaf first).
+MPWS_MAGIC = b"MPWS"
+MPWS_VER = 1
 
 
 def run(cmd: list[str]) -> None:
@@ -45,7 +60,34 @@ def run(cmd: list[str]) -> None:
     subprocess.check_call(cmd)
 
 
+def uleb(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        out.append(b | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def write_file(path: Path, data: bytes | str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(data, str):
+        path.write_text(data)
+    else:
+        path.write_bytes(data)
+
+
+def openssl_sign(key: Path, data: Path, sig_out: Path) -> None:
+    run(["openssl", "dgst", "-sha256", "-sign", str(key), "-out", str(sig_out), str(data)])
+
+
+def pem_to_der_cert(pem: Path, der: Path) -> None:
+    run(["openssl", "x509", "-in", str(pem), "-outform", "DER", "-out", str(der)])
+
+
 def cmd_gen_key(out_prefix: Path) -> None:
+    out_prefix.parent.mkdir(parents=True, exist_ok=True)
     pem = out_prefix.with_suffix(".pem")
     pub = Path(str(out_prefix) + ".pub.der")
     run(["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", str(pem)])
@@ -54,25 +96,253 @@ def cmd_gen_key(out_prefix: Path) -> None:
     print(pub)
 
 
-def cmd_sign(key: Path, target: Path) -> None:
-    sig = Path(str(target) + ".sig")
-    run(["openssl", "dgst", "-sha256", "-sign", str(key), "-out", str(sig), str(target)])
-    print(sig)
+def _ec_key(path: Path) -> None:
+    run(["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", str(path)])
+
+
+def _req(key: Path, subject: str, out_csr: Path) -> None:
+    run(["openssl", "req", "-new", "-key", str(key), "-subj", subject, "-out", str(out_csr)])
+
+
+def _sign_cert(
+    csr: Path,
+    ca_crt: Path,
+    ca_key: Path,
+    out_crt: Path,
+    *,
+    days: int,
+    extfile: Path,
+    serial: int,
+) -> None:
+    run(
+        [
+            "openssl",
+            "x509",
+            "-req",
+            "-in",
+            str(csr),
+            "-CA",
+            str(ca_crt),
+            "-CAkey",
+            str(ca_key),
+            "-set_serial",
+            str(serial),
+            "-days",
+            str(days),
+            "-sha256",
+            "-extfile",
+            str(extfile),
+            "-out",
+            str(out_crt),
+        ]
+    )
+
+
+def cmd_gen_pki(out_dir: Path, with_sub_ca: bool, days: int) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    root_key = out_dir / "root.key.pem"
+    root_crt = out_dir / "root.crt.pem"
+    root_der = out_dir / "root.crt.der"
+    leaf_key = out_dir / "leaf.key.pem"
+    leaf_crt = out_dir / "leaf.crt.pem"
+    leaf_der = out_dir / "leaf.crt.der"
+    chain_der = out_dir / "chain.der"
+
+    # Root CA (self-signed). OpenSSL 3 req uses -config/-extensions, not -extfile.
+    _ec_key(root_key)
+    root_cfg = out_dir / "root.cnf"
+    write_file(
+        root_cfg,
+        textwrap.dedent(
+            """\
+            [req]
+            distinguished_name = req_dn
+            x509_extensions = v3_ca
+            prompt = no
+            [req_dn]
+            CN = wasmmod-root
+            [v3_ca]
+            basicConstraints = critical,CA:TRUE,pathlen:2
+            keyUsage = critical,keyCertSign,cRLSign
+            subjectKeyIdentifier = hash
+            """
+        ),
+    )
+    run(
+        [
+            "openssl",
+            "req",
+            "-new",
+            "-x509",
+            "-key",
+            str(root_key),
+            "-config",
+            str(root_cfg),
+            "-days",
+            str(days),
+            "-sha256",
+            "-out",
+            str(root_crt),
+        ]
+    )
+    pem_to_der_cert(root_crt, root_der)
+
+    signer_crt = root_crt
+    signer_key = root_key
+    serial = 2
+    intermediates: list[Path] = []
+
+    if with_sub_ca:
+        sub_key = out_dir / "sub.key.pem"
+        sub_csr = out_dir / "sub.csr.pem"
+        sub_crt = out_dir / "sub.crt.pem"
+        sub_der = out_dir / "sub.crt.der"
+        sub_ext = out_dir / "sub.ext"
+        _ec_key(sub_key)
+        _req(sub_key, "/CN=wasmmod-sub", sub_csr)
+        write_file(
+            sub_ext,
+            textwrap.dedent(
+                """\
+                basicConstraints=critical,CA:TRUE,pathlen:0
+                keyUsage=critical,keyCertSign,cRLSign
+                subjectKeyIdentifier=hash
+                authorityKeyIdentifier=keyid,issuer
+                """
+            ),
+        )
+        _sign_cert(sub_csr, root_crt, root_key, sub_crt, days=days, extfile=sub_ext, serial=serial)
+        serial += 1
+        pem_to_der_cert(sub_crt, sub_der)
+        signer_crt, signer_key = sub_crt, sub_key
+        intermediates.append(sub_der)
+
+    # Leaf signing cert (digitalSignature only — not a CA).
+    leaf_csr = out_dir / "leaf.csr.pem"
+    leaf_ext = out_dir / "leaf.ext"
+    _ec_key(leaf_key)
+    _req(leaf_key, "/CN=wasmmod-pack-signer", leaf_csr)
+    write_file(
+        leaf_ext,
+        textwrap.dedent(
+            """\
+            basicConstraints=critical,CA:FALSE
+            keyUsage=critical,digitalSignature
+            extendedKeyUsage=codeSigning
+            subjectKeyIdentifier=hash
+            authorityKeyIdentifier=keyid,issuer
+            """
+        ),
+    )
+    _sign_cert(leaf_csr, signer_crt, signer_key, leaf_crt, days=days, extfile=leaf_ext, serial=serial)
+    pem_to_der_cert(leaf_crt, leaf_der)
+
+    # chain.der = leaf || intermediates (root stays in trust store only).
+    chain = leaf_der.read_bytes() + b"".join(p.read_bytes() for p in intermediates)
+    write_file(chain_der, chain)
+
+    for p in (root_der, leaf_key, leaf_der, chain_der):
+        print(p)
+    if with_sub_ca:
+        print(out_dir / "sub.crt.der")
+
+
+def pack_mpws(sig: bytes, chain: bytes) -> bytes:
+    if len(sig) > 0xFFFF or len(chain) > 0xFFFF:
+        raise SystemExit("sig/chain too large for MPWS")
+    return (
+        MPWS_MAGIC
+        + bytes([MPWS_VER, 0])
+        + len(sig).to_bytes(2, "big")
+        + sig
+        + len(chain).to_bytes(2, "big")
+        + chain
+    )
+
+
+def append_sig_section(wasm: bytes, payload: bytes) -> bytes:
+    if len(wasm) < 8 or wasm[:4] != b"\x00asm":
+        raise SystemExit("not a Wasm module (embed needs .wasm, not .aot)")
+    name = SIG_SECTION.encode()
+    body = uleb(len(name)) + name + payload
+    section = bytes([0]) + uleb(len(body)) + body
+    return wasm + section
+
+
+def cmd_sign(
+    key: Path,
+    target: Path,
+    *,
+    embed: bool,
+    cert: Path | None,
+    chain: Path | None,
+) -> None:
+    if not target.is_file():
+        raise SystemExit(f"missing {target}")
+    sig_path = Path(str(target) + ".sig")
+    openssl_sign(key, target, sig_path)
+    print(sig_path)
+
+    chain_bytes = b""
+    if chain is not None:
+        if not chain.is_file():
+            raise SystemExit(f"missing chain {chain}")
+        chain_bytes = chain.read_bytes()
+    elif cert is not None:
+        if not cert.is_file():
+            raise SystemExit(f"missing cert {cert}")
+        chain_bytes = cert.read_bytes()
+    if chain_bytes:
+        crt_path = Path(str(target) + ".crt")
+        write_file(crt_path, chain_bytes)
+        print(crt_path)
+
+    if embed:
+        data = target.read_bytes()
+        sig = sig_path.read_bytes()
+        payload = pack_mpws(sig, chain_bytes) if chain_bytes else sig
+        target.write_bytes(append_sig_section(data, payload))
+        print(f"{target} (+{SIG_SECTION})", file=sys.stderr)
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    g = sub.add_parser("gen-key")
+
+    g = sub.add_parser("gen-key", help="raw ECDSA keypair (no X.509)")
     g.add_argument("-o", "--output", type=Path, required=True, help="key prefix")
-    s = sub.add_parser("sign")
-    s.add_argument("--key", type=Path, required=True, help="private key PEM")
+
+    p = sub.add_parser("gen-pki", help="root CA + signing leaf (+ optional sub-CA)")
+    p.add_argument("-o", "--output", type=Path, required=True, help="output directory")
+    p.add_argument("--sub-ca", action="store_true", help="insert intermediate CA under root")
+    p.add_argument("--days", type=int, default=3650, help="cert lifetime (default 10y)")
+
+    s = sub.add_parser("sign", help="detach-sign → .sig [+.crt]; optional --embed")
+    s.add_argument("--key", type=Path, required=True, help="private key PEM (leaf or raw)")
+    s.add_argument("--cert", type=Path, help="leaf cert DER to ship as target.crt")
+    s.add_argument(
+        "--chain",
+        type=Path,
+        help="full chain DER (leaf first, then intermediates); overrides --cert content",
+    )
+    s.add_argument(
+        "--embed",
+        action="store_true",
+        help="append wasmmod.sig section (.wasm only)",
+    )
     s.add_argument("target", type=Path, help=".wasm / .aot path")
+
     args = ap.parse_args()
     if args.cmd == "gen-key":
         cmd_gen_key(args.output)
+    elif args.cmd == "gen-pki":
+        cmd_gen_pki(args.output, args.sub_ca, args.days)
     else:
-        cmd_sign(args.key, args.target)
+        embed = bool(args.embed)
+        if embed and args.target.suffix.lower() == ".aot":
+            print("note: --embed ignored for .aot (use detached .sig/.crt)", file=sys.stderr)
+            embed = False
+        cmd_sign(args.key, args.target, embed=embed, cert=args.cert, chain=args.chain)
     return 0
 
 

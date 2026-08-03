@@ -19,11 +19,14 @@ MPY_INTERP = $(UNIX)/build-wasm/micropython
 MPY_AOT = $(UNIX)/build-wasm-aot/micropython
 MPY_FJIT = $(UNIX)/build-wasm-fjit/micropython
 MPY_JIT = $(UNIX)/build-wasm-jit/micropython
+MPY_VERIFY = $(UNIX)/build-wasm-verify/micropython
 
-# Prefer wamrc from this tree's WAMR (version-matched). Override with WAMRC=...
-WAMRC_BUILD ?= $(UNIX)/build-wamrc
-WAMRC ?= $(WAMRC_BUILD)/wamrc
-LLVM_CMAKE_DIR ?= $(shell llvm-config-18 --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null)
+# Dev PKI (root CA + sub-CA + leaf). Generated once; .keys/ is gitignored.
+SIGN_KEY_DIR = $(CURDIR)/.keys
+SIGN_PKI_DIR = $(SIGN_KEY_DIR)/pki
+SIGN_ROOT = $(SIGN_PKI_DIR)/root.crt.der
+SIGN_LEAF_KEY = $(SIGN_PKI_DIR)/leaf.key.pem
+SIGN_CHAIN = $(SIGN_PKI_DIR)/chain.der
 
 PACK_WASMS = \
 	packs/hello.wasm \
@@ -31,8 +34,14 @@ PACK_WASMS = \
 	packs/mixed.wasm \
 	packs/bridge.wasm
 
-.PHONY: all clean test test-aot test-fast-jit test-jit test-engines test-http demo repl \
-	packs aot-packs wamrc host host-aot host-fast-jit host-jit
+# Prefer wamrc from this tree's WAMR (version-matched). Override with WAMRC=...
+WAMRC_BUILD ?= $(UNIX)/build-wamrc
+WAMRC ?= $(WAMRC_BUILD)/wamrc
+LLVM_CMAKE_DIR ?= $(shell llvm-config-18 --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null)
+
+.PHONY: all clean test test-aot test-fast-jit test-jit test-engines test-http test-http-verify \
+	test-verify test-signed packs aot-packs sign-packs sign-key wamrc \
+	host host-aot host-fast-jit host-jit host-verify demo repl
 
 packs:
 	$(MAKE) -C hello
@@ -41,6 +50,24 @@ packs:
 	$(MAKE) -C bridge
 
 all: packs
+
+sign-key: $(SIGN_ROOT)
+
+$(SIGN_ROOT) $(SIGN_LEAF_KEY) $(SIGN_CHAIN):
+	mkdir -p $(SIGN_PKI_DIR)
+	python3 $(WASM_SIGN) gen-pki --sub-ca -o $(SIGN_PKI_DIR)
+
+# Detached .sig + .crt (leaf||sub) next to each pack. Device trusts SIGN_ROOT.
+sign-packs: packs sign-key
+	@for w in $(PACK_WASMS); do \
+		echo "SIGN $$w"; \
+		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$w; \
+		aot=$${w%.wasm}.aot; \
+		if [ -f "$$aot" ]; then \
+			echo "SIGN $$aot"; \
+			python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$aot; \
+		fi; \
+	done
 
 # Build wamrc from nested WAMR so .aot matches the linked AOT loader.
 wamrc:
@@ -63,9 +90,13 @@ aot-packs: packs wamrc
 		echo "AOT $$w -> $$aot"; \
 		$(WAMRC) -o $$aot $$w; \
 	done
+	$(MAKE) sign-packs
 
 host:
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) BUILD=build-wasm
+
+host-verify:
+	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_WASM_VERIFY=1 BUILD=build-wasm-verify
 
 host-aot:
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_PY_WASM_AOT=1 BUILD=build-wasm-aot
@@ -91,6 +122,11 @@ repl: packs host
 test: packs host
 	$(MPY_INTERP) $(CURDIR)/run_matrix.py
 
+# Require ECDSA signatures (detached .sig+.crt) + trusted root CA.
+test-verify: sign-packs host-verify
+	@test -f $(SIGN_ROOT) || (echo "FAIL: missing $(SIGN_ROOT)"; exit 1)
+	WASM_TRUST_CA=$(SIGN_ROOT) $(MPY_VERIFY) $(CURDIR)/run_verify.py
+
 # Static HTTP pack root (native C fetch). Serves packs/ as document root.
 test-http: packs host
 	@set -e; \
@@ -105,6 +141,25 @@ test-http: packs host
 	port=$$(cat $$portfile); \
 	echo "HTTP pack root http://127.0.0.1:$$port/"; \
 	HTTP_PACK_ROOT=http://127.0.0.1:$$port/ $(MPY_INTERP) $(CURDIR)/run_http.py
+
+# HTTP + signatures (same static tree; .sig/.crt fetched like VFS).
+test-http-verify: sign-packs host-verify
+	@set -e; \
+	portfile=$$(mktemp); \
+	python3 $(CURDIR)/tools/pack_http_server.py --dir $(CURDIR)/packs --port 0 --write-port $$portfile & \
+	spid=$$!; \
+	trap 'kill $$spid 2>/dev/null || true; rm -f $$portfile' EXIT; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		[ -s $$portfile ] && break; \
+		sleep 0.1; \
+	done; \
+	port=$$(cat $$portfile); \
+	echo "HTTP signed pack root http://127.0.0.1:$$port/"; \
+	WASM_TRUST_CA=$(SIGN_ROOT) HTTP_PACK_ROOT=http://127.0.0.1:$$port/ \
+		$(MPY_VERIFY) $(CURDIR)/run_http_verify.py
+
+# sign-packs + VFS verify + HTTP verify (one shot).
+test-signed: test-verify test-http-verify
 
 test-aot: aot-packs host-aot
 	$(MPY_AOT) $(CURDIR)/run_matrix.py
@@ -201,4 +256,4 @@ clean:
 	$(MAKE) -C client clean
 	$(MAKE) -C mixed clean
 	$(MAKE) -C bridge clean
-	rm -f packs/*.aot
+	rm -f packs/*.aot packs/*.sig packs/*.crt

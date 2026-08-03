@@ -3,6 +3,8 @@
 *.aot
 *.mpack
 *.sig
+*.crt
 *.wat
 .*.o
 .engine-summary
+.keys/

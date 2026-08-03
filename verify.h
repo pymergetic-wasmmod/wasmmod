@@ -38,7 +38,7 @@
 #define MICROPY_WASM_VERIFY (0)
 #endif
 
-// Add a trusted public key (DER SubjectPublicKeyInfo or raw uncompressed P-256).
+// Add trust material: CA cert DER/PEM (PKI) and/or leaf SPKI DER (pinned pubkey).
 bool mp_wasm_trust_add(const uint8_t *key, size_t key_len);
 void mp_wasm_trust_clear(void);
 size_t mp_wasm_trust_count(void);

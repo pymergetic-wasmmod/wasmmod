@@ -66,6 +66,10 @@
  * | `MICROPY_WASM_EXPORT_PUBLISH(mod, name, fn)` | observe guest exports (e.g. Metal `reg`) |
  * | `MICROPY_WASM_STACK_SIZE` / `HEAP_SIZE` | WAMR instance sizing |
  *
+ * Trust is an **X.509 root CA** and/or pinned leaf SPKI (`wasm.add_trust`).
+ * Sign with `tools/wasm_sign.py gen-pki` + `sign --chain`; smoke:
+ * `make -C examples test-signed`.
+ *
  * Defaults: POSIX HTTP(S) in `fetch.c` when `MICROPY_WASM_HTTP_NATIVE=1`;
  * VFS via `mp_reader`; verify via mbedtls when `MICROPY_WASM_VERIFY!=0`.
  */

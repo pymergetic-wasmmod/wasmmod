@@ -194,6 +194,9 @@ make -C mpy-cross BUILD=build -j"$(nproc)"   # pack freeze (.mpy)
 
 make -C extmod/wasmmod/examples test           # interp matrix
 make -C extmod/wasmmod/examples test-engines   # all engines
+make -C extmod/wasmmod/examples test-http      # static HTTP pack fetch
+make -C extmod/wasmmod/examples test-verify    # ECDSA .sig+.crt + root CA
+make -C extmod/wasmmod/examples test-signed    # PKI sign + VFS + HTTP verify
 make -C extmod/wasmmod/examples demo           # real micropython -i session
 make -C extmod/wasmmod/examples repl           # interactive unix REPL
 ```

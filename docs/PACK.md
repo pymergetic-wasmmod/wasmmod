@@ -445,42 +445,57 @@ Ports replace I/O with `mp_wasm_io_set` / `MICROPY_WASM_IO_OPS` (see [ports/PORT
 
 ## Signature verification (mbedtls)
 
-When `MICROPY_SSL_MBEDTLS` (or a smaller dedicated crypto switch) is
-enabled, packs may be distributed as **signed blobs**. Goal: verify
-*before* instantiate.
+**PKI (preferred):** trust a **root CA** with `wasm.add_trust(root.crt.der)`.
+Packs ship a detached ECDSA `.sig` plus `.crt` (leaf [+ intermediates], root
+not included). The loader verifies the X.509 chain to the trusted root, then
+checks the ECDSA-P256/SHA-256 signature with the leaf key.
 
-### Proposed distribution shapes
+**Pinned pubkey (still supported):** `wasm.add_trust(leaf.pub.der)` and a
+`.sig` only — no chain check.
 
-1. **Detached signature** (simplest for VFS / HTTP):
-   - `hello.wasm`
-   - `hello.wasm.sig` (raw signature bytes) + trust store of public keys
-2. **Envelope** (better for HTTP):
-   - custom section `wasmmod.sig` on the wasm, or
-   - outer container: `magic | pubkey_id | sig | wasm_bytes`
+When `MICROPY_SSL_MBEDTLS` is on and `MICROPY_WASM_VERIFY!=0`, packs are
+verified *before* instantiate.
 
-Algorithm (initial): **Ed25519** or **ECDSA-P256** via mbedtls — pick one
-in implementation; document in pack.toml:
+### Distribution shapes
 
-```toml
-[trust]
-# optional; tool may detach-sign at pack time
-# sign = true
+1. **Detached PKI** (default; VFS + HTTP + `.aot`):
+   - `hello.wasm` / `hello.aot`
+   - `hello.wasm.sig` / `hello.aot.sig` (openssl ECDSA-SHA256)
+   - `hello.wasm.crt` / `hello.aot.crt` (leaf DER, then intermediates)
+2. **Embedded** (`.wasm` only):
+   - `tools/wasm_sign.py sign --embed --chain chain.der` → `wasmmod.sig`
+     section with MPWS envelope (sig + chain)
+   - Loader hashes the module *without* that section
+
+```bash
+make -C examples test-signed         # PKI sign + VFS + HTTP verify
+# or piecemeal:
+make -C examples sign-packs          # .keys/pki + packs/*.{sig,crt}
+make -C examples test-verify         # MICROPY_WASM_VERIFY=1 + add_trust(root)
+make -C examples test-http-verify    # same over HTTP
 ```
 
-Loader policy (config):
+```python
+wasm.add_trust(open(".keys/pki/root.crt.der", "rb").read())
+```
+
+Host tooling:
+
+```bash
+tools/wasm_sign.py gen-pki -o .keys/pki              # root + leaf
+tools/wasm_sign.py gen-pki -o .keys/pki --sub-ca     # root → sub → leaf
+tools/wasm_sign.py sign --key .keys/pki/leaf.key.pem \
+    --chain .keys/pki/chain.der packs/hello.wasm
+```
 
 | Mode | Behaviour |
 |------|-----------|
-| `MICROPY_WASM_VERIFY=0` | no verify (default for unix smoke) |
-| `MICROPY_WASM_VERIFY=1` | require valid sig for every load |
+| `MICROPY_WASM_VERIFY=0` | no verify (default matrix smoke) |
+| `MICROPY_WASM_VERIFY=1` | require valid sig every load |
 | `MICROPY_WASM_VERIFY=2` | verify if `.sig` / section present; else allow |
 
-Failed verify → do not instantiate, raise `OSError` / `ValueError`. Public
-keys come from a port-supplied store (flash partition, `wasm.add_trust(key)`,
-or compile-time pinned keys) — not from the pack itself.
-
-Ports can plug a custom verify hook; the default path uses mbedtls + a
-key ring API (`wasm.add_trust`).
+Failed verify → do not instantiate. The root CA never comes from the pack
+itself — only from `add_trust` / flash / compile-time trust.
 
 ## Export table (module + func)
 
