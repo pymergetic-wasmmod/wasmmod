@@ -115,6 +115,7 @@ static bool find_in_root(const char *root, const char *slash_name, vstr_t *path_
     vstr_clear(&rel);
     vstr_init(&rel, strlen(slash_name) + 16);
     #endif
+    // 1) package: name/__init__.wasm
     vstr_add_str(&rel, slash_name);
     vstr_add_str(&rel, "/__init__.wasm");
     if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
@@ -122,7 +123,27 @@ static bool find_in_root(const char *root, const char *slash_name, vstr_t *path_
         return true;
     }
 
-    // Example / pack-dir layout: hello/hello.wasm (basename == leaf dir).
+    // 2) module: name.wasm
+    vstr_clear(&rel);
+    vstr_init(&rel, strlen(slash_name) + 8);
+    #if MICROPY_PY_WASM_AOT
+    vstr_add_str(&rel, slash_name);
+    vstr_add_str(&rel, ".aot");
+    if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
+        vstr_clear(&rel);
+        return true;
+    }
+    vstr_clear(&rel);
+    vstr_init(&rel, strlen(slash_name) + 8);
+    #endif
+    vstr_add_str(&rel, slash_name);
+    vstr_add_str(&rel, ".wasm");
+    if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
+        vstr_clear(&rel);
+        return true;
+    }
+
+    // 3) pack-dir layout: name/name.wasm (basename == leaf dir)
     {
         const char *leaf = strrchr(slash_name, '/');
         leaf = leaf ? leaf + 1 : slash_name;
@@ -144,29 +165,10 @@ static bool find_in_root(const char *root, const char *slash_name, vstr_t *path_
         vstr_add_char(&rel, '/');
         vstr_add_str(&rel, leaf);
         vstr_add_str(&rel, ".wasm");
-        if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
-            vstr_clear(&rel);
-            return true;
-        }
-    }
-
-    vstr_clear(&rel);
-    vstr_init(&rel, strlen(slash_name) + 8);
-    #if MICROPY_PY_WASM_AOT
-    vstr_add_str(&rel, slash_name);
-    vstr_add_str(&rel, ".aot");
-    if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
+        bool ok = try_vfs_file(root, vstr_null_terminated_str(&rel), path_out);
         vstr_clear(&rel);
-        return true;
+        return ok;
     }
-    vstr_clear(&rel);
-    vstr_init(&rel, strlen(slash_name) + 8);
-    #endif
-    vstr_add_str(&rel, slash_name);
-    vstr_add_str(&rel, ".wasm");
-    bool ok = try_vfs_file(root, vstr_null_terminated_str(&rel), path_out);
-    vstr_clear(&rel);
-    return ok;
 }
 
 static bool find_in_list(mp_obj_t list_obj, const char *slash_name, vstr_t *path_out) {

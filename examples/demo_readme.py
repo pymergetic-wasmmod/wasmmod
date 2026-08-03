@@ -1,9 +1,10 @@
+# pyright: reportMissingImports=false
 import sys
 sys.implementation
 sys.implementation.name
 help("modules")
 
-# Before the hook: hello/ on cwd is an empty directory package — no pack attrs.
+# Before hook: hello/ on cwd is an empty directory package.
 import hello
 hasattr(hello, "greet")
 
@@ -11,7 +12,7 @@ import wasm
 wasm
 wasm.install_hook()
 
-# Drop the stale empty module, then import again — finder loads hello/hello.wasm.
+# After hook: drop stale module; finder loads hello/hello.wasm.
 del sys.modules["hello"]
 import hello, mixed, bridge
 hasattr(hello, "greet")

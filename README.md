@@ -105,8 +105,8 @@ True
 **FQN → file:** `import a.b` searches `wasm.path` then `sys.path` (dots → `/`):
 
 1. `a/b/__init__.wasm` (package)
-2. `a/b/b.wasm` (dir + same-named file — example layout)
-3. `a/b.wasm` (module)
+2. `a/b.wasm` (module)
+3. `a/b/b.wasm` (pack-dir layout — e.g. `hello/hello.wasm`)
 
 First hit wins. Nested names inside a pack (`hello.util`) come from the pack’s embedded Python after the root `.wasm` is loaded — not a second file. Override roots with `wasm.path`. Explicit path: `wasm.load_pack("…/foo.wasm", "foo")`.
 
