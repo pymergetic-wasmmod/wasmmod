@@ -40,8 +40,20 @@
 
 // Add trust material: CA cert DER/PEM (PKI) and/or leaf SPKI DER (pinned pubkey).
 bool mp_wasm_trust_add(const uint8_t *key, size_t key_len);
-void mp_wasm_trust_clear(void);
-size_t mp_wasm_trust_count(void);
+void mp_wasm_trust_clear(void); // clears store; disables baked-CA auto-reload this session
+size_t mp_wasm_trust_count(void); // may lazy-load baked roots first
+
+// Session start (wasm.__init__): empty store, arm lazy baked-CA load.
+void mp_wasm_trust_init_session(void);
+// Ensure baked roots are loaded (no-op if disarmed / already loaded / none linked).
+void mp_wasm_trust_ensure(void);
+
+// Load compile-time / image-baked trust anchors (weak no-op unless linked).
+// Prefer calling via mp_wasm_trust_ensure(), not directly.
+void mp_wasm_trust_load_builtin(void);
+
+// Helper for generated wasm_trust_ca.c: add one root from zlib (or raw if lens equal).
+bool mp_wasm_trust_add_blob(const uint8_t *data, uint32_t data_len, uint32_t uncompressed_len);
 
 // Runtime verify gate (default on). When false, mp_wasm_verify_bytes is a no-op.
 // Compile-time MICROPY_WASM_VERIFY==0 remains a full no-op regardless.

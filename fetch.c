@@ -41,12 +41,7 @@
 #include "extmod/wasmmod/fetch.h"
 #include "extmod/wasmmod/io.h"
 
-#ifndef MICROPY_WASM_MALLOC
-#define MICROPY_WASM_MALLOC(n) malloc(n)
-#endif
-#ifndef MICROPY_WASM_FREE
-#define MICROPY_WASM_FREE(p) free(p)
-#endif
+#include "extmod/wasmmod/alloc.h"
 
 // Native HTTP(S) on POSIX-like hosts. Ports override via mp_wasm_io_ops_t.
 #ifndef MICROPY_WASM_HTTP_NATIVE
@@ -556,7 +551,10 @@ static bool native_http_probe(const char *uri) {
     if (http_exchange("HEAD", uri, NULL, &status, err, sizeof(err))) {
         return true;
     }
-    // Some servers reject HEAD — fall back to GET and discard body.
+    // Only fall back when HEAD is unsupported — not on 404 / other misses.
+    if (status != 405 && status != 501) {
+        return false;
+    }
     vstr_t body;
     if (http_exchange("GET", uri, &body, &status, err, sizeof(err))) {
         vstr_clear(&body);

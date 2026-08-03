@@ -26,17 +26,17 @@
 """
 Sign .wasm / .aot for MICROPY_WASM_VERIFY (ECDSA-P256 + SHA-256).
 
-PKI (preferred):
-  tools/wasm_sign.py gen-pki -o .keys/pki              # root CA + signing leaf
-  tools/wasm_sign.py gen-pki -o .keys/pki --sub-ca     # root → sub-CA → leaf
-  tools/wasm_sign.py sign --key .keys/pki/leaf.key.pem \\
-      --cert .keys/pki/leaf.crt.der [--chain .keys/pki/chain.der] packs/hello.wasm
+PKI (preferred) — trust is host-scoped; sign is per artifact:
+  tools/wasmmod.py sign gen-pki -o .keys                 # → trust/ + sign/
+  tools/wasmmod.py sign gen-pki -o .keys --sub-ca        # root → sub-CA → leaf
+  tools/wasmmod.py sign sign --key .keys/sign/leaf.key.pem \\
+      --chain .keys/sign/chain.der packs/hello.wasm
   # → hello.wasm.sig + hello.wasm.crt (leaf [+ intermediates])
-  # Trust on device: wasm.add_trust(open("root.crt.der","rb").read())
+  # Host: wasm.add_trust(open(".keys/trust/root.crt.der","rb").read())
 
 Raw pubkey (still supported):
-  tools/wasm_sign.py gen-key -o .keys/dev
-  tools/wasm_sign.py sign --key .keys/dev.pem packs/hello.wasm
+  tools/wasmmod.py sign gen-key -o .keys/dev
+  tools/wasmmod.py sign sign --key .keys/dev.pem packs/hello.wasm
 
 Requires openssl.
 """
@@ -139,18 +139,23 @@ def _sign_cert(
 
 
 def cmd_gen_pki(out_dir: Path, with_sub_ca: bool, days: int) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    root_key = out_dir / "root.key.pem"
-    root_crt = out_dir / "root.crt.pem"
-    root_der = out_dir / "root.crt.der"
-    leaf_key = out_dir / "leaf.key.pem"
-    leaf_crt = out_dir / "leaf.crt.pem"
-    leaf_der = out_dir / "leaf.crt.der"
-    chain_der = out_dir / "chain.der"
+    """Write trust/ (host CA) and sign/ (pack leaf + chain) under out_dir."""
+    trust = out_dir / "trust"
+    sign = out_dir / "sign"
+    trust.mkdir(parents=True, exist_ok=True)
+    sign.mkdir(parents=True, exist_ok=True)
+
+    root_key = trust / "root.key.pem"
+    root_crt = trust / "root.crt.pem"
+    root_der = trust / "root.crt.der"
+    leaf_key = sign / "leaf.key.pem"
+    leaf_crt = sign / "leaf.crt.pem"
+    leaf_der = sign / "leaf.crt.der"
+    chain_der = sign / "chain.der"
 
     # Root CA (self-signed). OpenSSL 3 req uses -config/-extensions, not -extfile.
     _ec_key(root_key)
-    root_cfg = out_dir / "root.cnf"
+    root_cfg = trust / "root.cnf"
     write_file(
         root_cfg,
         textwrap.dedent(
@@ -193,11 +198,11 @@ def cmd_gen_pki(out_dir: Path, with_sub_ca: bool, days: int) -> None:
     intermediates: list[Path] = []
 
     if with_sub_ca:
-        sub_key = out_dir / "sub.key.pem"
-        sub_csr = out_dir / "sub.csr.pem"
-        sub_crt = out_dir / "sub.crt.pem"
-        sub_der = out_dir / "sub.crt.der"
-        sub_ext = out_dir / "sub.ext"
+        sub_key = sign / "sub.key.pem"
+        sub_csr = sign / "sub.csr.pem"
+        sub_crt = sign / "sub.crt.pem"
+        sub_der = sign / "sub.crt.der"
+        sub_ext = sign / "sub.ext"
         _ec_key(sub_key)
         _req(sub_key, "/CN=wasmmod-sub", sub_csr)
         write_file(
@@ -218,8 +223,8 @@ def cmd_gen_pki(out_dir: Path, with_sub_ca: bool, days: int) -> None:
         intermediates.append(sub_der)
 
     # Leaf signing cert (digitalSignature only — not a CA).
-    leaf_csr = out_dir / "leaf.csr.pem"
-    leaf_ext = out_dir / "leaf.ext"
+    leaf_csr = sign / "leaf.csr.pem"
+    leaf_ext = sign / "leaf.ext"
     _ec_key(leaf_key)
     _req(leaf_key, "/CN=wasmmod-pack-signer", leaf_csr)
     write_file(
@@ -237,14 +242,14 @@ def cmd_gen_pki(out_dir: Path, with_sub_ca: bool, days: int) -> None:
     _sign_cert(leaf_csr, signer_crt, signer_key, leaf_crt, days=days, extfile=leaf_ext, serial=serial)
     pem_to_der_cert(leaf_crt, leaf_der)
 
-    # chain.der = leaf || intermediates (root stays in trust store only).
+    # chain.der = leaf || intermediates (root stays in trust/ only).
     chain = leaf_der.read_bytes() + b"".join(p.read_bytes() for p in intermediates)
     write_file(chain_der, chain)
 
     for p in (root_der, leaf_key, leaf_der, chain_der):
         print(p)
     if with_sub_ca:
-        print(out_dir / "sub.crt.der")
+        print(sign / "sub.crt.der")
 
 
 def pack_mpws(sig: bytes, chain: bytes) -> bytes:
@@ -312,8 +317,8 @@ def main() -> int:
     g = sub.add_parser("gen-key", help="raw ECDSA keypair (no X.509)")
     g.add_argument("-o", "--output", type=Path, required=True, help="key prefix")
 
-    p = sub.add_parser("gen-pki", help="root CA + signing leaf (+ optional sub-CA)")
-    p.add_argument("-o", "--output", type=Path, required=True, help="output directory")
+    p = sub.add_parser("gen-pki", help="write trust/ (root CA) + sign/ (leaf + chain)")
+    p.add_argument("-o", "--output", type=Path, required=True, help="keys root (creates trust/ and sign/)")
     p.add_argument("--sub-ca", action="store_true", help="insert intermediate CA under root")
     p.add_argument("--days", type=int, default=3650, help="cert lifetime (default 10y)")
 

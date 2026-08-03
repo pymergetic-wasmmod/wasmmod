@@ -30,17 +30,11 @@
 
 #if MICROPY_PY_WASM
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "extmod/wasmmod/pack.h"
 
-#ifndef MICROPY_WASM_MALLOC
-#define MICROPY_WASM_MALLOC(n) malloc(n)
-#endif
-#ifndef MICROPY_WASM_FREE
-#define MICROPY_WASM_FREE(p) free(p)
-#endif
+#include "extmod/wasmmod/alloc.h"
 
 bool mp_wasm_read_uleb(const uint8_t **p, const uint8_t *end, uint32_t *out) {
     uint32_t result = 0;

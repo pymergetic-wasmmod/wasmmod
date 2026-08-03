@@ -32,13 +32,13 @@
 
 #include <string.h>
 
-#include "py/builtin.h"
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/nlr.h"
 
 #include "extmod/wasmmod/fetch.h"
 #include "extmod/wasmmod/finder.h"
+#include "extmod/wasmmod/runtime.h"
 
 #if MICROPY_VFS
 #include "extmod/vfs.h"
@@ -47,14 +47,6 @@
 #ifndef MICROPY_PY_WASM_AOT
 #define MICROPY_PY_WASM_AOT (0)
 #endif
-
-#include "extmod/wasmmod/runtime.h"// Defined in wasmmod.c
-
-mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override);
-void mp_wasm_path_ensure(void);
-mp_obj_t mp_wasm_path_obj(void);
-void mp_wasm_arch_ensure(void);
-mp_obj_t mp_wasm_arch_obj(void);
 
 static bool path_is_frozen(const char *root) {
     return root != NULL && strcmp(root, ".frozen") == 0;
@@ -596,6 +588,10 @@ static void discover_fill(const char *prefix) {
 }
 
 mp_obj_t mp_wasm_import_wasm(const char *dotted_name) {
+    return mp_wasm_import_wasm_at(dotted_name, NULL);
+}
+
+mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *known_path) {
     mp_obj_t existing = lookup_loaded(dotted_name);
     if (existing != MP_OBJ_NULL) {
         return existing;
@@ -603,7 +599,16 @@ mp_obj_t mp_wasm_import_wasm(const char *dotted_name) {
 
     // Leaf pack at any depth — parents become namespaces if needed.
     vstr_t path;
-    if (mp_wasm_find_pack(dotted_name, &path)) {
+    bool have_path = false;
+    if (known_path != NULL && known_path[0] != '\0') {
+        vstr_init(&path, strlen(known_path) + 1);
+        vstr_add_str(&path, known_path);
+        have_path = true;
+    } else if (mp_wasm_find_pack(dotted_name, &path)) {
+        have_path = true;
+    }
+
+    if (have_path) {
         const char *dot = strrchr(dotted_name, '.');
         if (dot != NULL) {
             size_t plen = (size_t)(dot - dotted_name);

@@ -2,7 +2,8 @@
 # Tiny static HTTP server for wasmmod pack smoke tests.
 # Serves a directory tree as-is (VFS mirror). No JSON / resolve API.
 #
-#   python3 tools/pack_http_server.py --dir packs --port 0 --write-port .http-port
+#   python3 tools/wasmmod.py httpd --dir packs --port 0 --write-port .http-port
+#   # or: tools/wasmmod_httpd.py …
 #
 # Then: wasm.verify(False); wasm.install_hook("http://127.0.0.1:<port>/")
 
@@ -20,6 +21,12 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=0, help="Listen port (0 = ephemeral)")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--write-port", help="Write chosen port to this file")
+    ap.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress per-request logs (default: log every GET/HEAD)",
+    )
     args = ap.parse_args()
 
     root = os.path.abspath(args.dir)
@@ -28,10 +35,18 @@ def main() -> int:
         return 1
 
     os.chdir(root)
+    quiet = args.quiet
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def log_message(self, fmt: str, *log_args) -> None:
+            # Silence default '"GET /x HTTP/1.0" 200 -' — we log in log_request.
             pass
+
+        def log_request(self, code: object = "-", size: object = "-") -> None:
+            if quiet:
+                return
+            # HEAD probes + GET of .wasm / .sig / .crt show up here.
+            print(f"  http {self.command} {self.path} → {code}", flush=True)
 
     httpd = http.server.ThreadingHTTPServer((args.host, args.port), Handler)
     host, port = httpd.server_address[:2]

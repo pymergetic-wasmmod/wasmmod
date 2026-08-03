@@ -8,8 +8,8 @@ like any other package.
 
 Today’s loader (`extmod/wasmmod/wasmmod.c`) only instantiates Wasm and offers
 `call()`. This document is the **target design** for packing, registration,
-and host↔guest / guest↔guest calls. Bits marked **v1 (shipped)** exist in
-`tools/wasm_pack.py` now; the rest is proposed structure.
+and host↔guest / guest↔guest calls. Bits marked **v1 (shipped)** exist via
+`tools/wasmmod.py pack` now; the rest is proposed structure.
 
 ## Goals
 
@@ -388,7 +388,7 @@ Recommended shipping layouts:
 Tooling:
 
 ```sh
-python3 tools/wasm_pack.py examples/hello/ -o hello.wasm
+python3 tools/wasmmod.py pack examples/hello/ -o hello.wasm
 wamrc -o hello.aot hello.wasm          # target-specific flags as needed
 # optional: wasm_pack --write-mpack hello.mpack
 ```
@@ -445,7 +445,45 @@ Ports replace I/O with `mp_wasm_io_set` / `MICROPY_WASM_IO_OPS` (see [ports/PORT
 
 ## Signature verification (mbedtls)
 
-**PKI (preferred):** trust a **root CA** with `wasm.add_trust(root.crt.der)`.
+### Trust vs sign
+
+| Layer | Scope | Material |
+|-------|--------|----------|
+| **Trust** | Host / upy project / Metal image | Root CA DER(s) zlib-compressed into ROM at **image build** (`MICROPY_WASM_TRUST_CA`), or flash via `MICROPY_WASM_TRUST_BOOT` / runtime `add_trust`. |
+| **Sign** | Each pack build (CI) | Leaf private key → `.sig` + `.crt` beside the artifact. |
+| **Ship** | With the pack | `.sig` + `.crt` only — never the root, never the leaf key. |
+
+One leaf may sign many packs; or each build gets its own leaf under the same CA.
+The device only checks that `.crt` chains to a trusted root, then ECDSA over the
+bytes. Multiple roots: `MICROPY_WASM_TRUST_CA="root_a.der root_b.der"` (or
+repeated `add_trust`). Baked roots inflate **lazily** on first verify /
+`trust_count()` — not on `import wasm`. Omit bake and skip `add_trust` →
+`trust_n==0` → signed loads fail under `VERIFY=1`. `wasm.trust_clear()`
+disables auto-reload of baked roots for the session.
+
+Examples smoke generates keys under `.keys/` (gitignored). A **real** project
+keeps the root in the firmware build and only the leaf in pack CI:
+
+```bash
+# firmware / upy image (one or more public root DERs → zlib ROM)
+make MICROPY_PY_WASM=1 MICROPY_WASM_VERIFY=1 \
+  MICROPY_WASM_TRUST_CA="/path/to/project/trust/root.crt.der"
+
+# pack CI
+tools/wasmmod.py sign sign --key sign/leaf.key.pem \
+    --chain sign/chain.der packs/hello.wasm
+```
+
+Smoke key layout (`gen-pki -o .keys`):
+
+```text
+.keys/
+  trust/root.crt.der     # baked via MICROPY_WASM_TRUST_CA (or add_trust)
+  sign/leaf.key.pem      # CI secret
+  sign/chain.der         # → packs/*.crt (leaf || intermediates)
+```
+
+**PKI (preferred):** trust a **root CA** (compile-in or `wasm.add_trust`).
 Packs ship a detached ECDSA `.sig` plus `.crt` (leaf [+ intermediates], root
 not included). The loader verifies the X.509 chain to the trusted root, then
 checks the ECDSA-P256/SHA-256 signature with the leaf key.
@@ -463,29 +501,32 @@ verified *before* instantiate.
    - `hello.wasm.sig` / `hello.aot.sig` (openssl ECDSA-SHA256)
    - `hello.wasm.crt` / `hello.aot.crt` (leaf DER, then intermediates)
 2. **Embedded** (`.wasm` only):
-   - `tools/wasm_sign.py sign --embed --chain chain.der` → `wasmmod.sig`
+   - `tools/wasmmod.py sign sign --embed --chain chain.der` → `wasmmod.sig`
      section with MPWS envelope (sig + chain)
    - Loader hashes the module *without* that section
 
 ```bash
 make -C examples test-signed         # PKI sign + VFS + HTTP verify
 # or piecemeal:
-make -C examples sign-packs          # .keys/pki + packs/*.{sig,crt}
-make -C examples test-verify         # MICROPY_WASM_VERIFY=1 + add_trust(root)
+make -C examples sign-packs          # .keys/{trust,sign} + packs/*.{sig,crt}
+make -C examples test-verify         # VERIFY=1 + baked MICROPY_WASM_TRUST_CA
 make -C examples test-http-verify    # same over HTTP
 ```
 
 ```python
-wasm.add_trust(open(".keys/pki/root.crt.der", "rb").read())
+# Prefer bake at build time; trust_count() triggers lazy inflate:
+# wasm.add_trust(open(".keys/trust/root.crt.der", "rb").read())
+print(wasm.trust_count())  # >= 1 when MICROPY_WASM_TRUST_CA was set
+# wasm.trust_clear()  # empties store; baked roots stay disarmed this session
 ```
 
 Host tooling:
 
 ```bash
-tools/wasm_sign.py gen-pki -o .keys/pki              # root + leaf
-tools/wasm_sign.py gen-pki -o .keys/pki --sub-ca     # root → sub → leaf
-tools/wasm_sign.py sign --key .keys/pki/leaf.key.pem \
-    --chain .keys/pki/chain.der packs/hello.wasm
+tools/wasmmod.py sign gen-pki -o .keys              # trust/ + sign/
+tools/wasmmod.py sign gen-pki -o .keys --sub-ca     # root → sub → leaf
+tools/wasmmod.py sign sign --key .keys/sign/leaf.key.pem \
+    --chain .keys/sign/chain.der packs/hello.wasm
 ```
 
 | Mode | Behaviour |
@@ -495,7 +536,8 @@ tools/wasm_sign.py sign --key .keys/pki/leaf.key.pem \
 | `MICROPY_WASM_VERIFY=2` | verify if `.sig` / section present; else allow |
 
 Failed verify → do not instantiate. The root CA never comes from the pack
-itself — only from `add_trust` / flash / compile-time trust.
+itself — only from the image (`MICROPY_WASM_TRUST_CA` / `TRUST_BOOT`) or
+`add_trust`.
 
 ## Export table (module + func)
 
@@ -706,7 +748,7 @@ per pair (Wasm import module = target package name, field = `func`).
 ## Tooling shape
 
 ```text
-tools/wasm_pack.py [pack.toml | pack dir | sources…]
+tools/wasmmod.py pack [pack.toml | pack dir | sources…]
   0. read pack.toml (if present / if given a directory)
   1. compile native sources (impl / globs / sources list) → objects
   2. wasm-ld → linked.wasm (exports from [[exports]] + lifecycle)
@@ -719,7 +761,7 @@ CLI may stay source-oriented for smoke tests; directory + `pack.toml` is
 the normal pack author path (see `examples/hello/pack.toml`):
 
 ```sh
-python3 tools/wasm_pack.py examples/hello -o hello.wasm
+python3 tools/wasmmod.py pack examples/hello -o hello.wasm
 ```
 
 ## Loader API (proposed Python surface)
@@ -792,7 +834,7 @@ Keep optional and boring for upstream. Full contract: [ports/PORT.md](../ports/P
 | `extmod/wasmmod/` | Loader + pack/runtime/forward/host/finder/fetch/verify |
 | `extmod/wasmmod/third_party/wamr` | Nested WAMR submodule |
 | `extmod/wasmmod/ports/micropython/` | Make/CMake glue; optional `mpconfig_wasm.h` |
-| `extmod/wasmmod/tools/` | `wasm_pack.py` / `wasm_sign.py` |
+| `extmod/wasmmod/tools/` | `wasmmod.py` + `wasmmod_*.py` |
 | `extmod/wasmmod/examples/` | Demos + `run_matrix.py` |
 | Host `extmod/extmod.mk` / `.cmake` | Thin `include` when `MICROPY_PY_WASM` |
 | Host `examples/wasmmod` | Optional symlink → `extmod/wasmmod/examples` |

@@ -180,7 +180,7 @@ endif()
 Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).  
 Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`.
 
-Optional host trampolines (metalpython): `tools/wasm_pack.py` / `tools/wasm_sign.py` → `extmod/wasmmod/tools/…`.
+Optional host trampoline (metalpython): `tools/wasmmod.py` → `extmod/wasmmod/tools/wasmmod.py`.
 
 ---
 
@@ -195,7 +195,7 @@ make -C mpy-cross BUILD=build -j"$(nproc)"   # pack freeze (.mpy)
 make -C extmod/wasmmod/examples test           # interp matrix
 make -C extmod/wasmmod/examples test-engines   # all engines
 make -C extmod/wasmmod/examples test-http      # static HTTP pack fetch
-make -C extmod/wasmmod/examples test-verify    # ECDSA .sig+.crt + root CA
+make -C extmod/wasmmod/examples test-verify    # ECDSA .sig+.crt + baked root CA
 make -C extmod/wasmmod/examples test-signed    # PKI sign + VFS + HTTP verify
 make -C extmod/wasmmod/examples demo           # real micropython -i session
 make -C extmod/wasmmod/examples repl           # interactive unix REPL

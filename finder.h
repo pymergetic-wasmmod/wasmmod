@@ -45,6 +45,15 @@ bool mp_wasm_has_descendants(const char *prefix);
 
 // Load-or-reuse a pack by dotted import name. Raises on failure.
 // Namespace packages (PEP 420-ish) are created when only children exist.
+// If path is non-NULL, skip find_pack and load that artifact (import-hook reuse).
 mp_obj_t mp_wasm_import_wasm(const char *dotted_name);
+mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *path);
+
+// Path / arch lists (wasm.path, wasm.arch) and pack load entry used by finder.
+void mp_wasm_path_ensure(void);
+mp_obj_t mp_wasm_path_obj(void);
+void mp_wasm_arch_ensure(void);
+mp_obj_t mp_wasm_arch_obj(void);
+mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override);
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_FINDER_H

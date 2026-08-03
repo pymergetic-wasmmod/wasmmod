@@ -134,7 +134,7 @@ Set `WASM_CC` / `WASM_LD` if needed. Mixed/bridge also need a Rust
 
 ```sh
 # Pack from manifest (tool lives in this repo)
-python3 extmod/wasmmod/tools/wasm_pack.py extmod/wasmmod/examples/hello -o hello.wasm
+python3 extmod/wasmmod/tools/wasmmod.py pack extmod/wasmmod/examples/hello -o hello.wasm
 ```
 
 ## Author

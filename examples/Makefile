@@ -21,12 +21,11 @@ MPY_FJIT = $(UNIX)/build-wasm-fjit/micropython
 MPY_JIT = $(UNIX)/build-wasm-jit/micropython
 MPY_VERIFY = $(UNIX)/build-wasm-verify/micropython
 
-# Dev PKI (root CA + sub-CA + leaf). Generated once; .keys/ is gitignored.
+# Dev PKI: trust/ = host CA; sign/ = pack leaf. Generated once; .keys/ is gitignored.
 SIGN_KEY_DIR = $(CURDIR)/.keys
-SIGN_PKI_DIR = $(SIGN_KEY_DIR)/pki
-SIGN_ROOT = $(SIGN_PKI_DIR)/root.crt.der
-SIGN_LEAF_KEY = $(SIGN_PKI_DIR)/leaf.key.pem
-SIGN_CHAIN = $(SIGN_PKI_DIR)/chain.der
+SIGN_ROOT = $(SIGN_KEY_DIR)/trust/root.crt.der
+SIGN_LEAF_KEY = $(SIGN_KEY_DIR)/sign/leaf.key.pem
+SIGN_CHAIN = $(SIGN_KEY_DIR)/sign/chain.der
 
 PACK_WASMS = \
 	packs/hello.wasm \
@@ -54,10 +53,10 @@ all: packs
 sign-key: $(SIGN_ROOT)
 
 $(SIGN_ROOT) $(SIGN_LEAF_KEY) $(SIGN_CHAIN):
-	mkdir -p $(SIGN_PKI_DIR)
-	python3 $(WASM_SIGN) gen-pki --sub-ca -o $(SIGN_PKI_DIR)
+	mkdir -p $(SIGN_KEY_DIR)
+	python3 $(WASM_SIGN) gen-pki --sub-ca -o $(SIGN_KEY_DIR)
 
-# Detached .sig + .crt (leaf||sub) next to each pack. Device trusts SIGN_ROOT.
+# Detached .sig + .crt (leaf||sub) next to each pack. Device trusts SIGN_ROOT only.
 sign-packs: packs sign-key
 	@for w in $(PACK_WASMS); do \
 		echo "SIGN $$w"; \
@@ -95,8 +94,9 @@ aot-packs: packs wamrc
 host:
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) BUILD=build-wasm
 
-host-verify:
-	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_WASM_VERIFY=1 BUILD=build-wasm-verify
+host-verify: $(SIGN_ROOT)
+	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_WASM_VERIFY=1 \
+		MICROPY_WASM_TRUST_CA=$(SIGN_ROOT) BUILD=build-wasm-verify
 
 host-aot:
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_PY_WASM_AOT=1 BUILD=build-wasm-aot
@@ -122,16 +122,16 @@ repl: packs host
 test: packs host
 	$(MPY_INTERP) $(CURDIR)/run_matrix.py
 
-# Require ECDSA signatures (detached .sig+.crt) + trusted root CA.
+# Require ECDSA signatures (detached .sig+.crt) + baked root CA in the host.
 test-verify: sign-packs host-verify
 	@test -f $(SIGN_ROOT) || (echo "FAIL: missing $(SIGN_ROOT)"; exit 1)
-	WASM_TRUST_CA=$(SIGN_ROOT) $(MPY_VERIFY) $(CURDIR)/run_verify.py
+	$(MPY_VERIFY) $(CURDIR)/run_verify.py
 
 # Static HTTP pack root (native C fetch). Serves packs/ as document root.
 test-http: packs host
 	@set -e; \
 	portfile=$$(mktemp); \
-	python3 $(CURDIR)/tools/pack_http_server.py --dir $(CURDIR)/packs --port 0 --write-port $$portfile & \
+	python3 -u $(WASMMOD_ROOT)/tools/wasmmod.py httpd --dir $(CURDIR)/packs --port 0 --write-port $$portfile & \
 	spid=$$!; \
 	trap 'kill $$spid 2>/dev/null || true; rm -f $$portfile' EXIT; \
 	for i in 1 2 3 4 5 6 7 8 9 10; do \
@@ -146,7 +146,7 @@ test-http: packs host
 test-http-verify: sign-packs host-verify
 	@set -e; \
 	portfile=$$(mktemp); \
-	python3 $(CURDIR)/tools/pack_http_server.py --dir $(CURDIR)/packs --port 0 --write-port $$portfile & \
+	python3 -u $(WASMMOD_ROOT)/tools/wasmmod.py httpd --dir $(CURDIR)/packs --port 0 --write-port $$portfile & \
 	spid=$$!; \
 	trap 'kill $$spid 2>/dev/null || true; rm -f $$portfile' EXIT; \
 	for i in 1 2 3 4 5 6 7 8 9 10; do \
@@ -155,8 +155,7 @@ test-http-verify: sign-packs host-verify
 	done; \
 	port=$$(cat $$portfile); \
 	echo "HTTP signed pack root http://127.0.0.1:$$port/"; \
-	WASM_TRUST_CA=$(SIGN_ROOT) HTTP_PACK_ROOT=http://127.0.0.1:$$port/ \
-		$(MPY_VERIFY) $(CURDIR)/run_http_verify.py
+	HTTP_PACK_ROOT=http://127.0.0.1:$$port/ $(MPY_VERIFY) $(CURDIR)/run_http_verify.py
 
 # sign-packs + VFS verify + HTTP verify (one shot).
 test-signed: test-verify test-http-verify

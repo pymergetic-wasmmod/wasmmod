@@ -1,21 +1,36 @@
 # pyright: reportMissingImports=false
 # Signed HTTP pack smoke. Driven by `make test-http-verify`.
-# Expects HTTP_PACK_ROOT + WASM_TRUST_CA; host with MICROPY_WASM_VERIFY=1.
+# Host with MICROPY_WASM_VERIFY=1 + baked MICROPY_WASM_TRUST_CA; HTTP_PACK_ROOT set.
 
 import os
+import sys
 import wasm
 
 root = os.getenv("HTTP_PACK_ROOT")
-ca_path = os.getenv("WASM_TRUST_CA") or os.getenv("WASM_TRUST_PUB")
-if not root or not ca_path:
-    raise SystemExit("HTTP_PACK_ROOT and WASM_TRUST_CA required")
+if not root:
+    raise SystemExit("HTTP_PACK_ROOT required")
 
-with open(ca_path, "rb") as f:
-    wasm.add_trust(f.read())
+n = wasm.trust_count()
+print("baked trust_count=", n)
+if n == 0:
+    ca_path = os.getenv("WASM_TRUST_CA") or os.getenv("WASM_TRUST_PUB")
+    if not ca_path:
+        raise SystemExit("no baked trust and WASM_TRUST_CA not set")
+    print("add_trust", ca_path)
+    with open(ca_path, "rb") as f:
+        wasm.add_trust(f.read())
 
+print("install_hook", root)
 wasm.install_hook(root)
+print("wasm.path =", wasm.path)
+
+print("import hello  # finder → HTTP GET hello.wasm (+ .sig/.crt)")
 import hello
 
+print("  sys.modules['hello'] =", sys.modules.get("hello"))
+print("  hello.hello()  ->", hello.hello())
+print("  hello.add(2,3) ->", hello.add(2, 3))
+print("  hello.greet()  ->", repr(hello.greet()))
 assert hello.greet() == "hello from pack py"
 assert hello.hello() == 42
 assert hello.add(2, 3) == 5

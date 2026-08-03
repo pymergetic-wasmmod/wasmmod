@@ -31,7 +31,6 @@
 #if MICROPY_PY_WASM
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "extmod/wasmmod/forward.h"
@@ -39,12 +38,7 @@
 #include "extmod/wasmmod/runtime.h"
 #include "wasm_export.h"
 
-#ifndef MICROPY_WASM_MALLOC
-#define MICROPY_WASM_MALLOC(n) malloc(n)
-#endif
-#ifndef MICROPY_WASM_FREE
-#define MICROPY_WASM_FREE(p) free(p)
-#endif
+#include "extmod/wasmmod/alloc.h"
 
 typedef struct mp_wasm_reg_entry_t {
     struct mp_wasm_reg_entry_t *next;

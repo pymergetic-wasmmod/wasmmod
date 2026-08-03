@@ -31,17 +31,14 @@
 #if MICROPY_PY_WASM
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-#include "extmod/wasmmod/pack.h"
+#include "py/mpconfig.h"
 #include "extmod/wasmmod/verify.h"
 
-#ifndef MICROPY_WASM_MALLOC
-#define MICROPY_WASM_MALLOC(n) malloc(n)
-#endif
-#ifndef MICROPY_WASM_FREE
-#define MICROPY_WASM_FREE(p) free(p)
+#include "extmod/wasmmod/alloc.h"
+#ifndef MP_WEAK
+#define MP_WEAK __attribute__((weak))
 #endif
 
 typedef struct mp_wasm_trust_key_t {
@@ -52,6 +49,10 @@ typedef struct mp_wasm_trust_key_t {
 
 static mp_wasm_trust_key_t *trust_keys;
 static size_t trust_n;
+
+// Lazy baked-CA load: armed on session init; disarmed by trust_clear().
+static bool trust_builtin_armed;
+static bool trust_builtin_loaded;
 
 // Default on; wasm.verify(False) disables for the session (all loads).
 static bool verify_runtime_enabled = true;
@@ -85,7 +86,7 @@ bool mp_wasm_trust_add(const uint8_t *key, size_t key_len) {
     return true;
 }
 
-void mp_wasm_trust_clear(void) {
+static void trust_clear_list(void) {
     while (trust_keys != NULL) {
         mp_wasm_trust_key_t *dead = trust_keys;
         trust_keys = dead->next;
@@ -95,13 +96,113 @@ void mp_wasm_trust_clear(void) {
     trust_n = 0;
 }
 
+void mp_wasm_trust_clear(void) {
+    trust_clear_list();
+    trust_builtin_armed = false;
+    trust_builtin_loaded = false;
+}
+
+void mp_wasm_trust_init_session(void) {
+    trust_clear_list();
+    trust_builtin_armed = true;
+    trust_builtin_loaded = false;
+}
+
+// Overridden by BUILD/wasm_trust_ca.c when MICROPY_WASM_TRUST_CA is set.
+MP_WEAK void mp_wasm_trust_load_builtin(void) {
+}
+
+void mp_wasm_trust_ensure(void) {
+    if (trust_builtin_loaded || !trust_builtin_armed) {
+        return;
+    }
+    trust_builtin_loaded = true;
+    mp_wasm_trust_load_builtin();
+    #ifdef MICROPY_WASM_TRUST_BOOT
+    MICROPY_WASM_TRUST_BOOT();
+    #endif
+}
+
 size_t mp_wasm_trust_count(void) {
+    mp_wasm_trust_ensure();
     return trust_n;
+}
+
+#ifndef MICROPY_WASM_TRUST_INFLATE
+#define MICROPY_WASM_TRUST_INFLATE (0)
+#endif
+
+#if MICROPY_WASM_TRUST_INFLATE || MICROPY_PY_DEFLATE
+#include "lib/uzlib/uzlib.h"
+#if MICROPY_WASM_TRUST_INFLATE && !MICROPY_PY_DEFLATE
+// Pull inflate when the deflate module is not compiled in.
+#include "lib/uzlib/tinflate.c"
+#include "lib/uzlib/header.c"
+#include "lib/uzlib/adler32.c"
+#endif
+
+static bool trust_inflate_zlib(const uint8_t *src, uint32_t src_len, uint8_t *dst, uint32_t dst_len) {
+    uzlib_uncomp_t decomp;
+    memset(&decomp, 0, sizeof(decomp));
+    decomp.source = src;
+    decomp.source_limit = src + src_len;
+    decomp.dest_start = dst;
+    decomp.dest = dst;
+    decomp.dest_limit = dst + dst_len;
+
+    int wbits = 0;
+    if (uzlib_parse_zlib_gzip_header(&decomp, &wbits) != UZLIB_HEADER_ZLIB) {
+        return false;
+    }
+    if (wbits < 8) {
+        wbits = 8;
+    }
+    if (wbits > 15) {
+        wbits = 15;
+    }
+    size_t dict_len = (size_t)1 << (unsigned)wbits;
+    uint8_t *dict = MICROPY_WASM_MALLOC(dict_len);
+    if (dict == NULL) {
+        return false;
+    }
+    uzlib_uncompress_init(&decomp, dict, (unsigned int)dict_len);
+    int st;
+    do {
+        st = uzlib_uncompress_chksum(&decomp);
+    } while (st == UZLIB_OK);
+    MICROPY_WASM_FREE(dict);
+    return st == UZLIB_DONE && (uint32_t)(decomp.dest - decomp.dest_start) == dst_len;
+}
+#endif
+
+bool mp_wasm_trust_add_blob(const uint8_t *data, uint32_t data_len, uint32_t uncompressed_len) {
+    if (data == NULL || data_len == 0 || uncompressed_len == 0) {
+        return false;
+    }
+    if (data_len == uncompressed_len) {
+        return mp_wasm_trust_add(data, uncompressed_len);
+    }
+    #if MICROPY_WASM_TRUST_INFLATE || MICROPY_PY_DEFLATE
+    uint8_t *raw = MICROPY_WASM_MALLOC(uncompressed_len);
+    if (raw == NULL) {
+        return false;
+    }
+    bool ok = trust_inflate_zlib(data, data_len, raw, uncompressed_len);
+    if (ok) {
+        ok = mp_wasm_trust_add(raw, uncompressed_len);
+    }
+    MICROPY_WASM_FREE(raw);
+    return ok;
+    #else
+    (void)data;
+    return false;
+    #endif
 }
 
 #if MICROPY_WASM_VERIFY
 
 #include "extmod/wasmmod/fetch.h"
+#include "extmod/wasmmod/pack.h"
 
 #if MICROPY_SSL_MBEDTLS
 #include "mbedtls/md.h"
@@ -375,6 +476,7 @@ bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_h
     if (!verify_runtime_enabled) {
         return true;
     }
+    mp_wasm_trust_ensure();
     if (bytes == NULL || len == 0) {
         if (errbuf && errbuf_len) {
             snprintf(errbuf, errbuf_len, "verify: empty");

@@ -28,11 +28,12 @@ Build a freestanding Wasm guest and optionally append a MicroPython pack
 section (`wasmmod.pack`). See examples/PACK.md (this repo).
 
 Examples:
-  tools/wasm_pack.py hello.c -o hello.wasm --export hello --export add
-  tools/wasm_pack.py hello.c -o hello.wasm --name hello --mount src \\
+  tools/wasmmod.py pack hello.c -o hello.wasm --export hello --export add
+  tools/wasmmod.py pack hello.c -o hello.wasm --name hello --mount src \\
       --export hello --export add
-  tools/wasm_pack.py examples/hello -o hello.wasm
-  tools/wasm_pack.py examples/hello/pack.toml -o hello.wasm
+  tools/wasmmod.py pack examples/hello -o hello.wasm
+  tools/wasmmod.py pack examples/hello/pack.toml -o hello.wasm
+  # or: tools/wasmmod_pack.py …
 """
 
 from __future__ import annotations

@@ -4,13 +4,19 @@
 # Enable from the command line (no mpconfig.h / mpconfigport.mk edits needed):
 #   make MICROPY_PY_WASM=1
 # Optional: MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX} MICROPY_WASM_VERIFY
+# Bake host root CA(s) into the image (public DER only):
+#   make MICROPY_WASM_VERIFY=1 MICROPY_WASM_TRUST_CA=/path/to/root.crt.der
 # C defaults (optional): ports/micropython/mpconfig_wasm.h
+# Port flash hook: #define MICROPY_WASM_TRUST_BOOT() … mp_wasm_trust_add(…)
 
 WASMMOD_DIR ?= extmod/wasmmod
 WAMR_DIR ?= $(WASMMOD_DIR)/third_party/wamr
 
 SRC_WASMMOD = \
 	$(WASMMOD_DIR)/wasmmod.c \
+	$(WASMMOD_DIR)/modobj.c \
+	$(WASMMOD_DIR)/modapi.c \
+	$(WASMMOD_DIR)/packload.c \
 	$(WASMMOD_DIR)/fetch.c \
 	$(WASMMOD_DIR)/finder.c \
 	$(WASMMOD_DIR)/forward.c \
@@ -51,6 +57,22 @@ ifneq ($(filter 1,$(MICROPY_PY_WASM_JIT) $(MICROPY_PY_WASM_FAST_JIT)),)
 LDFLAGS_EXTMOD += -lstdc++
 endif
 
+# Embed public root CA DER(s) → zlib ROM + lazy mp_wasm_trust_load_builtin().
+# Multiple roots: MICROPY_WASM_TRUST_CA="a.der b.der"
+ifneq ($(strip $(MICROPY_WASM_TRUST_CA)),)
+WASM_TRUST_CA_C = $(BUILD)/wasm_trust_ca.c
+WASM_TRUST_CA_O = $(BUILD)/wasm_trust_ca.o
+PY_O += $(WASM_TRUST_CA_O)
+CFLAGS_EXTMOD += -DMICROPY_WASM_TRUST_INFLATE=1
+
+$(WASM_TRUST_CA_C): $(MICROPY_WASM_TRUST_CA) $(TOP)/$(WASMMOD_DIR)/tools/wasmmod_embed_ca.py
+	$(Q)$(MKDIR) -p $(dir $@)
+	$(Q)python3 $(TOP)/$(WASMMOD_DIR)/tools/wasmmod.py embed-ca -o $@ $(MICROPY_WASM_TRUST_CA)
+
+$(WASM_TRUST_CA_O): $(WASM_TRUST_CA_C)
+	$(Q)$(CC) $(CFLAGS) $(CFLAGS_EXTMOD) $(INC) -c -o $@ $<
+endif
+
 WAMR_CMAKE_EXTRA =
 LLVM_CONFIG ?= $(shell command -v llvm-config-18 2>/dev/null || command -v llvm-config 2>/dev/null)
 ifneq ($(MICROPY_PY_WASM_JIT),0)
@@ -77,7 +99,9 @@ $(WAMR_BUILD)/libiwasm.a:
 		$(WAMR_CMAKE_EXTRA)
 	$(Q)cmake --build $(WAMR_BUILD) --target vmlib -j
 
-$(BUILD)/$(WASMMOD_DIR)/wasmmod.o $(BUILD)/$(WASMMOD_DIR)/runtime.o \
+$(BUILD)/$(WASMMOD_DIR)/wasmmod.o $(BUILD)/$(WASMMOD_DIR)/modobj.o \
+$(BUILD)/$(WASMMOD_DIR)/modapi.o $(BUILD)/$(WASMMOD_DIR)/packload.o \
+$(BUILD)/$(WASMMOD_DIR)/runtime.o \
 $(BUILD)/$(WASMMOD_DIR)/pack.o $(BUILD)/$(WASMMOD_DIR)/finder.o \
 $(BUILD)/$(WASMMOD_DIR)/forward.o $(BUILD)/$(WASMMOD_DIR)/fetch.o \
 $(BUILD)/$(WASMMOD_DIR)/verify.o $(BUILD)/$(WASMMOD_DIR)/host.o: $(WAMR_BUILD)/libiwasm.a

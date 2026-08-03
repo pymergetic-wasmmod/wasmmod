@@ -30,18 +30,9 @@
 
 #if MICROPY_PY_WASM
 
-#include <stdlib.h>
 #include <string.h>
 
-#ifndef MICROPY_WASM_MALLOC
-#define MICROPY_WASM_MALLOC(n) malloc(n)
-#endif
-#ifndef MICROPY_WASM_REALLOC
-#define MICROPY_WASM_REALLOC(p, n) realloc((p), (n))
-#endif
-#ifndef MICROPY_WASM_FREE
-#define MICROPY_WASM_FREE(p) free(p)
-#endif
+#include "extmod/wasmmod/alloc.h"
 
 #include "py/obj.h"
 #include "py/runtime.h"

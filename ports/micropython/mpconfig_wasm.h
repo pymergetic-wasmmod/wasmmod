@@ -67,5 +67,10 @@
 
 // Replaceable host I/O / alloc / verify — see extmod/wasmmod/ports/PORT.md
 // and extmod/wasmmod/io.h (mp_wasm_io_ops_t, mp_wasm_io_set).
+//
+// Bake root CA(s) at image build (zlib ROM; lazy on first verify / trust_count):
+//   make MICROPY_WASM_TRUST_CA="a.der b.der" …
+// Or from the port (flash / ROM bytes), via ensure / TRUST_BOOT:
+//   #define MICROPY_WASM_TRUST_BOOT() do { mp_wasm_trust_add(ca, ca_len); } while (0)
 
 #endif // MICROPY_INCLUDED_WASMMOD_MPCONFIG_WASM_H

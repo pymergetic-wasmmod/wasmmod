@@ -66,9 +66,15 @@
  * | `MICROPY_WASM_EXPORT_PUBLISH(mod, name, fn)` | observe guest exports (e.g. Metal `reg`) |
  * | `MICROPY_WASM_STACK_SIZE` / `HEAP_SIZE` | WAMR instance sizing |
  *
- * Trust is an **X.509 root CA** and/or pinned leaf SPKI (`wasm.add_trust`).
- * Sign with `tools/wasm_sign.py gen-pki` + `sign --chain`; smoke:
- * `make -C examples test-signed`.
+ * Trust is **host-scoped** (root CA / pinned SPKI). Prefer baking public
+ * root DER(s) at image build (zlib ROM, lazy inflate on first verify):
+ * `MICROPY_WASM_TRUST_CA="a.der b.der"` (see `tools/wasmmod.py embed-ca`).
+ * No bake and no `add_trust` → signed loads fail under `VERIFY=1`.
+ * Ports may also `#define MICROPY_WASM_TRUST_BOOT()` to `mp_wasm_trust_add`
+ * flash/ROM bytes (runs from `mp_wasm_trust_ensure`). Runtime
+ * `wasm.add_trust` remains; `trust_clear` disarms baked auto-reload.
+ * Signing is **per pack** (`gen-pki` → `.keys/trust` + `.keys/sign`, then
+ * `sign --chain`). Smoke: `make -C examples test-signed`.
  *
  * Defaults: POSIX HTTP(S) in `fetch.c` when `MICROPY_WASM_HTTP_NATIVE=1`;
  * VFS via `mp_reader`; verify via mbedtls when `MICROPY_WASM_VERIFY!=0`.

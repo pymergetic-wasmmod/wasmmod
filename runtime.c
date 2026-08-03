@@ -34,7 +34,6 @@
 
 #if MICROPY_PY_WASM
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "extmod/wasmmod/forward.h"
@@ -58,15 +57,7 @@ bool mp_wasm_host_register(void);
 // Port hooks: override in mpconfigport.h to plug a custom allocator or
 // to observe exports (e.g. a host registry). Defaults keep this module
 // usable on plain unix MicroPython with no host glue.
-#ifndef MICROPY_WASM_MALLOC
-#define MICROPY_WASM_MALLOC(n) malloc(n)
-#endif
-#ifndef MICROPY_WASM_REALLOC
-#define MICROPY_WASM_REALLOC(p, n) realloc((p), (n))
-#endif
-#ifndef MICROPY_WASM_FREE
-#define MICROPY_WASM_FREE(p) free(p)
-#endif
+#include "extmod/wasmmod/alloc.h"
 #ifndef MICROPY_WASM_EXPORT_PUBLISH
 #define MICROPY_WASM_EXPORT_PUBLISH(module_name, export_name, fn_ptr) ((void)0)
 #endif
