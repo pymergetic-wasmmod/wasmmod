@@ -85,22 +85,21 @@ Type "help()" for more information.
 …  select            websocket
 …  socket
 Plus any modules on the filesystem
->>> import hello
->>> hasattr(hello, "greet")        # before hook: empty hello/ dir package
+>>> import hello                   # succeeds as empty hello/ dir package (cached)
+>>> hasattr(hello, "greet")
 False
 >>> import wasm
 >>> wasm.install_hook()
->>> del sys.modules["hello"]       # drop the stale empty module
->>> import hello, mixed, bridge    # hook → hello/hello.wasm on sys.path
+>>> del sys.modules["hello"]       # clear cache so re-import hits the hook
+>>> import hello, mixed, bridge    # hook → hello/hello.wasm
 >>> hasattr(hello, "greet")
 True
 >>> hello.greet()
 'hello from pack py'
 >>> bridge.via_rs(6)
 36
->>> bridge.via_hello()
-42
 ```
+
 
 **FQN → file:** `import a.b` searches `wasm.path` then `sys.path` (dots → `/`):
 
