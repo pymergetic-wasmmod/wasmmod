@@ -189,7 +189,8 @@ endif()
 Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).  
 Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`.
 
-Optional host trampoline (metalpython): `tools/wasmmod.py` → `extmod/wasmmod/tools/wasmmod.py`.
+Optional host trampoline (metalpython): `tools/wasmmod.py` → `extmod/wasmmod/tools/wasmmod.py`.  
+MetalPython keeps a clean upy-shaped `wasmmod` branch (PR candidate) under product `master` — see that repo’s [`BRANCHES.md`](https://github.com/pymergetic/metalpython/blob/wasmmod/BRANCHES.md).
 
 ---
 
