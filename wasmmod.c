@@ -46,6 +46,7 @@
 #include "extmod/wasmmod/fetch.h"
 #include "extmod/wasmmod/finder.h"
 #include "extmod/wasmmod/host.h"
+#include "extmod/wasmmod/io.h"
 #include "extmod/wasmmod/pack.h"
 #include "extmod/wasmmod/runtime.h"
 #include "extmod/wasmmod/verify.h"
@@ -1018,8 +1019,8 @@ static mp_obj_t mod_wasm_import_hook(size_t n_args, const mp_obj_t *args) {
             return mp_call_function_n_kw(prev, n_args, 0, args);
         }
 
-        // Prefer a real leaf pack on wasm.path (cheap stats) over an empty
-        // same-named directory. Namespace listdir + sys.path packs: ImportError path.
+        // Prefer packs on wasm.path (VFS or HTTP) over a same-named empty directory
+    // on sys.path. Namespace listdir + sys.path packs: ImportError path.
         vstr_t path;
         if (mp_wasm_find_pack_on_wasm_path(name, &path)) {
             vstr_clear(&path);
@@ -1067,7 +1068,70 @@ static mp_obj_t mod_wasm_import_hook(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_import_hook_obj, 1, 5, mod_wasm_import_hook);
 
-static mp_obj_t mod_wasm_install_hook(void) {
+static void wasm_path_append_unique(const char *root) {
+    mp_wasm_path_ensure();
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_list_get(MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_wasm_path_obj)), &n, &items);
+    for (size_t i = 0; i < n; ++i) {
+        if (!mp_obj_is_str(items[i])) {
+            continue;
+        }
+        const char *existing = mp_obj_str_get_str(items[i]);
+        if (strcmp(existing, root) == 0) {
+            return;
+        }
+        // Treat "http://h/packs" and "http://h/packs/" as the same root.
+        size_t elen = strlen(existing);
+        size_t rlen = strlen(root);
+        if (elen > 0 && existing[elen - 1] == '/' && elen == rlen + 1
+            && strncmp(existing, root, rlen) == 0) {
+            return;
+        }
+        if (rlen > 0 && root[rlen - 1] == '/' && rlen == elen + 1
+            && strncmp(root, existing, elen) == 0) {
+            return;
+        }
+    }
+    mp_obj_list_append(MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_wasm_path_obj)),
+        mp_obj_new_str(root, strlen(root)));
+}
+
+// wasm.verify() → bool; wasm.verify(False) → session gate for all loads (VFS+HTTP).
+static mp_obj_t mod_wasm_verify(size_t n_args, const mp_obj_t *args) {
+    if (n_args == 0) {
+        return mp_obj_new_bool(mp_wasm_get_verify_enabled());
+    }
+    mp_wasm_set_verify_enabled(mp_obj_is_true(args[0]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_verify_obj, 0, 1, mod_wasm_verify);
+
+static mp_obj_t mod_wasm_install_hook(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_url };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_url, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    if (args[ARG_url].u_obj != mp_const_none) {
+        const char *url = mp_obj_str_get_str(args[ARG_url].u_obj);
+        if (!mp_wasm_uri_is_http(url)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("install_hook: url must be http(s)"));
+        }
+        // Normalize trailing slash for URL roots.
+        size_t len = strlen(url);
+        vstr_t root;
+        vstr_init(&root, len + 2);
+        vstr_add_strn(&root, url, len);
+        if (root.len == 0 || root.buf[root.len - 1] != '/') {
+            vstr_add_char(&root, '/');
+        }
+        wasm_path_append_unique(vstr_null_terminated_str(&root));
+        vstr_clear(&root);
+    }
+
     #if !MICROPY_CAN_OVERRIDE_BUILTINS
     mp_raise_NotImplementedError(MP_ERROR_TEXT("wasm.install_hook requires MICROPY_CAN_OVERRIDE_BUILTINS"));
     #else
@@ -1082,7 +1146,7 @@ static mp_obj_t mod_wasm_install_hook(void) {
     return mp_const_none;
     #endif
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_install_hook_obj, mod_wasm_install_hook);
+static MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_install_hook_obj, 0, mod_wasm_install_hook);
 
 static mp_obj_t mod_wasm_uninstall_hook(void) {
     #if !MICROPY_CAN_OVERRIDE_BUILTINS
@@ -1347,6 +1411,8 @@ static mp_obj_t mod_wasm___init__(void) {
     MP_STATE_VM(mp_wasm_host_slots) = MP_OBJ_NULL;
     MP_STATE_VM(mp_wasm_handles) = MP_OBJ_NULL;
     wasm_import_hook_depth = 0;
+    mp_wasm_set_verify_enabled(true);
+    mp_wasm_io_set(NULL);
     mp_wasm_trust_clear();
     mp_wasm_host_clear_all();
     mp_wasm_mem_clear_all();
@@ -1364,6 +1430,7 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_path), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_path_obj)) },
     { MP_ROM_QSTR(MP_QSTR_arch), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_arch_obj)) },
     { MP_ROM_QSTR(MP_QSTR_VERIFY), MP_ROM_INT(MICROPY_WASM_VERIFY) },
+    { MP_ROM_QSTR(MP_QSTR_verify), MP_ROM_PTR(&mod_wasm_verify_obj) },
     { MP_ROM_QSTR(MP_QSTR_AOT), MP_ROM_INT(MICROPY_PY_WASM_AOT) },
     { MP_ROM_QSTR(MP_QSTR_JIT), MP_ROM_INT(MICROPY_PY_WASM_JIT) },
     { MP_ROM_QSTR(MP_QSTR_FAST_JIT), MP_ROM_INT(MICROPY_PY_WASM_FAST_JIT) },

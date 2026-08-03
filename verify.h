@@ -43,6 +43,11 @@ bool mp_wasm_trust_add(const uint8_t *key, size_t key_len);
 void mp_wasm_trust_clear(void);
 size_t mp_wasm_trust_count(void);
 
+// Runtime verify gate (default on). When false, mp_wasm_verify_bytes is a no-op.
+// Compile-time MICROPY_WASM_VERIFY==0 remains a full no-op regardless.
+void mp_wasm_set_verify_enabled(bool enabled);
+bool mp_wasm_get_verify_enabled(void);
+
 // Verify bytes before instantiate. path_hint may be NULL (bytes-only load).
 // On failure fills errbuf and returns false.
 bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_hint, char *errbuf, size_t errbuf_len);

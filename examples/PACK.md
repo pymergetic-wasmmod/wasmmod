@@ -302,8 +302,9 @@ Opt-in so normal `import sensor` hits packs without calling `import_wasm`:
 
 ```python
 import wasm
-wasm.path = ["/lib/wasm", "https://example.org/packs/"]
-wasm.install_hook()     # wrap builtins.__import__ (or gated C hook)
+wasm.verify(False)                       # session gate: all loads (VFS + HTTP)
+wasm.install_hook("https://example.org/packs/")  # optional URL root + import hook
+# wasm.path.append("/lib/wasm"); wasm.install_hook()
 
 import sensor           # finder runs; loads sensor/__init__.wasm if needed
 import sensor.drivers
@@ -311,6 +312,10 @@ from sensor import util # py child inside the pack — already natural
 
 wasm.uninstall_hook()   # restore previous __import__
 ```
+
+`wasm.verify()` returns the current flag; `wasm.VERIFY` is the compile-time
+`MICROPY_WASM_VERIFY` mode (0/1/2). Runtime `verify(False)` skips checks even
+when compile-time mode is on (unsigned smoke / local trees).
 
 Implementation options (pick smallest upstreamable one):
 
@@ -415,17 +420,26 @@ same — only the code engine behind the export changes.
 |--------|-----|
 | **VFS** | `open(path, "rb")` / `mp_reader` — same as today’s `wasm.load(path)` |
 | **memory** | `wasm.load(bytes)` |
-| **HTTP(S)** | `wasm.load("https://…/pkg.wasm")` or search roots that are URL prefixes; use existing `requests` / socket stack when present |
+| **HTTP(S)** | Default: native C client in `fetch.c`. Replace via `mp_wasm_io_ops_t` (`io.h` / [ports/PORT.md](../ports/PORT.md)) — Metal async-ready. |
 
-Search path (proposed):
+URL roots mirror the VFS layout. Candidate order matches local finder
+(AOT/arch tags → plain `.aot` → portable `.wasm`; tree then flat dotted names).
+HTTP roots are probed with a real HEAD/GET (only **200** counts); no directory listing.
 
 ```python
-wasm.path = ["/lib/wasm", "https://example.org/packs/"]
-wasm.import_wasm("hello")   # tries each root
+import wasm
+wasm.verify(True)                        # session gate (default on): VFS + HTTP
+wasm.install_hook("https://example.org/packs/")
+# or: wasm.path.append("https://example.org/packs/"); wasm.install_hook()
+import hello   # GET …/packs/hello.wasm (then …/hello.wasm.sig if verifying)
 ```
 
-Ports may replace the fetcher with a hook (`MICROPY_WASM_FETCH(url) -> bytes`)
-to supply a custom HTTP / VFS stack without forking the loader.
+Detached `{artifact}.sig` is fetched the same way over HTTP as on VFS.
+`wasm.verify(False)` disables signature checks for the session (compile-time
+`MICROPY_WASM_VERIFY=0` is always a no-op). Smoke:
+`make -C examples test-http` (unsigned; uses `wasm.verify(False)`).
+
+Ports replace I/O with `mp_wasm_io_set` / `MICROPY_WASM_IO_OPS` (see [ports/PORT.md](../ports/PORT.md)).
 
 ## Signature verification (mbedtls)
 
@@ -435,9 +449,9 @@ enabled, packs may be distributed as **signed blobs**. Goal: verify
 
 ### Proposed distribution shapes
 
-1. **Detached signature** (simplest for VFS):
+1. **Detached signature** (simplest for VFS / HTTP):
    - `hello.wasm`
-   - `hello.wasmmod.sig` (raw signature bytes) + trust store of public keys
+   - `hello.wasm.sig` (raw signature bytes) + trust store of public keys
 2. **Envelope** (better for HTTP):
    - custom section `wasmmod.sig` on the wasm, or
    - outer container: `magic | pubkey_id | sig | wasm_bytes`
@@ -716,13 +730,15 @@ Low-level escape remains: `WasmModule.call("export", ...)`.
 
 ## Port hooks (host; not in the pack bytes)
 
-Keep optional and boring for upstream:
+Keep optional and boring for upstream. Full contract: [ports/PORT.md](../ports/PORT.md).
 
 | Hook | Role |
 |------|------|
+| `mp_wasm_io_ops_t` / `mp_wasm_io_set` | Preferred — replace HTTP fetch/probe (+ yield); Metal async→sync here |
+| `MICROPY_WASM_IO_OPS` | Compile-time default ops table |
 | `MICROPY_WASM_MALLOC` / `FREE` | instance allocator |
-| `MICROPY_WASM_FETCH(uri)` | VFS/HTTP (or custom) → bytes |
-| `MICROPY_WASM_VERIFY(bytes, sig)` | signature check; default mbedtls when enabled |
+| `MICROPY_WASM_FETCH(uri)` | Legacy bool shim (prefer I/O ops) |
+| `MICROPY_WASM_VERIFY_HOOK(bytes, sig)` | signature check; default mbedtls when enabled |
 | `MICROPY_WASM_EXPORT_PUBLISH(mod, func, ptr)` | optional observe/publish hook for ports |
 | host native table | implements `wasmmod.host.*` imports |
 
@@ -770,8 +786,8 @@ enable with `make MICROPY_PY_WASM=1`.
 ### PR hygiene
 
 - Feature entirely behind `MICROPY_PY_WASM` (default off).
-- Port hooks stay weak/`#ifndef` defaults (`MALLOC`, `FETCH`, `VERIFY`,
-  `EXPORT_PUBLISH`).
+- Port hooks stay weak/`#ifndef` / ops-table defaults (`IO_OPS`, `MALLOC`,
+  `VERIFY_HOOK`, `EXPORT_PUBLISH`) — see `ports/PORT.md`.
 - Python bytecode selection stays in the **port** loader (upy vs cpy); shared
   code only parses the pack and runs WAMR.
 

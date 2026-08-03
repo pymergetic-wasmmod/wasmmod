@@ -53,6 +53,17 @@ typedef struct mp_wasm_trust_key_t {
 static mp_wasm_trust_key_t *trust_keys;
 static size_t trust_n;
 
+// Default on; wasm.verify(False) disables for the session (all loads).
+static bool verify_runtime_enabled = true;
+
+void mp_wasm_set_verify_enabled(bool enabled) {
+    verify_runtime_enabled = enabled;
+}
+
+bool mp_wasm_get_verify_enabled(void) {
+    return verify_runtime_enabled;
+}
+
 bool mp_wasm_trust_add(const uint8_t *key, size_t key_len) {
     if (key == NULL || key_len == 0) {
         return false;
@@ -100,7 +111,7 @@ size_t mp_wasm_trust_count(void) {
 #endif
 
 static bool load_detached_sig(const char *path_hint, vstr_t *sig_out) {
-    if (path_hint == NULL || mp_wasm_uri_is_http(path_hint)) {
+    if (path_hint == NULL) {
         return false;
     }
     vstr_t sig_path;
@@ -158,6 +169,9 @@ static bool verify_with_trust(const uint8_t *bytes, uint32_t len, const uint8_t 
 }
 
 bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_hint, char *errbuf, size_t errbuf_len) {
+    if (!verify_runtime_enabled) {
+        return true;
+    }
     if (bytes == NULL || len == 0) {
         if (errbuf && errbuf_len) {
             snprintf(errbuf, errbuf_len, "verify: empty");
@@ -211,6 +225,7 @@ bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_h
     (void)path_hint;
     (void)errbuf;
     (void)errbuf_len;
+    (void)verify_runtime_enabled; // still settable; compile-time off = always allow
     return true;
 }
 

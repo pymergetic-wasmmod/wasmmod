@@ -82,8 +82,16 @@ static bool try_vfs_file(const char *root, const char *rel, vstr_t *path_out) {
 }
 
 static bool try_url_candidate(const char *root, const char *rel, vstr_t *path_out) {
-    mp_wasm_join_uri(root, rel, path_out);
-    return true;
+    vstr_t url;
+    mp_wasm_join_uri(root, rel, &url);
+    const char *curi = vstr_null_terminated_str(&url);
+    bool ok = mp_wasm_http_probe(curi);
+    if (ok) {
+        vstr_init(path_out, url.len + 1);
+        vstr_add_strn(path_out, url.buf, url.len);
+    }
+    vstr_clear(&url);
+    return ok;
 }
 
 // Try stem + optional ".<arch>" + ext under root (VFS or URL).
@@ -235,7 +243,8 @@ bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out) {
     return false;
 }
 
-// Import-hook pre-check: only wasm.path (keep sys.path packs on ImportError fallback).
+// Import-hook prefer-path: wasm.path only (VFS + HTTP). Packs beat a
+// same-named empty dir on cwd/sys.path; sys.path pack roots stay on ImportError.
 bool mp_wasm_find_pack_on_wasm_path(const char *dotted_name, vstr_t *path_out) {
     if (dotted_name == NULL || dotted_name[0] == '\0') {
         return false;

@@ -95,6 +95,10 @@ Plus any modules on the filesystem
 36
 ```
 
+HTTP roots use the same static layout (native C GET). Example:
+`wasm.verify(False); wasm.install_hook("http://host/packs/")` then `import hello`.
+See `make -C examples test-http`.
+
 **FQN → file:** `import a.b.c` searches `wasm.path` then `sys.path`. A pack can sit at any depth; if only the leaf file exists, missing parents are thin namespace packages (PEP 420-ish) so `a.b.c` stays attribute-reachable. VFS pack roots are scanned so `import a` / `a.b` work when children exist (flat `a.b.c.wasm` or tree `a/b/…`).
 
 Path form (dots → `/`): `a/b/c/__init__.wasm` · `a/b/c.wasm`  
@@ -114,8 +118,8 @@ make -C examples repl    # interactive — type it yourself
 ```
 wasmmod/
 ├── pack.*  runtime.*  forward.*  verify.*   portable core
-├── fetch.*  wasmmod.c  finder.*  host.*     MicroPython host
-├── ports/micropython/                       make / cmake / mpconfig
+├── fetch.*  io.h  wasmmod.c  finder.*  host.*  MicroPython host
+├── ports/                                   make / cmake / mpconfig / PORT.md
 ├── tools/wasm_{pack,sign}.py                host-agnostic CLIs
 ├── examples/                                sources + packs/ + call matrix
 │   └── packs/                               built <name>.wasm artifacts
@@ -124,7 +128,7 @@ wasmmod/
 └── third_party/wamr                         WAMR (Apache-2.0)
 ```
 
-Pack sections are named `wasmmod.pack` / `wasmmod.imports` / `wasmmod.host` / `wasmmod.sig` — see [docs/PACK.md](docs/PACK.md).
+Pack sections are named `wasmmod.pack` / `wasmmod.imports` / `wasmmod.host` / `wasmmod.sig` — see [docs/PACK.md](docs/PACK.md). Host I/O replaceability (Metal async): [ports/PORT.md](ports/PORT.md).
 
 ```mermaid
 flowchart LR

@@ -31,7 +31,7 @@ PACK_WASMS = \
 	packs/mixed.wasm \
 	packs/bridge.wasm
 
-.PHONY: all clean test test-aot test-fast-jit test-jit test-engines demo repl \
+.PHONY: all clean test test-aot test-fast-jit test-jit test-engines test-http demo repl \
 	packs aot-packs wamrc host host-aot host-fast-jit host-jit
 
 packs:
@@ -90,6 +90,21 @@ repl: packs host
 # Default smoke: interpreter (no AOT/JIT).
 test: packs host
 	$(MPY_INTERP) $(CURDIR)/run_matrix.py
+
+# Static HTTP pack root (native C fetch). Serves packs/ as document root.
+test-http: packs host
+	@set -e; \
+	portfile=$$(mktemp); \
+	python3 $(CURDIR)/tools/pack_http_server.py --dir $(CURDIR)/packs --port 0 --write-port $$portfile & \
+	spid=$$!; \
+	trap 'kill $$spid 2>/dev/null || true; rm -f $$portfile' EXIT; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		[ -s $$portfile ] && break; \
+		sleep 0.1; \
+	done; \
+	port=$$(cat $$portfile); \
+	echo "HTTP pack root http://127.0.0.1:$$port/"; \
+	HTTP_PACK_ROOT=http://127.0.0.1:$$port/ $(MPY_INTERP) $(CURDIR)/run_http.py
 
 test-aot: aot-packs host-aot
 	$(MPY_AOT) $(CURDIR)/run_matrix.py

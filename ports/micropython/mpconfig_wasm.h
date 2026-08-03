@@ -65,4 +65,7 @@
 #define MICROPY_WASM_PACK_ARCH ""
 #endif
 
+// Replaceable host I/O / alloc / verify — see extmod/wasmmod/ports/PORT.md
+// and extmod/wasmmod/io.h (mp_wasm_io_ops_t, mp_wasm_io_set).
+
 #endif // MICROPY_INCLUDED_WASMMOD_MPCONFIG_WASM_H

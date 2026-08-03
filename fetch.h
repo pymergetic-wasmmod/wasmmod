@@ -32,9 +32,12 @@
 
 #include "py/misc.h"
 
-// Fetch URI into *out (vstr). Supports VFS paths; http(s) via MICROPY_WASM_FETCH
-// port hook when provided.
+// Fetch URI into *out (vstr). Order: port I/O ops → legacy MICROPY_WASM_FETCH
+// → native HTTP (if http(s)) → VFS. See io.h / ports/PORT.md for Metal.
 bool mp_wasm_fetch(const char *uri, vstr_t *out, char *errbuf, size_t errbuf_len);
+
+// True if http(s) URI responds with 200. Uses ops->probe (or fetch), else native.
+bool mp_wasm_http_probe(const char *uri);
 
 bool mp_wasm_uri_is_http(const char *uri);
 
