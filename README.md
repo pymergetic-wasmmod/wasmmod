@@ -85,9 +85,15 @@ Type "help()" for more information.
 …  select            websocket
 …  socket
 Plus any modules on the filesystem
+>>> import hello
+>>> hasattr(hello, "greet")        # before hook: empty hello/ dir package
+False
 >>> import wasm
 >>> wasm.install_hook()
->>> import hello, mixed, bridge   # auto: hello/hello.wasm on sys.path
+>>> del sys.modules["hello"]       # drop the stale empty module
+>>> import hello, mixed, bridge    # hook → hello/hello.wasm on sys.path
+>>> hasattr(hello, "greet")
+True
 >>> hello.greet()
 'hello from pack py'
 >>> bridge.via_rs(6)
@@ -96,6 +102,13 @@ Plus any modules on the filesystem
 42
 ```
 
+**FQN → file:** `import a.b` searches `wasm.path` then `sys.path` (dots → `/`):
+
+1. `a/b/__init__.wasm` (package)
+2. `a/b/b.wasm` (dir + same-named file — example layout)
+3. `a/b.wasm` (module)
+
+First hit wins. Nested names inside a pack (`hello.util`) come from the pack’s embedded Python after the root `.wasm` is loaded — not a second file. Override roots with `wasm.path`. Explicit path: `wasm.load_pack("…/foo.wasm", "foo")`.
 
 ```bash
 make -C examples demo    # real REPL: micropython -i < demo_readme.py
