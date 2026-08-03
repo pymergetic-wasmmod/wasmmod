@@ -1,26 +1,157 @@
 # wasmmod
 
-Guest WASM pack loader for Python runtimes — load signed `.wasm` packs via
-[WAMR](https://github.com/bytecodealliance/wasm-micro-runtime), with a
-MicroPython host first and a path to CPython.
+**Signed WASM packs for Python.**  
+One `.wasm` file can ship **C + Rust + embedded Python**, talk to peer packs, and call back into the host — loaded by [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) through a small MicroPython `wasm` module (CPython path planned).
 
-**Status:** extracted from metalpython / MicroPython `extmod/wasmmod`. Layout is
-drop-in for a git submodule at `extmod/wasmmod`
-(`#include "extmod/wasmmod/..."` unchanged).
+Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
+
+<!-- Eyecatch: drop PNGs into screenshots/ (see screenshots/SHOTLIST.md), then uncomment:
+
+<p align="center">
+  <img src="screenshots/matrix-table.png" alt="Call matrix table" width="720" />
+</p>
+<p align="center">
+  <img src="screenshots/engine-summary.png" alt="Engine summary" width="480" />
+  &nbsp;
+  <img src="screenshots/repl-demo.png" alt="Host REPL demo" width="480" />
+</p>
+
+-->
+
+---
+
+## Why it shows off
+
+| Superpower | What you get |
+|------------|----------------|
+| **Multi-impl packs** | C, Rust, and pack-local Python in one artifact |
+| **Guest → guest** | `bridge` imports `hello` / `mixed` without host glue per call |
+| **Guest → host → Py** | `wasmmod.host` slots, buffers, mem cookies, object handles |
+| **Engine matrix** | Interp · AOT · Fast JIT · LLVM JIT — same packs |
+
+```
+caller\callee | Py  | C   | RS
+--------------+-----+-----+----
+Py            |  ✓  |  ✓  |  ✓
+C             |  ✓  |  ✓  |  ✓
+RS            |  ✓  |  ✓  |  ✓
++ guest→guest, guest→host, rich i64/f32/f64 …
+```
+
+`make -C examples test-engines` → **57 cases × 4 engines**.
+
+---
+
+## Taste in three languages
+
+**Pack Python** calls a native export in the same `.wasm`:
+
+```python
+# hello/src/__init__.py
+def greet():
+    return "hello from pack py"
+
+def answer():
+    return hello()   # → C export in this pack
+```
+
+**C guest** imports peers + host with one macro:
+
+```c
+#include "../../guest.h"
+
+MP_WASM_IMPORT("hello", int, hello, void);
+MP_WASM_IMPORT("mixed", int, mixed_answer, void);
+MP_WASM_IMPORT("wasmmod.host", int, call_i32, int slot, int arg);
+
+int via_rs(int x)   { return rs_square(x); }   /* same-pack Rust */
+int via_hello(void) { return hello(); }        /* peer pack */
+int via_host(int x) { return call_i32(0, x); } /* host slot */
+```
+
+**Rust** freestanding export (linked into `mixed` / `bridge`):
+
+```rust
+#![no_std]
+
+#[no_mangle]
+pub extern "C" fn rs_answer() -> i32 { 7 }
+
+#[no_mangle]
+pub extern "C" fn rs_i64_answer(x: i64) -> i64 { x + 7 }
+```
+
+**Host** (MicroPython) — load once, `import` like any module:
+
+```text
+>>> import wasm
+>>> wasm.install_hook()
+>>> wasm.load_pack("hello/hello.wasm", "hello")
+>>> wasm.load_pack("mixed/mixed.wasm", "mixed")
+>>> wasm.load_pack("bridge/bridge.wasm", "bridge")
+>>> import hello, bridge, mixed
+>>> hello.greet()
+'hello from pack py'
+>>> hello.answer()           # pack Py → C
+42
+>>> mixed.mixed_answer()     # C shim → Rust
+42
+>>> bridge.via_rs(6)         # same-pack C → RS
+36
+>>> bridge.via_hello()       # guest → guest
+42
+>>> bridge.via_peer_hello()  # pack Py → peer C
+42
+```
+
+Or run the canned demo (good for screenshots):
+
+```bash
+make -C examples demo
+# or:  micropython examples/demo_readme.py
+```
+
+---
 
 ## Layout
 
-| Path | Role |
-|------|------|
-| `pack.*`, `runtime.*`, `forward.*`, `verify.*` | Portable core (pack format, WAMR load, guest→guest forwarders, trust) |
-| `fetch.*` | Byte loader (currently MicroPython reader-backed) |
-| `wasmmod.c`, `finder.*`, `host.*` | MicroPython host (`wasm` module, import hook, host slots/handles) |
-| `ports/micropython/` | Make/CMake fragments + optional `mpconfig_wasm.h` |
-| `ports/cpython/` | (planned) CPython extension glue — port picks `.pyc` / `.py` |
-| `docs/PACK.md` | Pack / imports section format |
-| `examples/` | Guest packs + call-matrix smoke (`hello`, `client`, `mixed`, `bridge`) |
-| `tools/` | Host-agnostic pack/sign CLIs (`wasm_pack.py`, `wasm_sign.py`) |
-| `third_party/wamr` | Nested [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) submodule |
+```
+wasmmod/
+├── pack.*  runtime.*  forward.*  verify.*   portable core
+├── fetch.*  wasmmod.c  finder.*  host.*     MicroPython host
+├── ports/micropython/                       make / cmake / mpconfig
+├── tools/wasm_{pack,sign}.py                host-agnostic CLIs
+├── examples/                                packs + call matrix
+├── screenshots/                             README eye-catchers
+├── docs/PACK.md                             section format
+└── third_party/wamr                         WAMR (Apache-2.0)
+```
+
+Pack sections are named `wasmmod.pack` / `wasmmod.imports` / `wasmmod.host` / `wasmmod.sig` — see [docs/PACK.md](docs/PACK.md).
+
+```mermaid
+flowchart LR
+  subgraph host [Host Python]
+    PY[import hello / bridge]
+    WM[wasm module]
+    HS[host slots / mem / handles]
+  end
+  subgraph packs [Signed .wasm packs]
+    H[hello<br/>Py+C]
+    M[mixed<br/>C+RS]
+    B[bridge<br/>Py+C+RS]
+  end
+  PY --> WM
+  WM --> H
+  WM --> M
+  WM --> B
+  B -->|guest→guest| H
+  B -->|guest→guest| M
+  B -->|wasmmod.host| HS
+  HS --> PY
+```
+
+---
 
 ## MicroPython integration
 
@@ -29,7 +160,7 @@ git submodule add https://github.com/pymergetic/wasmmod.git extmod/wasmmod
 git submodule update --init --recursive extmod/wasmmod
 ```
 
-Host tree only needs thin includes (no `py/mpconfig.h` / `mpconfigport.mk` edits):
+Host tree only needs thin includes (no `py/mpconfig.h` edits):
 
 ```make
 # extmod/extmod.mk
@@ -45,39 +176,45 @@ if(MICROPY_PY_WASM)
 endif()
 ```
 
-Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).
-Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`
-from a port `mpconfigport.h` — not required when using the make fragment.
+Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).  
+Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`.
 
-Optional host trampolines (metalpython): `tools/wasm_pack.py` / `tools/wasm_sign.py`
-→ `extmod/wasmmod/tools/…`.
+Optional host trampolines (metalpython): `tools/wasm_pack.py` / `tools/wasm_sign.py` → `extmod/wasmmod/tools/…`.
 
-## Build & test (unix host)
+---
 
-From the **host** MicroPython / metalpython tree (submodule already at
-`extmod/wasmmod`). Cold worktree once:
+## Build & test
+
+From the **host** MicroPython / metalpython tree:
 
 ```bash
 make -C ports/unix submodules
-make -C mpy-cross BUILD=build -j"$(nproc)"   # needed for pack freeze (.mpy)
+make -C mpy-cross BUILD=build -j"$(nproc)"   # pack freeze (.mpy)
+
+make -C extmod/wasmmod/examples test           # interp matrix
+make -C extmod/wasmmod/examples test-engines   # all engines
+make -C extmod/wasmmod/examples demo           # pretty REPL sample
 ```
 
-Then:
-
-```bash
-# Interpreter matrix (packs + build-wasm + run_matrix.py)
-make -C extmod/wasmmod/examples test
-
-# All engines: interp + AOT + Fast JIT (+ LLVM JIT if linkable)
-make -C extmod/wasmmod/examples test-engines
-
-# Same via metalpython symlink (if present)
-make -C examples/wasmmod test-engines
+```text
+Engine summary
+================================================================
+Engine       Result
+------------ ----------------
+Interp       PASS (57 cases OK)
+AOT          PASS (57 cases OK)
+Fast JIT     PASS (57 cases OK)
+LLVM JIT     PASS (57 cases OK)
+----------------------------------------------------------------
+4 passed, 0 failed, 0 skipped
+ALL ENGINES OK
 ```
 
-Details, manual smoke, and pack.toml notes: [examples/README.md](examples/README.md).
-Pack format: [docs/PACK.md](docs/PACK.md).
+Details: [examples/README.md](examples/README.md) · pack format: [docs/PACK.md](docs/PACK.md).
+
+---
 
 ## License
 
-MIT — Copyright (c) 2026 Rouven Raudzus <raudzus@pymergetic.com>
+MIT — Copyright (c) 2026 Rouven Raudzus \<raudzus@pymergetic.com\>  
+Nested `third_party/wamr` is **Apache-2.0** (Bytecode Alliance); see [LICENSE](LICENSE).

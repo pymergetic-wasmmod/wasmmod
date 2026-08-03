@@ -31,7 +31,7 @@ PACK_WASMS = \
 	mixed/mixed.wasm \
 	bridge/bridge.wasm
 
-.PHONY: all clean test test-aot test-fast-jit test-jit test-engines \
+.PHONY: all clean test test-aot test-fast-jit test-jit test-engines demo \
 	packs aot-packs wamrc host host-aot host-fast-jit host-jit
 
 packs:
@@ -75,6 +75,10 @@ host-fast-jit:
 
 host-jit:
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_PY_WASM_JIT=1 BUILD=build-wasm-jit
+
+# Pretty REPL sample for README / screenshots (needs packs + host).
+demo: packs host
+	$(MPY_INTERP) $(CURDIR)/demo_readme.py
 
 # Default smoke: interpreter (no AOT/JIT).
 test: packs host
