@@ -6,15 +6,7 @@ One `.wasm` file can ship **C + Rust + embedded Python**, talk to peer packs, an
 Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
 
 <p align="center">
-  <img src="screenshots/repl-demo.png" alt="Real MicroPython REPL — wasm builtin, load packs" width="720" />
-</p>
-
-<p align="center">
-  <img src="screenshots/matrix-table.png" alt="Same-pack call matrix — Py / C / RS" width="640" />
-</p>
-
-<p align="center">
-  <img src="screenshots/engine-summary.png" alt="Engine summary — Interp AOT Fast JIT LLVM JIT" width="480" />
+  <img src="screenshots/repl-demo.png" alt="Real MicroPython REPL — wasm builtin, load packs" width="780" />
 </p>
 
 ---
@@ -211,6 +203,27 @@ ALL ENGINES OK
 ```
 
 Details: [examples/README.md](examples/README.md) · pack format: [docs/PACK.md](docs/PACK.md).
+
+---
+
+## Preview
+
+More shots (click through for full size):
+
+<p align="center">
+  <a href="screenshots/pack-calls.png"><img src="screenshots/pack-calls.png" alt="Pack calls — Py / C / RS / guest→guest" width="260" /></a>
+  &nbsp;
+  <a href="screenshots/matrix-table.png"><img src="screenshots/matrix-table.png" alt="Same-pack call matrix" width="260" /></a>
+  &nbsp;
+  <a href="screenshots/engine-summary.png"><img src="screenshots/engine-summary.png" alt="Engine summary — 4/4 PASS" width="260" /></a>
+</p>
+
+| | |
+|---|---|
+| [`pack-calls.png`](screenshots/pack-calls.png) | Cross-lang pack calls |
+| [`matrix-table.png`](screenshots/matrix-table.png) | Same-pack Py ↔ C ↔ RS matrix |
+| [`engine-summary.png`](screenshots/engine-summary.png) | Interp · AOT · Fast JIT · LLVM JIT |
+| [`repl-demo.png`](screenshots/repl-demo.png) | Full MicroPython REPL (hero above) |
 
 ---
 
