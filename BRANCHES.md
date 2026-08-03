@@ -1,5 +1,9 @@
 # Host branches (MetalPython ↔ MicroPython)
 
+> **Experimental integration.** The `wasmmod` host branch is the clean PR track for
+> an alpha / default-off submodule. Do not treat the pin or glue as a stable
+> upstream contract until MicroPython (or a non-alpha wasmmod release) says so.
+
 [`pymergetic/metalpython`](https://github.com/pymergetic/metalpython) is a MicroPython
 fork that vendors this repo at `extmod/wasmmod`. We keep **two host branches** there
 because we cannot maintain two separate upy forks:

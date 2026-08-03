@@ -1,5 +1,9 @@
 # WASM guest modules
 
+> **Experimental** (`wasmmod` **v0.1.1-alpha**). These examples and the host
+> `wasm` module are pre-release: flags, pack contracts, and APIs may change.
+> See the [package README](../README.md) status note.
+
 Build freestanding guests and load them with MicroPython's optional `wasm`
 module (WAMR-backed, `MICROPY_PY_WASM=1`).
 

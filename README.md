@@ -2,6 +2,12 @@
 
 **v0.1.1-alpha** — signed WASM packs for Python.
 
+> **Experimental.** This is a pre-release (`-alpha`). APIs, pack layout, verify/HTTP
+> surfaces, and build flags may change without a stable compatibility promise.
+> Default-off on purpose (`MICROPY_PY_WASM=0`); treat enablement as an experiment
+> until a non-alpha release. Engine matrix and demos are exercised often, but the
+> surface is still moving fast.
+
 One `.wasm` file can ship **C + Rust + embedded Python**, talk to peer packs, and call back into the host — loaded by [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) through a small MicroPython `wasm` module (CPython path planned). Opt-in only (`MICROPY_PY_WASM=0` by default); host trees stay unchanged unless they include the submodule and turn the flag on.
 
 Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
