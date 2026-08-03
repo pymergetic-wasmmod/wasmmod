@@ -76,7 +76,7 @@ Python payload (default **source-only**):
 
 ```toml
 [python]
-mount = "py"
+# mount = "src"   # default (with native.dir); strip prefix in pack paths
 # freeze = true
 # keep_source = true
 # targets = [
@@ -104,7 +104,7 @@ make -C extmod/wasmmod/examples/bridge   # full matrix bridge
 # 2) Build unix MicroPython with the wasm loader
 make -C ports/unix MICROPY_PY_WASM=1 MICROPY_PY_BTREE=0 MICROPY_PY_FFI=0 BUILD=build-wasm
 
-# 3) Hello smoke (native + embedded py/, including nested hello.util)
+# 3) Hello smoke (native + embedded src/, including nested hello.util)
 ports/unix/build-wasm/micropython -c '
 import wasm
 m = wasm.load_pack("extmod/wasmmod/examples/hello/hello.wasm")
@@ -120,12 +120,12 @@ wasm.unload("hello")
 
 ```python
 import wasm
-wasm.host_set(0, lambda x: x * 2)   # slot for micropython.host.call_i32
+wasmmod.host_set(0, lambda x: x * 2)   # slot for wasmmod.host.call_i32
 wasm.load_pack("extmod/wasmmod/examples/hello/hello.wasm")
 wasm.load_pack("extmod/wasmmod/examples/mixed/mixed.wasm")
 b = wasm.load_pack("extmod/wasmmod/examples/bridge/bridge.wasm")
 print(b.via_host(7))   # → 14
-wasm.host_clear()
+wasmmod.host_clear()
 ```
 
 Requires `clang` and a `wasm-ld` (LLVM lld, wasi-sdk, or rustup's wasm-ld).

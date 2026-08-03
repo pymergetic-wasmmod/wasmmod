@@ -5,12 +5,8 @@ version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Py-callable bridge covering C/RS/host/peer + i64/f32/f64/mem/handles."
 
-[native]
-dir = "."
-sources = ["bridge.c", "lib.rs"]
-
+# Defaults: native.dir = "src", python.mount = "src".
 [python]
-mount = "py"
 keep_source = true
 # TESTING: all bytecode targets enabled (trim / set freeze=false later).
 freeze = true

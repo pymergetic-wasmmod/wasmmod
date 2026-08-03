@@ -48,6 +48,7 @@
 
 #include "extmod/wasmmod/forward.h"
 #include "extmod/wasmmod/host.h"
+#include "extmod/wasmmod/pack.h"
 #include "extmod/wasmmod/runtime.h"
 #include "wasm_export.h"
 
@@ -790,7 +791,7 @@ bool mp_wasm_host_register(void) {
     }
     host_slots_ensure();
     handles_ensure();
-    if (!wasm_runtime_register_natives("micropython.host", host_symbols,
+    if (!wasm_runtime_register_natives(MP_WASM_HOST_MODULE, host_symbols,
             sizeof(host_symbols) / sizeof(host_symbols[0]))) {
         return false;
     }

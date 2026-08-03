@@ -1,4 +1,4 @@
-"""Stubs for the hello.wasm pack (native + embedded py/)."""
+"""Stubs for the hello.wasm pack (native + embedded src/)."""
 
 from typing import Any
 

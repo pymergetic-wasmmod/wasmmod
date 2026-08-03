@@ -25,11 +25,11 @@
 # THE SOFTWARE.
 """
 Build a freestanding Wasm guest and optionally append a MicroPython pack
-section (`micropython.pack`). See examples/PACK.md (this repo).
+section (`wasmmod.pack`). See examples/PACK.md (this repo).
 
 Examples:
   tools/wasm_pack.py hello.c -o hello.wasm --export hello --export add
-  tools/wasm_pack.py hello.c -o hello.wasm --name hello --mount py \\
+  tools/wasm_pack.py hello.c -o hello.wasm --name hello --mount src \\
       --export hello --export add
   tools/wasm_pack.py examples/hello -o hello.wasm
   tools/wasm_pack.py examples/hello/pack.toml -o hello.wasm
@@ -45,8 +45,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-SECTION_NAME = "micropython.pack"
-IMPORTS_SECTION = "micropython.imports"
+SECTION_NAME = "wasmmod.pack"
+IMPORTS_SECTION = "wasmmod.imports"
 MAGIC = b"MPWP"
 IMPORTS_MAGIC = b"MPWI"
 PACK_VERSION_V1 = 1
@@ -62,6 +62,33 @@ SIG_AUTO = 255
 C_EXTS = {".c"}
 CXX_EXTS = {".cc", ".cpp", ".cxx", ".C"}
 RS_EXTS = {".rs"}
+NATIVE_EXTS = C_EXTS | CXX_EXTS | RS_EXTS
+
+# Default pack layout: one src/ tree (Python module paths + co-located natives).
+DEFAULT_SRC_DIR = "src"
+
+# Skip when embedding mount trees (natives are linked, not packed as files).
+EMBED_SKIP_NAMES = frozenset(
+    {
+        "pack.toml",
+        "Makefile",
+        "CMakeLists.txt",
+        ".gitignore",
+    }
+)
+EMBED_SKIP_SUFFIXES = frozenset(
+    {
+        ".wasm",
+        ".aot",
+        ".mpack",
+        ".sig",
+        ".o",
+        ".obj",
+        ".md",
+        ".toml",
+        ".pyi",
+    }
+)
 
 # Host-tagged bytecode targets (see docs/PACK.md).
 DEFAULT_PYTHON_TARGETS = (
@@ -71,6 +98,35 @@ DEFAULT_PYTHON_TARGETS = (
     "cpy:cp313",
     "cpy:cp314",
 )
+
+
+def is_native_source(path: Path) -> bool:
+    return path.suffix in NATIVE_EXTS
+
+
+def should_embed_file(path: Path) -> bool:
+    """True if path belongs in wasmmod.pack (not native/build noise)."""
+    name = path.name
+    if name.startswith("."):
+        return False
+    if name in EMBED_SKIP_NAMES:
+        return False
+    if path.suffix in EMBED_SKIP_SUFFIXES:
+        return False
+    if is_native_source(path):
+        return False
+    return True
+
+
+def collect_native_sources(dir_path: Path) -> list[str]:
+    """Recurse for C/C++/Rust under dir_path (co-located with Python ok)."""
+    out: list[str] = []
+    if not dir_path.is_dir():
+        return out
+    for p in sorted(dir_path.rglob("*")):
+        if p.is_file() and is_native_source(p):
+            out.append(str(p.resolve()))
+    return out
 
 def sig_tag(sig: str | None) -> int:
     """Map pack.toml sig strings to binder tags.
@@ -401,7 +457,7 @@ def collect_mounts(
         if not root.is_dir():
             raise SystemExit(f"wasm_pack: --mount not a directory: {root}")
         for path in sorted(root.rglob("*")):
-            if not path.is_file():
+            if not path.is_file() or not should_embed_file(path):
                 continue
             rel = path.relative_to(root).as_posix()
             if rel.startswith("../") or "/../" in f"/{rel}/":
@@ -572,7 +628,12 @@ def compile_wasm(sources: list[str], out: Path, exports: list[str], opt: str) ->
     objs: list[Path] = []
     try:
         for src in src_paths:
-            obj = out.with_name(f".{out.stem}.{src.stem}{src.suffix}.o")
+            try:
+                rel = src.resolve().relative_to(out.parent.resolve())
+            except ValueError:
+                rel = Path(src.name)
+            tag = str(rel).replace("/", "__").replace("\\", "__")
+            obj = out.with_name(f".{out.stem}.{tag}.o")
             compile_to_obj(src, obj, opt)
             objs.append(obj)
         if wasm_ld:
@@ -648,17 +709,15 @@ def manifest_to_build(
                 raise SystemExit(f"wasm_pack: source not found: {p}")
             sources.append(str(p))
     else:
-        ndir = native.get("dir", "native")
+        ndir = native.get("dir", DEFAULT_SRC_DIR)
         if not isinstance(ndir, str):
             raise SystemExit("wasm_pack: native.dir must be a string")
         d = (root / ndir).resolve()
-        if d.is_dir():
-            for ext in ("*.c", "*.cc", "*.cpp", "*.cxx", "*.rs"):
-                for p in sorted(d.glob(ext)):
-                    sources.append(str(p))
+        sources = collect_native_sources(d)
         if not sources:
             raise SystemExit(
-                f"wasm_pack: no native sources (set native.sources or put .c/.cpp/.rs under {ndir}/)"
+                f"wasm_pack: no native sources (set native.sources or put "
+                f".c/.cpp/.rs under {ndir}/, nested ok)"
             )
 
     link_exports: list[str] = []
@@ -702,7 +761,7 @@ def manifest_to_build(
 
     mounts: list[Path] = []
     py = data.get("python") or {}
-    mount = py.get("mount", "py")
+    mount = py.get("mount", DEFAULT_SRC_DIR)
     if isinstance(mount, str) and mount:
         m = (root / mount).resolve()
         if m.is_dir():
@@ -749,13 +808,13 @@ def main() -> int:
     ap.add_argument("-o", "--output", required=True, help="Output .wasm path")
     ap.add_argument("--export", action="append", default=[], help="Export symbol (repeatable)")
     ap.add_argument("-O", default="2", help="Optimization level (default 2)")
-    ap.add_argument("--name", help="Package name for micropython.pack (default: output stem)")
+    ap.add_argument("--name", help="Package name for wasmmod.pack (default: output stem)")
     ap.add_argument(
         "--mount",
         action="append",
         default=[],
         type=Path,
-        help="Directory of .py/.mpy/assets to embed (repeatable)",
+        help="Directory of .py/.mpy/assets to embed (repeatable; default from pack.toml: src/)",
     )
     ap.add_argument(
         "--freeze",
@@ -784,14 +843,14 @@ def main() -> int:
     ap.add_argument(
         "--no-pack-section",
         action="store_true",
-        help="Do not append micropython.pack even if --mount/--name given",
+        help="Do not append wasmmod.pack even if --mount/--name given",
     )
     ap.add_argument(
         "--write-mpack",
         nargs="?",
         const="",
         default=None,
-        help="Write raw micropython.pack payload to PATH (default: <out>.mpack)",
+        help="Write raw wasmmod.pack payload to PATH (default: <out>.mpack)",
     )
     ap.add_argument(
         "--aot",
@@ -936,7 +995,7 @@ def main() -> int:
         mpack_path = Path(args.write_mpack) if args.write_mpack else out.with_suffix(".mpack")
         payload = extract_custom_section(raw, SECTION_NAME)
         if payload is None:
-            raise SystemExit("wasm_pack: no micropython.pack section to write")
+            raise SystemExit("wasm_pack: no wasmmod.pack section to write")
         mpack_path.write_bytes(payload)
         print(f"wrote {mpack_path} ({len(payload)}B)", file=sys.stderr)
 

@@ -36,7 +36,7 @@
 #define MICROPY_PY_WASM_MATRIX (0)
 #endif
 
-// Register WAMR natives for module "micropython.host" (idempotent).
+// Register WAMR natives for module "wasmmod.host".
 bool mp_wasm_host_register(void);
 
 // ---- Callable slots (guest → Python) ----

@@ -37,7 +37,7 @@ void mp_wasm_registry_add(mp_wasm_module_t *mod);
 void mp_wasm_registry_remove(mp_wasm_module_t *mod);
 mp_wasm_module_t *mp_wasm_registry_find(const char *name);
 
-// Read micropython.imports (+ Wasm import types) and register forwarder natives.
+// Read wasmmod.imports (+ Wasm import types) and register forwarder natives.
 // Must run after wasm_runtime_load and before instantiate. Idempotent per (module,func).
 bool mp_wasm_register_forwarders(const uint8_t *wasm, uint32_t len, char *errbuf, size_t errbuf_len);
 

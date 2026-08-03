@@ -26,7 +26,7 @@
 
 /* Guest that imports hello.hello from another pack (guest→guest forwarder). */
 
-#include "../guest.h"
+#include "../../guest.h"
 
 MP_WASM_IMPORT("hello", int, hello, void);
 

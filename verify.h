@@ -33,7 +33,7 @@
 // MICROPY_WASM_VERIFY:
 //   0 = off (default)
 //   1 = require a valid signature for every load
-//   2 = verify when .sig / micropython.sig present; otherwise allow
+//   2 = verify when .sig / wasmmod.sig present; otherwise allow
 #ifndef MICROPY_WASM_VERIFY
 #define MICROPY_WASM_VERIFY (0)
 #endif

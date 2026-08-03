@@ -1,13 +1,11 @@
-# Depends on the hello pack at runtime (guest→guest via micropython.imports).
+# Depends on the hello pack at runtime (guest→guest via wasmmod.imports).
 type = "package"
 name = "client"
 version = "0.1.0"
 impl = ["c"]
 comment = "Calls hello.hello through a Wasm import forwarder."
 
-[native]
-dir = "."
-sources = ["client.c"]
+# Defaults: native.dir = "src" (src/client.c).
 
 [lifecycle]
 load = "mp_pack_load"

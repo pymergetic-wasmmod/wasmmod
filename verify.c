@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "extmod/wasmmod/pack.h"
 #include "extmod/wasmmod/verify.h"
 
 #ifndef MICROPY_WASM_MALLOC
@@ -42,8 +43,6 @@
 #ifndef MICROPY_WASM_FREE
 #define MICROPY_WASM_FREE(p) free(p)
 #endif
-
-#define MP_WASM_SIG_SECTION "micropython.sig"
 
 typedef struct mp_wasm_trust_key_t {
     struct mp_wasm_trust_key_t *next;

@@ -154,7 +154,7 @@ bool mp_wasm_runtime_init(void) {
     if (!wasm_runtime_full_init(&init)) {
         return false;
     }
-    // Guest→host imports (micropython.host.*) before any module instantiate.
+    // Guest→host imports (wasmmod.host.*) before any module instantiate.
     if (!mp_wasm_host_register()) {
         wasm_runtime_destroy();
         return false;

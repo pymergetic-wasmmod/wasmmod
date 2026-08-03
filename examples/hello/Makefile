@@ -12,7 +12,7 @@ OUT = hello.wasm
 
 all: $(OUT)
 
-$(OUT): hello.c py/__init__.py py/util/__init__.py py/util/extra.py pack.toml $(WASM_PACK)
+$(OUT): src/hello.c src/__init__.py src/util/__init__.py src/util/extra.py pack.toml $(WASM_PACK)
 	python3 $(WASM_PACK) . -o $(OUT)
 
 clean:

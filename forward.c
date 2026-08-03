@@ -561,7 +561,7 @@ bool mp_wasm_register_forwarders(const uint8_t *wasm, uint32_t len, char *errbuf
     memset(&info, 0, sizeof(info));
     if (!mp_wasm_imports_parse(payload, payload_len, &info)) {
         if (errbuf && errbuf_len) {
-            snprintf(errbuf, errbuf_len, "bad micropython.imports section");
+            snprintf(errbuf, errbuf_len, "bad wasmmod.imports section");
         }
         return false;
     }

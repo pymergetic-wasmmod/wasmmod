@@ -86,7 +86,7 @@ unsafe extern "C" {
 }
 
 // Guest→host
-#[link(wasm_import_module = "micropython.host")]
+#[link(wasm_import_module = "wasmmod.host")]
 unsafe extern "C" {
     fn call_i32(slot: i32, arg: i32) -> i32;
     fn call_i64(slot: i32, arg: i64) -> i64;

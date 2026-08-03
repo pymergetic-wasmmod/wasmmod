@@ -46,7 +46,7 @@
  * Declare a Wasm import. `fn` is both the C symbol and the import field name.
  *
  *   MP_WASM_IMPORT("hello", int, hello, void);
- *   MP_WASM_IMPORT("micropython.host", int, call_i32, int slot, int arg);
+ *   MP_WASM_IMPORT("wasmmod.host", int, call_i32, int slot, int arg);
  */
 #define MP_WASM_IMPORT(module, ret, fn, ...) \
     MP_WASM_IMPORT_ATTR(module, #fn) ret fn(__VA_ARGS__)
@@ -54,7 +54,7 @@
 /**
  * Like MP_WASM_IMPORT, but C symbol differs from the Wasm import field name.
  *
- *   MP_WASM_IMPORT_AS("micropython.host", "call_i32", int, host_call, int, int);
+ *   MP_WASM_IMPORT_AS("wasmmod.host", "call_i32", int, host_call, int, int);
  */
 #define MP_WASM_IMPORT_AS(module, wasm_name, ret, c_name, ...) \
     MP_WASM_IMPORT_ATTR(module, wasm_name) ret c_name(__VA_ARGS__)

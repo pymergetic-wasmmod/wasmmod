@@ -1,0 +1,8 @@
+**/*.wasm
+**/*.aot
+**/*.mpack
+**/*.wat
+**/*.sig
+**/.*.o
+**/.engine-summary
+**/third_party/wamr/**

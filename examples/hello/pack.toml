@@ -5,10 +5,10 @@ type = "package"
 name = "hello"
 version = "0.1.0"
 impl = ["c"]
-comment = "Minimal freestanding demo: native hello/add + optional py/ tree."
+comment = "Minimal freestanding demo: src/ natives + Python tree."
 
+# Defaults: native.dir = "src", python.mount = "src" (strip src/ from module paths).
 [python]
-mount = "py"
 keep_source = true
 # TESTING: all bytecode targets enabled (trim / set freeze=false later).
 freeze = true
@@ -19,11 +19,6 @@ targets = [
   "cpy:cp313",
   "cpy:cp314",
 ]
-
-[native]
-dir = "."
-# Explicit until the tree grows a native/ folder:
-sources = ["hello.c"]
 
 [lifecycle]
 load = ""

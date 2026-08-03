@@ -10,7 +10,7 @@ OUT = client.wasm
 
 all: $(OUT)
 
-$(OUT): client.c pack.toml ../guest.h $(WASM_PACK)
+$(OUT): src/client.c pack.toml ../guest.h $(WASM_PACK)
 	python3 $(WASM_PACK) . -o $(OUT)
 
 clean:

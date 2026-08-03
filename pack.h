@@ -30,8 +30,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define MP_WASM_PACK_SECTION "micropython.pack"
-#define MP_WASM_IMPORTS_SECTION "micropython.imports"
+/* Project-scoped custom section / import-module names (host-agnostic). */
+#define MP_WASM_PACK_SECTION "wasmmod.pack"
+#define MP_WASM_IMPORTS_SECTION "wasmmod.imports"
+#define MP_WASM_HOST_MODULE "wasmmod.host"
+#define MP_WASM_SIG_SECTION "wasmmod.sig"
 #define MP_WASM_PACK_MAGIC "MPWP"
 #define MP_WASM_IMPORTS_MAGIC "MPWI"
 #define MP_WASM_PACK_KIND_PY 1

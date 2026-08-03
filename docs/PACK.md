@@ -48,23 +48,27 @@ Call directions:
 
 ## Source layout (one pack)
 
-Python may be arbitrarily nested. Native sources are **not** mirrored as
-import paths — they compile and link into **one** Wasm module; only the
-**export table** names what shows up in Python.
+Everything lives under **`src/`**. Python paths mirror the module tree;
+C/C++/Rust may sit **beside** the package level they belong to. The pack
+name comes from `pack.toml`; the loader never sees a `src` segment —
+`wasm_pack` strips the mount prefix when embedding.
+
+Native sources still compile and link into **one** Wasm module; only the
+**export table** (not directory layout) names what shows up as native
+attrs in Python. Nested natives are organizational unless you set
+`[[exports]] module=…`.
 
 ```text
 mypkg/                          # pack root
   pack.toml                     # manifest (TOML)
-  native/                       # compiled together → one .wasm
-    foo.c
+  src/                          # default native.dir + python.mount
+    __init__.py                 # → mypkg
+    foo.c                       # co-located native at pack root level
     bar.rs
-    util.cpp                    # OK; see C ABI note below
-  py/                           # mounted into micropython.pack (multi-level)
-    __init__.py
-    util.py
-    sub/
-      __init__.py
-      mod.py
+    util/
+      __init__.py               # → mypkg.util
+      helper.c                  # sits beside that submodule (optional)
+      extra.py
 ```
 
 **C ABI at the boundary.** C++ and Rust are supported as *implementation*
@@ -78,9 +82,9 @@ before exporting.
 Build result: **`mypkg.wasm`** (single file).
 
 ```text
-native/*.{c,cc,rs}  ── compile + wasm-ld ──┐
+src/**/*.{c,cc,rs}  ── compile + wasm-ld ──┐
                                            ├──► mypkg.wasm
-py/**               ── embed as section ───┘
+src/**/*.{py,…}     ── embed as section ───┘  (paths relative to src/)
 ```
 
 Analogy: think of the pack as a MicroPython **extension module** (CPython’s
@@ -90,7 +94,7 @@ parts travel inside the same file instead of beside it on a filesystem.
 ## Manifest: `pack.toml`
 
 Human-facing description of the pack. The tool reads it; selected
-fields are baked into `micropython.pack` / `micropython.imports`. TOML for
+fields are baked into `wasmmod.pack` / `wasmmod.imports`. TOML for
 lists/comments.
 
 ### Shape (proposed)
@@ -104,13 +108,13 @@ version = "0.1.0"
 # Optional blurb (tooling/docs only; not required in the wasm)
 comment = "Mixed native + Python demo pack"
 
-# Languages present under native/ (mixed allowed).
+# Languages present under src/ (mixed allowed).
 # Tools use this to pick compilers; empty = discover by file extension.
 # "cpp" / "rs" are impl languages only — exported surface is still C ABI.
 impl = ["c", "rs"]            # subset of: "c" | "cpp" | "rs"
 
 [python]
-mount = "py"                  # directory tree → micropython.pack files[]
+# mount = "src"               # default; tree → wasmmod.pack (strip prefix)
 keep_source = true            # keep .py beside bytecode (recommended)
 # freeze = true               # opt-in bytecode (default source-only)
 # targets = [                 # host-tagged names in the pack section
@@ -120,14 +124,14 @@ keep_source = true            # keep .py beside bytecode (recommended)
 # ]
 
 [native]
-dir = "native"                # default; all sources linked into one wasm
-# sources = ["native/foo.c"]  # optional explicit list (else glob dir)
+# dir = "src"                 # default; recurse for .c/.cpp/.rs
+# sources = ["src/foo.c"]     # optional explicit list (else discover dir)
 
 [lifecycle]
 load = "mp_pack_load"         # wasm export name, or "" to omit
 unload = "mp_pack_unload"
 
-# Published into sys.modules as accessors (→ micropython.pack exports[] v2)
+# Published into sys.modules as accessors (→ wasmmod.pack exports[] v2)
 # Loader introspects Wasm types; `sig` is optional/legacy and can be omitted.
 [[exports]]
 func = "add"                  # Python attr; Wasm export defaults to same name
@@ -137,7 +141,7 @@ module = "sub"                # optional: nest under mypkg.sub
 func = "ping"
 export = "sub_ping"           # optional: when Wasm export ≠ func
 
-# Guest→guest needs (→ micropython.imports)
+# Guest→guest needs (→ wasmmod.imports)
 [[imports]]
 module = "greeter"            # other pack's `name`
 func = "hello"
@@ -151,8 +155,7 @@ name = "hello"
 version = "0.1.0"
 impl = ["c"]
 
-[python]
-mount = "py"
+# [python] / [native] default to src/ (optional overrides)
 
 [[exports]]
 func = "hello"
@@ -177,14 +180,14 @@ On successful load of a pack named `mypkg`:
 
 1. Fetch bytes (VFS path, HTTP URL, or already in memory) → optional
    **signature verify** (see below).
-2. Instantiate Wasm (resolve `micropython.imports` / host imports).
+2. Instantiate Wasm (resolve `wasmmod.imports` / host imports).
 3. Call optional `mp_pack_load` (lifecycle).
 4. Create / reuse the root module object; store in **`sys.modules["mypkg"]`**.
 5. Publish embedded Python tree under that root (virtual filesystem +
    import hook, or eager `exec` into submodule objects):
-   - `py/util.py` → `sys.modules["mypkg.util"]`
-   - `py/sub/__init__.py` → package `mypkg.sub`
-   - `py/sub/mod.py` → `sys.modules["mypkg.sub.mod"]`
+   - `src/util.py` → `sys.modules["mypkg.util"]`
+   - `src/sub/__init__.py` → package `mypkg.sub`
+   - `src/sub/mod.py` → `sys.modules["mypkg.sub.mod"]`
 6. Bind `[[exports]]` accessors onto the correct module objects
    (`mypkg.add`, `mypkg.sub.ping`, …).
 7. Set pack metadata on the root (`__file__`, `__wasm__`, `__path__` as
@@ -361,7 +364,7 @@ the manifest) — execution engine is an implementation detail.
 
 ### Pack metadata vs AOT bytes
 
-`micropython.pack` / `micropython.imports` live in **Wasm custom sections**.
+`wasmmod.pack` / `wasmmod.imports` live in **Wasm custom sections**.
 `wamrc` consumes `.wasm` and emits `.aot`; custom sections are not a reliable
 place to read metadata from the `.aot` alone.
 
@@ -370,7 +373,7 @@ Recommended shipping layouts:
 1. **Pair (simple):** `hello.wasm` (or stripped meta-only) + `hello.aot`  
    Loader reads sections from `.wasm`, executes `.aot` when
    `MICROPY_PY_WASM_AOT` and load succeeds.
-2. **Sidecar:** `hello.aot` + `hello.mpack` (raw `micropython.pack` payload
+2. **Sidecar:** `hello.aot` + `hello.mpack` (raw `wasmmod.pack` payload
    bytes extracted at pack time). No need to keep full Wasm on the device.
 3. **Wasm-only:** interp path (today).
 
@@ -433,9 +436,9 @@ enabled, packs may be distributed as **signed blobs**. Goal: verify
 
 1. **Detached signature** (simplest for VFS):
    - `hello.wasm`
-   - `hello.wasm.sig` (raw signature bytes) + trust store of public keys
+   - `hello.wasmmod.sig` (raw signature bytes) + trust store of public keys
 2. **Envelope** (better for HTTP):
-   - custom section `micropython.sig` on the wasm, or
+   - custom section `wasmmod.sig` on the wasm, or
    - outer container: `magic | pubkey_id | sig | wasm_bytes`
 
 Algorithm (initial): **Ed25519** or **ECDSA-P256** via mbedtls — pick one
@@ -520,11 +523,11 @@ Python (or C host via the same API) calls the accessor; loader
 
 ### Guest → host **(shipped: call slots + mem cookies + handles)**
 
-Guest declares Wasm imports under `micropython.host`. The loader registers:
+Guest declares Wasm imports under `wasmmod.host`. The loader registers:
 
 | import | sig | role |
 |--------|-----|------|
-| `call_i32` | `(i32,i32)->i32` | `wasm.host_set(slot, fn)` → `fn(arg)` |
+| `call_i32` | `(i32,i32)->i32` | `wasmmod.host_set(slot, fn)` → `fn(arg)` |
 | `call0_i32` | `(i32)->i32` | `fn()` with no arg |
 | `call_i64` | `(i32,i64)->i64` | same, i64 |
 | `call_f32` | `(i32,f32)->f32` | same, f32 |
@@ -543,7 +546,7 @@ offset (`MP_WASM_PTR(p)` in `guest.h`). Durable buffers → **cookies**
 `WasmModule.memory_read/write/alloc/free` touch linear memory directly;
 `wasm.mem_alloc/get/set/free` manage cookies.
 
-Python installs callables with `wasm.host_set` / `host_get` / `host_clear`.
+Python installs callables with `wasmmod.host_set` / `host_get` / `host_clear`.
 Slots **grow on demand**. Do **not** list host imports in pack.toml
 `[[imports]]` (guest→guest only). Soft-fail returns `-1` / `-1.0` if the
 slot is empty or the callable raises.
@@ -554,7 +557,7 @@ v128 / externref are not bound (not useful for the Python surface).
 
 ### Guest → guest
 
-Pack declares needed `(module, func)` pairs (see `micropython.imports`
+Pack declares needed `(module, func)` pairs (see `wasmmod.imports`
 below). At instantiate, the loader registers **forwarding natives** that
 resolve the target pack by package name and call into its export. If the
 target is missing/unloaded, call fails soft (sentinel / exception), not
@@ -566,23 +569,24 @@ UB.
 ```text
 ┌──────────────────────────────────────────────┐
 │ Wasm module (linked C + C++ + Rust)          │
-│   imports: micropython.host.*, peer forwards │
+│   imports: wasmmod.host.*, peer forwards │
 │   exports: native API + optional load/unload │
 ├──────────────────────────────────────────────┤
-│ custom "micropython.pack"                    │
+│ custom "wasmmod.pack"                    │
 │   name, files[], exports[]  (v2+ table)      │
 ├──────────────────────────────────────────────┤
-│ custom "micropython.imports"  (optional)     │
+│ custom "wasmmod.imports"  (optional)     │
 │   [{module, func}, ...] guest→guest needs    │
 └──────────────────────────────────────────────┘
 ```
 
-## Custom section: `micropython.pack`
+## Custom section: `wasmmod.pack`
+
 
 | Field | Encoding | Notes |
 |-------|----------|--------|
 | section id | `0` | Wasm custom section |
-| name | UTF-8 | exactly `micropython.pack` |
+| name | UTF-8 | exactly `wasmmod.pack` |
 | payload | below | |
 
 ### Payload version 1 **(shipped)**
@@ -649,7 +653,7 @@ Unknown `sig` → skip binding that export (still callable via low-level API).
 v1 flags: none defined; ignore unknown bits. Readers that do not know
 `version` skip the whole section.
 
-## Custom section: `micropython.imports` **(proposed)**
+## Custom section: `wasmmod.imports` **(proposed)**
 
 Guest→guest import list:
 
@@ -675,8 +679,8 @@ tools/wasm_pack.py [pack.toml | pack dir | sources…]
   1. compile native sources (impl / globs / sources list) → objects
   2. wasm-ld → linked.wasm (exports from [[exports]] + lifecycle)
   3. optional: freeze [python].mount .py → .mpy via mpy-cross (--freeze / freeze=true)
-  4. append micropython.pack  (name + tree [+ exports v2]; kind=1 .py / kind=2 .mpy)
-  5. append micropython.imports from [[imports]]
+  4. append wasmmod.pack  (name + tree [+ exports v2]; kind=1 .py / kind=2 .mpy)
+  5. append wasmmod.imports from [[imports]]
 ```
 
 CLI may stay source-oriented for smoke tests; directory + `pack.toml` is
@@ -719,7 +723,7 @@ Keep optional and boring for upstream:
 | `MICROPY_WASM_FETCH(uri)` | VFS/HTTP (or custom) → bytes |
 | `MICROPY_WASM_VERIFY(bytes, sig)` | signature check; default mbedtls when enabled |
 | `MICROPY_WASM_EXPORT_PUBLISH(mod, func, ptr)` | optional observe/publish hook for ports |
-| host native table | implements `micropython.host.*` imports |
+| host native table | implements `wasmmod.host.*` imports |
 
 ## Phased delivery
 
@@ -729,8 +733,8 @@ Keep optional and boring for upstream:
 | **B** | `load_pack` → `sys.modules` + embedded `.py` / `.mpy` tree; natural child imports |
 | **C** | v2 export table + accessors / trampolines |
 | **D** | `import_wasm` + path search (`foo.wasm` / `foo/__init__.wasm`) |
-| **E** | `micropython.imports` + guest→guest forwarders |
-| **E2** | `micropython.host.call*_i32` + `wasm.host_set` (guest→Py) |
+| **E** | `wasmmod.imports` + guest→guest forwarders |
+| **E2** | `wasmmod.host.call*_i32` + `wasmmod.host_set` (guest→Py) |
 | **F** | Mixed C/C++/Rust in `wasm_pack`; lifecycle exports |
 | **G** | HTTP fetch hook + optional mbedtls signature verify |
 | **H** | `wasm.install_hook()` (+ optional `builtinimport` path-walk) so `import` auto-loads packs |
@@ -738,12 +742,13 @@ Keep optional and boring for upstream:
 
 ## Compatibility
 
-- `.wasm` without `micropython.pack` = native-only guest (supported).
+- `.wasm` without `wasmmod.pack` = native-only guest (supported).
 - v1 readers ignore v2 trailing export tables if we bump version (v2 readers
   read both files + exports).
-- Prefix `micropython.` on custom section names is reserved for this feature.
-- No requirement that Python paths mirror `native/` paths — native is one
-  blob; Python is the multi-level namespace.
+- Prefix `wasmmod.` on custom section names is reserved for this feature
+  (`wasmmod.pack` / `wasmmod.imports` / `wasmmod.sig`).
+- Python under `src/` defines the module tree; co-located natives still link
+  into one Wasm blob (export `module=` optional for nesting attrs).
 
 
 ## File layout (as submodule at `extmod/wasmmod`)

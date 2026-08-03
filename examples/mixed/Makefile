@@ -5,7 +5,7 @@ OUT = mixed.wasm
 
 all: $(OUT)
 
-$(OUT): shim.c lib.rs pack.toml $(WASM_PACK)
+$(OUT): src/shim.c src/lib.rs pack.toml $(WASM_PACK)
 	python3 $(WASM_PACK) . -o $(OUT)
 
 clean:

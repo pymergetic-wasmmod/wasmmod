@@ -9,7 +9,7 @@ OUT = bridge.wasm
 
 all: $(OUT)
 
-$(OUT): bridge.c lib.rs py/__init__.py pack.toml ../guest.h $(WASM_PACK)
+$(OUT): src/bridge.c src/lib.rs src/__init__.py pack.toml ../guest.h $(WASM_PACK)
 	python3 $(WASM_PACK) . -o $(OUT)
 
 clean:

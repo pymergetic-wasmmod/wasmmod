@@ -5,9 +5,7 @@ version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Smoke for multi-language native link in wasm_pack."
 
-[native]
-dir = "."
-sources = ["shim.c", "lib.rs"]
+# Defaults: native.dir = "src" (src/shim.c + src/lib.rs).
 
 [[exports]]
 func = "mixed_answer"

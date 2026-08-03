@@ -29,34 +29,34 @@
  *   Py → C/RS exports
  *   C → RS (same .wasm)
  *   guest → guest (hello, mixed)
- *   guest → host → Py (micropython.host)
+ *   guest → host → Py (wasmmod.host)
  *
  * Rust mirrors some of these imports in lib.rs (rs_via_*).
  */
 
 
-#include "../guest.h"
+#include "../../guest.h"
 
 /* Guest→guest (loader forwarders; peers must already be loaded). */
 MP_WASM_IMPORT("hello", int, hello, void);
 MP_WASM_IMPORT("mixed", int, mixed_answer, void);
 MP_WASM_IMPORT("mixed", long long, mixed_i64, long long x);
 
-/* Guest→host (registered by the loader as micropython.host.*). */
-MP_WASM_IMPORT("micropython.host", int, call_i32, int slot, int arg);
-MP_WASM_IMPORT("micropython.host", int, call0_i32, int slot);
-MP_WASM_IMPORT("micropython.host", long long, call_i64, int slot, long long arg);
-MP_WASM_IMPORT("micropython.host", float, call_f32, int slot, float arg);
-MP_WASM_IMPORT("micropython.host", double, call_f64, int slot, double arg);
-MP_WASM_IMPORT("micropython.host", int, call_buf, int slot, int off, int len);
-MP_WASM_IMPORT("micropython.host", int, call_mem, int slot, int cookie);
-MP_WASM_IMPORT("micropython.host", int, call_obj, int slot, int handle);
-MP_WASM_IMPORT("micropython.host", int, call0_py, int mod_off, int mod_len, int attr_off, int attr_len);
-MP_WASM_IMPORT("micropython.host", int, call_py, int mod_off, int mod_len, int attr_off, int attr_len, int arg);
-MP_WASM_IMPORT("micropython.host", int, mem_alloc, int size);
-MP_WASM_IMPORT("micropython.host", void, mem_free, int cookie);
-MP_WASM_IMPORT("micropython.host", int, mem_copy_in, int cookie, int src_off, int n);
-MP_WASM_IMPORT("micropython.host", int, mem_copy_out, int cookie, int dest_off, int n);
+/* Guest→host (registered by the loader as wasmmod.host.*). */
+MP_WASM_IMPORT("wasmmod.host", int, call_i32, int slot, int arg);
+MP_WASM_IMPORT("wasmmod.host", int, call0_i32, int slot);
+MP_WASM_IMPORT("wasmmod.host", long long, call_i64, int slot, long long arg);
+MP_WASM_IMPORT("wasmmod.host", float, call_f32, int slot, float arg);
+MP_WASM_IMPORT("wasmmod.host", double, call_f64, int slot, double arg);
+MP_WASM_IMPORT("wasmmod.host", int, call_buf, int slot, int off, int len);
+MP_WASM_IMPORT("wasmmod.host", int, call_mem, int slot, int cookie);
+MP_WASM_IMPORT("wasmmod.host", int, call_obj, int slot, int handle);
+MP_WASM_IMPORT("wasmmod.host", int, call0_py, int mod_off, int mod_len, int attr_off, int attr_len);
+MP_WASM_IMPORT("wasmmod.host", int, call_py, int mod_off, int mod_len, int attr_off, int attr_len, int arg);
+MP_WASM_IMPORT("wasmmod.host", int, mem_alloc, int size);
+MP_WASM_IMPORT("wasmmod.host", void, mem_free, int cookie);
+MP_WASM_IMPORT("wasmmod.host", int, mem_copy_in, int cookie, int src_off, int n);
+MP_WASM_IMPORT("wasmmod.host", int, mem_copy_out, int cookie, int dest_off, int n);
 
 /* Same-pack Rust (linked into this module). */
 int rs_square(int x);
