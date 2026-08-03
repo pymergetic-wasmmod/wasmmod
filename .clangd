@@ -1,0 +1,30 @@
+# clangd for this submodule only (does not affect the rest of the host tree).
+# Host loader .c files need MicroPython headers from the parent checkout.
+# If the parent has compile_commands.json, clangd prefers that for matched files.
+
+CompileFlags:
+  Add:
+    - -std=gnu99
+    - -DUNIX
+    - -DMICROPY_PY_WASM=1
+    - -I.
+    - -I../..
+    - -I../../ports/unix
+    - -I../../ports/unix/variants/standard
+    - -I../../ports/unix/build-wasm
+    - -Ithird_party/wamr/core/iwasm/include
+    - -I../../lib/mbedtls/include
+    - -I../../shared/readline
+  Remove:
+    - -W*
+
+# Freestanding pack guests: Wasm target so import_module/import_name are known.
+---
+If:
+  PathMatch: examples/.*\.(c|h)
+CompileFlags:
+  Add:
+    - --target=wasm32
+    - -ffreestanding
+    - -nostdlib
+    - -Iexamples
