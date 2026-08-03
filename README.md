@@ -6,7 +6,7 @@ One `.wasm` file can ship **C + Rust + embedded Python**, talk to peer packs, an
 Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
 
 <p align="center">
-  <img src="screenshots/repl-demo.png" alt="Host REPL — pack Py, C, Rust, guest→guest" width="520" />
+  <img src="screenshots/repl-demo.png" alt="Real MicroPython REPL — wasm builtin, load packs" width="720" />
 </p>
 
 <p align="center">
@@ -80,34 +80,34 @@ pub extern "C" fn rs_answer() -> i32 { 7 }
 pub extern "C" fn rs_i64_answer(x: i64) -> i64 { x + 7 }
 ```
 
-**Host** (MicroPython) — load once, `import` like any module:
+**Host** — real unix MicroPython REPL (`wasm` is a built-in; see `help('modules')`):
 
 ```text
+MicroPython … on 2026-08-03; linux [GCC …] version
+Type "help()" for more information.
+>>> import sys
+>>> sys.implementation.name
+'micropython'
+>>> help("modules")
+…  requests/__init__ wasm
+…  select            websocket
+…  socket
+Plus any modules on the filesystem
 >>> import wasm
 >>> wasm.install_hook()
 >>> wasm.load_pack("hello/hello.wasm", "hello")
->>> wasm.load_pack("mixed/mixed.wasm", "mixed")
->>> wasm.load_pack("bridge/bridge.wasm", "bridge")
->>> import hello, bridge, mixed
+>>> import hello, mixed, bridge
 >>> hello.greet()
 'hello from pack py'
->>> hello.answer()           # pack Py → C
-42
->>> mixed.mixed_answer()     # C shim → Rust
-42
->>> bridge.via_rs(6)         # same-pack C → RS
+>>> bridge.via_rs(6)
 36
->>> bridge.via_hello()       # guest → guest
-42
->>> bridge.via_peer_hello()  # pack Py → peer C
+>>> bridge.via_hello()
 42
 ```
 
-Or run the canned demo (good for screenshots):
-
 ```bash
-make -C examples demo
-# or:  micropython examples/demo_readme.py
+make -C examples demo    # real REPL: micropython -i < demo_readme.py
+make -C examples repl    # interactive — type it yourself
 ```
 
 ---
@@ -192,7 +192,8 @@ make -C mpy-cross BUILD=build -j"$(nproc)"   # pack freeze (.mpy)
 
 make -C extmod/wasmmod/examples test           # interp matrix
 make -C extmod/wasmmod/examples test-engines   # all engines
-make -C extmod/wasmmod/examples demo           # pretty REPL sample
+make -C extmod/wasmmod/examples demo           # real micropython -i session
+make -C extmod/wasmmod/examples repl           # interactive unix REPL
 ```
 
 ```text

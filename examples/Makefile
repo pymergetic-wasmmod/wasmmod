@@ -31,7 +31,7 @@ PACK_WASMS = \
 	mixed/mixed.wasm \
 	bridge/bridge.wasm
 
-.PHONY: all clean test test-aot test-fast-jit test-jit test-engines demo \
+.PHONY: all clean test test-aot test-fast-jit test-jit test-engines demo repl \
 	packs aot-packs wamrc host host-aot host-fast-jit host-jit
 
 packs:
@@ -76,9 +76,16 @@ host-fast-jit:
 host-jit:
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_PY_WASM_JIT=1 BUILD=build-wasm-jit
 
-# Pretty REPL sample for README / screenshots (needs packs + host).
+# Real unix MicroPython REPL, stdin = demo_readme.py (not a faked >>> printer).
 demo: packs host
-	$(MPY_INTERP) $(CURDIR)/demo_readme.py
+	@cd $(CURDIR) && $(MPY_INTERP) -i < $(CURDIR)/demo_readme.py
+
+# Interactive unix MicroPython in this directory (type it yourself).
+# Hint: help('modules')  →  import wasm  →  wasm.load_pack(...)
+repl: packs host
+	@echo "MicroPython REPL — cwd=$(CURDIR)"
+	@echo "Try:  help('modules')   import wasm   wasm.install_hook()"
+	@cd $(CURDIR) && $(MPY_INTERP) -i
 
 # Default smoke: interpreter (no AOT/JIT).
 test: packs host
