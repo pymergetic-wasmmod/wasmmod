@@ -28,12 +28,23 @@
 
 #include "py/obj.h"
 
-// Search wasm.path then sys.path for (dots → '/'), first hit wins:
-//   1) name/__init__.wasm  2) name.wasm
-// On success writes the path into *path_out (caller vstr_clear).
+// Search wasm.path then sys.path for a pack matching the dotted import name.
+// Path form: a/b/c/__init__.wasm | a/b/c.wasm
+// Flat form: a.b.c.wasm  (when name has dots; handy under packs/)
+// With AOT: try a/b/c[.<arch>].aot / a.b.c[.<arch>].aot (wasm.arch tags) then
+// plain .aot, then portable .wasm. Arch infix is AOT-only — .wasm is agnostic.
+// On success writes *path_out (caller vstr_clear).
 bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out);
 
+// Like find_pack but only searches wasm.path (cheap import-hook pre-check).
+bool mp_wasm_find_pack_on_wasm_path(const char *dotted_name, vstr_t *path_out);
+
+// True if a leaf pack exists or VFS pack roots imply descendants (flat/tree).
+bool mp_wasm_query_import(const char *dotted_name);
+bool mp_wasm_has_descendants(const char *prefix);
+
 // Load-or-reuse a pack by dotted import name. Raises on failure.
+// Namespace packages (PEP 420-ish) are created when only children exist.
 mp_obj_t mp_wasm_import_wasm(const char *dotted_name);
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_FINDER_H

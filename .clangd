@@ -1,9 +1,16 @@
 # clangd for this submodule only (does not affect the rest of the host tree).
 # Host loader .c files need MicroPython headers from the parent checkout.
-# If the parent has compile_commands.json, clangd prefers that for matched files.
+#
+# CompilationDatabase: None — ignore parent/other compile_commands.json so a
+# stale ports/unix/build-standard genhdr (missing newer root pointers like
+# mp_wasm_arch_obj) cannot win the include search over build-wasm.
+#
+# -xc: clangd often treats orphan .h as Objective-C++, which rejects -std=gnu99.
 
 CompileFlags:
+  CompilationDatabase: None
   Add:
+    - -xc
     - -std=gnu99
     - -DUNIX
     - -DMICROPY_PY_WASM=1
@@ -12,6 +19,7 @@ CompileFlags:
     - -I../../ports/unix
     - -I../../ports/unix/variants/standard
     - -I../../ports/unix/build-wasm
+    # WAMR public API (wasm_export.h). Must stay visible in .cursorignore.
     - -Ithird_party/wamr/core/iwasm/include
     - -I../../lib/mbedtls/include
     - -I../../shared/readline
@@ -23,7 +31,10 @@ CompileFlags:
 If:
   PathMatch: examples/.*\.(c|h)
 CompileFlags:
+  CompilationDatabase: None
   Add:
+    - -xc
+    - -std=gnu99
     - --target=wasm32
     - -ffreestanding
     - -nostdlib

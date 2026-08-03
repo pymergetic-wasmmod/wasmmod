@@ -5,4 +5,10 @@
 **/*.sig
 **/.*.o
 **/.engine-summary
+# Hide nested WAMR sources from Cursor index, but keep public headers so
+# clangd can resolve #include "wasm_export.h" (and friends).
 **/third_party/wamr/**
+!**/third_party/wamr/core/
+!**/third_party/wamr/core/iwasm/
+!**/third_party/wamr/core/iwasm/include/
+!**/third_party/wamr/core/iwasm/include/**

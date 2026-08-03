@@ -95,12 +95,12 @@ Plus any modules on the filesystem
 36
 ```
 
-**FQN → file:** `import a.b` searches `wasm.path` then `sys.path` (dots → `/`):
+**FQN → file:** `import a.b.c` searches `wasm.path` then `sys.path`. A pack can sit at any depth; if only the leaf file exists, missing parents are thin namespace packages (PEP 420-ish) so `a.b.c` stays attribute-reachable. VFS pack roots are scanned so `import a` / `a.b` work when children exist (flat `a.b.c.wasm` or tree `a/b/…`).
 
-1. `a/b/__init__.wasm` (package)
-2. `a/b.wasm` (module)
+Path form (dots → `/`): `a/b/c/__init__.wasm` · `a/b/c.wasm`  
+Flat form (e.g. under `packs/`): `a.b.c.wasm`
 
-Examples use `packs/<name>.wasm` on `wasm.path`. Nested names inside a pack (`hello.util`) come from embedded pack-Python — not a second file. Explicit path: `wasm.load_pack("packs/foo.wasm", "foo")`.
+**AOT only:** `wasm.arch` tags select `*.<arch>.aot` (then plain `.aot`), then portable `.wasm`. Nested names *inside* one pack (`hello.util`) still come from embedded pack-Python when no leaf file exists. Explicit: `wasm.load_pack("packs/foo.wasm", "foo")`.
 
 ```bash
 make -C examples demo    # real REPL: micropython -i < demo_readme.py

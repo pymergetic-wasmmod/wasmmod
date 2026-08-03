@@ -60,4 +60,9 @@
 #define MICROPY_WASM_VERIFY (0)
 #endif
 
+// Optional default wasm.arch entry for AOT filename tags (e.g. "x86_64"); empty = plain .aot names.
+#ifndef MICROPY_WASM_PACK_ARCH
+#define MICROPY_WASM_PACK_ARCH ""
+#endif
+
 #endif // MICROPY_INCLUDED_WASMMOD_MPCONFIG_WASM_H

@@ -229,6 +229,8 @@ Mirror Python’s package vs module layout so discovery feels obvious:
 | `mypkg/__init__.wasm` / `.aot` | **Package pack** (directory is the package) | `mypkg` |
 | `mypkg/sub.wasm` / `.aot` | Child pack under package `mypkg` | `mypkg.sub` (nested pack) |
 | `mypkg/sub/__init__.wasm` / `.aot` | Nested package pack | `mypkg.sub` |
+| `mypkg.sub.wasm` | Flat dotted filename (e.g. under `packs/`) | `mypkg.sub` |
+| `mypkg.sub.<arch>.aot` | Arch-tagged **AOT** pack (`wasm.arch` / `MICROPY_WASM_PACK_ARCH`); `.wasm` stays arch-agnostic | `mypkg.sub` |
 
 Prefer `.aot` over `.wasm` when `MICROPY_PY_WASM_AOT` is enabled (see AOT).
 
@@ -272,14 +274,15 @@ Both `import_wasm` and the hook call the same finder:
 ```text
 find_wasm(fullname_name) → path_or_url | None
 
-for root in wasm.path:          # may overlap / extend sys.path
-  try root/name/__init__.wasm   # package pack
-  try root/name.wasm            # module pack
-  # dotted name → nested dirs: sensor.drivers → sensor/drivers/…
+for root in wasm.path + sys.path:
+  # path form / flat dotted (.wasm portable):
+  try root/a/b/c/__init__.wasm | root/a/b/c.wasm | root/a.b.c.wasm
+  # AOT only — wasm.arch tags then plain .aot, else .wasm:
+  try root/a/b/c[.<arch>].aot | root/a.b.c[.<arch>].aot | … .aot
 ```
 
 So yes: **path-based finder**, same mental model as `sys.path`, just also
-understands `__init__.wasm` / `name.wasm` (and optional HTTP roots).
+understands nested packs, flat dotted names, optional arch tags, and HTTP roots.
 
 ### `wasm.import_wasm` (always available when `MICROPY_PY_WASM`)
 

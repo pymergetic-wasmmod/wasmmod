@@ -8,6 +8,7 @@ JIT: int
 FAST_JIT: int
 MODE: int  # WAMR RunningMode: 1=Interp 2=Fast_JIT 3=LLVM_JIT 4=Multi_Tier
 path: list[str]
+arch: list[str]  # AOT only: ".<arch>" infix on .aot (e.g. "thumbv7em"); .wasm stays plain
 
 def load(data: str | bytes) -> Any: ...
 def load_pack(path: str | bytes, name: Optional[str] = None) -> Any: ...

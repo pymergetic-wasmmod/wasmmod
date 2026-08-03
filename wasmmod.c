@@ -91,6 +91,7 @@ static const mp_obj_type_t mp_type_wasm_module;
 static const mp_obj_type_t mp_type_wasm_func;
 
 MP_REGISTER_ROOT_POINTER(mp_obj_list_t mp_wasm_path_obj);
+MP_REGISTER_ROOT_POINTER(mp_obj_list_t mp_wasm_arch_obj);
 MP_REGISTER_ROOT_POINTER(mp_obj_t mp_wasm_prev_import);
 
 static int wasm_import_hook_depth;
@@ -104,6 +105,25 @@ void mp_wasm_path_ensure(void) {
 mp_obj_t mp_wasm_path_obj(void) {
     mp_wasm_path_ensure();
     return MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_wasm_path_obj));
+}
+
+#ifndef MICROPY_WASM_PACK_ARCH
+#define MICROPY_WASM_PACK_ARCH ""
+#endif
+
+void mp_wasm_arch_ensure(void) {
+    if (MP_STATE_VM(mp_wasm_arch_obj).base.type != &mp_type_list) {
+        mp_obj_list_init(&MP_STATE_VM(mp_wasm_arch_obj), 0);
+        if (MICROPY_WASM_PACK_ARCH[0] != '\0') {
+            mp_obj_list_append(MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_wasm_arch_obj)),
+                mp_obj_new_str(MICROPY_WASM_PACK_ARCH, strlen(MICROPY_WASM_PACK_ARCH)));
+        }
+    }
+}
+
+mp_obj_t mp_wasm_arch_obj(void) {
+    mp_wasm_arch_ensure();
+    return MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_wasm_arch_obj));
 }
 
 static void wasm_module_ensure_open(mp_obj_wasm_module_t *self) {
@@ -989,13 +1009,19 @@ static mp_obj_t mod_wasm_import_hook(size_t n_args, const mp_obj_t *args) {
         prev = MP_OBJ_FROM_PTR(&mp_builtin___import___obj);
     }
 
-    // Prefer a found .wasm pack over a same-named directory on sys.path.
-    // (Unix port treats hello/ as a package even without __init__.py, so the
-    // ImportError fallback below would never run for example pack layouts.)
+    // Fast path: already loaded — do not probe the filesystem.
     if (wasm_import_hook_depth == 0 && n_args >= 1 && mp_obj_is_str(args[0])) {
         const char *name = mp_obj_str_get_str(args[0]);
+        mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
+            MP_OBJ_NEW_QSTR(qstr_from_str(name)), MP_MAP_LOOKUP);
+        if (el != NULL && el->value != MP_OBJ_NULL) {
+            return mp_call_function_n_kw(prev, n_args, 0, args);
+        }
+
+        // Prefer a real leaf pack on wasm.path (cheap stats) over an empty
+        // same-named directory. Namespace listdir + sys.path packs: ImportError path.
         vstr_t path;
-        if (mp_wasm_find_pack(name, &path)) {
+        if (mp_wasm_find_pack_on_wasm_path(name, &path)) {
             vstr_clear(&path);
             wasm_import_hook_depth++;
             nlr_buf_t nlr_pack;
@@ -1022,6 +1048,7 @@ static mp_obj_t mod_wasm_import_hook(size_t n_args, const mp_obj_t *args) {
         nlr_jump(nlr.ret_val);
     }
 
+    // Fallback: leaf pack missed above, or namespace-only (descendants / listdir).
     const char *name = mp_obj_str_get_str(args[0]);
     wasm_import_hook_depth++;
     nlr_buf_t nlr2;
@@ -1311,6 +1338,11 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_rs_call_attr_obj, 2, 3, mod_
 #if MICROPY_MODULE_BUILTIN_INIT
 static mp_obj_t mod_wasm___init__(void) {
     mp_obj_list_init(&MP_STATE_VM(mp_wasm_path_obj), 0);
+    mp_obj_list_init(&MP_STATE_VM(mp_wasm_arch_obj), 0);
+    if (MICROPY_WASM_PACK_ARCH[0] != '\0') {
+        mp_obj_list_append(MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_wasm_arch_obj)),
+            mp_obj_new_str(MICROPY_WASM_PACK_ARCH, strlen(MICROPY_WASM_PACK_ARCH)));
+    }
     MP_STATE_VM(mp_wasm_prev_import) = MP_OBJ_NULL;
     MP_STATE_VM(mp_wasm_host_slots) = MP_OBJ_NULL;
     MP_STATE_VM(mp_wasm_handles) = MP_OBJ_NULL;
@@ -1330,6 +1362,7 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&mod_wasm___init___obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_path), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_path_obj)) },
+    { MP_ROM_QSTR(MP_QSTR_arch), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_arch_obj)) },
     { MP_ROM_QSTR(MP_QSTR_VERIFY), MP_ROM_INT(MICROPY_WASM_VERIFY) },
     { MP_ROM_QSTR(MP_QSTR_AOT), MP_ROM_INT(MICROPY_PY_WASM_AOT) },
     { MP_ROM_QSTR(MP_QSTR_JIT), MP_ROM_INT(MICROPY_PY_WASM_JIT) },
