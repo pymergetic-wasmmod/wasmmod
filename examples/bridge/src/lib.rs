@@ -101,9 +101,55 @@ unsafe extern "C" {
     fn mem_copy_in(cookie: i32, src_off: i32, n: i32) -> i32;
 }
 
+// Guest loader API (host wasm.* mirror)
+#[link(wasm_import_module = "wasmmod")]
+unsafe extern "C" {
+    fn version(off: i32, maxlen: i32) -> i32;
+    fn mode() -> i32;
+    fn verify() -> i32;
+    fn trust_count() -> i32;
+    #[link_name = "call_i32"]
+    fn wasmmod_call_i32(
+        pack_off: i32,
+        pack_len: i32,
+        func_off: i32,
+        func_len: i32,
+        nargs: i32,
+        args_off: i32,
+    ) -> i32;
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_hello() -> i32 {
     hello()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rs_via_loader_hello() -> i32 {
+    static PACK: [u8; 5] = *b"hello";
+    static FUNC: [u8; 5] = *b"hello";
+    wasmmod_call_i32(PACK.as_ptr() as i32, 5, FUNC.as_ptr() as i32, 5, 0, 0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rs_via_loader_version_len() -> i32 {
+    let mut buf = [0u8; 32];
+    version(buf.as_mut_ptr() as i32, 32)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rs_via_loader_mode() -> i32 {
+    mode()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rs_via_loader_verify() -> i32 {
+    verify()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rs_via_loader_trust_count() -> i32 {
+    trust_count()
 }
 
 #[no_mangle]

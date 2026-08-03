@@ -58,6 +58,14 @@ MP_WASM_IMPORT("wasmmod.host", void, mem_free, int cookie);
 MP_WASM_IMPORT("wasmmod.host", int, mem_copy_in, int cookie, int src_off, int n);
 MP_WASM_IMPORT("wasmmod.host", int, mem_copy_out, int cookie, int dest_off, int n);
 
+/* Guest loader API (wasm.* on the host → wasmmod.* imports here). */
+MP_WASM_IMPORT_AS("wasmmod", "version", int, wasmmod_version, int off, int maxlen);
+MP_WASM_IMPORT_AS("wasmmod", "mode", int, wasmmod_mode, void);
+MP_WASM_IMPORT_AS("wasmmod", "verify", int, wasmmod_verify, void);
+MP_WASM_IMPORT_AS("wasmmod", "trust_count", int, wasmmod_trust_count, void);
+MP_WASM_IMPORT_AS("wasmmod", "call_i32", int, wasmmod_call_i32,
+    int pack_off, int pack_len, int func_off, int func_len, int nargs, int args_off);
+
 /* Same-pack Rust (linked into this module). */
 int rs_square(int x);
 int rs_add3(int a, int b, int c);
@@ -111,6 +119,30 @@ int via_c_self(int x) {
 
 int via_hello(void) {
     return hello();
+}
+
+/* Dynamic peer call via wasmmod.call_i32 (no static hello import required). */
+int via_loader_hello(void) {
+    static const char pack[] = "hello";
+    static const char func[] = "hello";
+    return wasmmod_call_i32(MP_WASM_PTR(pack), 5, MP_WASM_PTR(func), 5, 0, 0);
+}
+
+int via_loader_version_len(void) {
+    char buf[32];
+    return wasmmod_version(MP_WASM_PTR(buf), (int)sizeof(buf));
+}
+
+int via_loader_mode(void) {
+    return wasmmod_mode();
+}
+
+int via_loader_verify(void) {
+    return wasmmod_verify();
+}
+
+int via_loader_trust_count(void) {
+    return wasmmod_trust_count();
 }
 
 int via_mixed(void) {

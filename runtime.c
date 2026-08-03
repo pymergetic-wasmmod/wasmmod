@@ -43,6 +43,7 @@
 
 // Defined in host.c (needs the full MicroPython include path).
 bool mp_wasm_host_register(void);
+bool mp_wasm_loader_register(void);
 
 #ifndef MICROPY_PY_WASM_AOT
 #define MICROPY_PY_WASM_AOT (0)
@@ -145,8 +146,8 @@ bool mp_wasm_runtime_init(void) {
     if (!wasm_runtime_full_init(&init)) {
         return false;
     }
-    // Guest→host imports (wasmmod.host.*) before any module instantiate.
-    if (!mp_wasm_host_register()) {
+    // Guest imports (wasmmod.* / wasmmod.host.*) before any module instantiate.
+    if (!mp_wasm_host_register() || !mp_wasm_loader_register()) {
         wasm_runtime_destroy();
         return false;
     }

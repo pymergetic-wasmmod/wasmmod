@@ -47,6 +47,7 @@
  *
  *   MP_WASM_IMPORT("hello", int, hello, void);
  *   MP_WASM_IMPORT("wasmmod.host", int, call_i32, int slot, int arg);
+ *   MP_WASM_IMPORT_AS("wasmmod", "version", int, wasmmod_version, int, int);
  */
 #define MP_WASM_IMPORT(module, ret, fn, ...) \
     MP_WASM_IMPORT_ATTR(module, #fn) ret fn(__VA_ARGS__)

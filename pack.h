@@ -33,7 +33,8 @@
 /* Project-scoped custom section / import-module names (host-agnostic). */
 #define MP_WASM_PACK_SECTION "wasmmod.pack"
 #define MP_WASM_IMPORTS_SECTION "wasmmod.imports"
-#define MP_WASM_HOST_MODULE "wasmmod.host"
+#define MP_WASM_MODULE "wasmmod"           /* guest loader API (version, call_i32, …) */
+#define MP_WASM_HOST_MODULE "wasmmod.host" /* guest→host slots / mem / call_py */
 #define MP_WASM_SIG_SECTION "wasmmod.sig"
 #define MP_WASM_PACK_MAGIC "MPWP"
 #define MP_WASM_IMPORTS_MAGIC "MPWI"

@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "py/mpstate.h"
+#include "py/objstr.h"
 
 #if MICROPY_PY_WASM
 
@@ -35,10 +36,13 @@
 #include "extmod/wasmmod/io.h"
 #include "extmod/wasmmod/mod.h"
 #include "extmod/wasmmod/verify.h"
+#include "extmod/wasmmod/version.h"
 
 #ifndef MICROPY_WASM_PACK_ARCH
 #define MICROPY_WASM_PACK_ARCH ""
 #endif
+
+static const MP_DEFINE_STR_OBJ(mp_wasm_version_obj, MICROPY_WASM_VERSION);
 
 MP_REGISTER_ROOT_POINTER(mp_obj_list_t mp_wasm_path_obj);
 MP_REGISTER_ROOT_POINTER(mp_obj_list_t mp_wasm_arch_obj);
@@ -98,6 +102,7 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     #if MICROPY_MODULE_BUILTIN_INIT
     { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&mod_wasm___init___obj) },
     #endif
+    { MP_ROM_QSTR(MP_QSTR_version), MP_ROM_PTR(&mp_wasm_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_path), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_path_obj)) },
     { MP_ROM_QSTR(MP_QSTR_arch), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_arch_obj)) },
     { MP_ROM_QSTR(MP_QSTR_VERIFY), MP_ROM_INT(MICROPY_WASM_VERIFY) },

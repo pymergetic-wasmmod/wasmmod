@@ -98,13 +98,24 @@ host-verify: $(SIGN_ROOT)
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_WASM_VERIFY=1 \
 		MICROPY_WASM_TRUST_CA=$(SIGN_ROOT) BUILD=build-wasm-verify
 
+# Drop stale genhdr/frozen when engine flags change — otherwise unix can fail with
+# "redeclaration of enumerator MP_QSTR_*" in frozen_content.c vs qstrdefs.generated.h.
+define clean-unix-build-qstr
+	rm -rf $(UNIX)/$(1)/genhdr \
+		$(UNIX)/$(1)/frozen_content.c \
+		$(UNIX)/$(1)/frozen_content.o
+endef
+
 host-aot:
+	$(call clean-unix-build-qstr,build-wasm-aot)
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_PY_WASM_AOT=1 BUILD=build-wasm-aot
 
 host-fast-jit:
+	$(call clean-unix-build-qstr,build-wasm-fjit)
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_PY_WASM_FAST_JIT=1 BUILD=build-wasm-fjit
 
 host-jit:
+	$(call clean-unix-build-qstr,build-wasm-jit)
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_PY_WASM_JIT=1 BUILD=build-wasm-jit
 
 # Real unix MicroPython REPL, stdin = demo_readme.py (not a faked >>> printer).

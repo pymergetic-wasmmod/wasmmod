@@ -21,6 +21,7 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/finder.c \
 	$(WASMMOD_DIR)/forward.c \
 	$(WASMMOD_DIR)/host.c \
+	$(WASMMOD_DIR)/loader.c \
 	$(WASMMOD_DIR)/pack.c \
 	$(WASMMOD_DIR)/runtime.c \
 	$(WASMMOD_DIR)/verify.c
@@ -45,13 +46,17 @@ MICROPY_WASM_VERIFY ?= 0
 # Config-specific WAMR tree so AOT/JIT flag flips do not require a manual wipe.
 WAMR_BUILD ?= $(BUILD)/wamr-a$(MICROPY_PY_WASM_AOT)j$(MICROPY_PY_WASM_JIT)f$(MICROPY_PY_WASM_FAST_JIT)
 
+# Package release string → wasm.version (single source: VERSION).
+MICROPY_WASM_VERSION ?= $(shell tr -d '[:space:]' < $(TOP)/$(WASMMOD_DIR)/VERSION)
+
 INC += -I$(TOP)/$(WAMR_DIR)/core/iwasm/include
 CFLAGS_EXTMOD += -DMICROPY_PY_WASM=1 \
 	-DMICROPY_PY_WASM_AOT=$(MICROPY_PY_WASM_AOT) \
 	-DMICROPY_PY_WASM_JIT=$(MICROPY_PY_WASM_JIT) \
 	-DMICROPY_PY_WASM_FAST_JIT=$(MICROPY_PY_WASM_FAST_JIT) \
 	-DMICROPY_PY_WASM_MATRIX=$(MICROPY_PY_WASM_MATRIX) \
-	-DMICROPY_WASM_VERIFY=$(MICROPY_WASM_VERIFY)
+	-DMICROPY_WASM_VERIFY=$(MICROPY_WASM_VERIFY) \
+	-DMICROPY_WASM_VERSION=\"$(MICROPY_WASM_VERSION)\"
 LDFLAGS_EXTMOD += -L$(WAMR_BUILD) -liwasm -lpthread -ldl -lm
 ifneq ($(filter 1,$(MICROPY_PY_WASM_JIT) $(MICROPY_PY_WASM_FAST_JIT)),)
 LDFLAGS_EXTMOD += -lstdc++

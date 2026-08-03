@@ -577,7 +577,10 @@ bool mp_wasm_register_forwarders(const uint8_t *wasm, uint32_t len, char *errbuf
         memcpy(func, im->func, fl);
         func[fl] = '\0';
 
-        if (strncmp(module, "micropython.", 12) == 0) {
+        // Host-provided natives — never install peer forwarders for these.
+        if (strncmp(module, "micropython.", 12) == 0
+            || strcmp(module, MP_WASM_HOST_MODULE) == 0
+            || strcmp(module, MP_WASM_MODULE) == 0) {
             continue;
         }
 

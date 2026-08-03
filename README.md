@@ -136,7 +136,7 @@ wasmmod/
 ├── screenshots/                             README eye-catchers
 ├── docs/PACK.md                             section format
 ├── BRANCHES.md                              MetalPython host branch layout
-├── VERSION                                  package semver (pre-release)
+├── VERSION                                  → wasm.version (always when built)
 └── third_party/wamr                         WAMR (Apache-2.0)
 ```
 
@@ -190,7 +190,9 @@ endif()
 ```
 
 Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).  
-Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`.
+Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`.  
+`wasm.version` is always the package release string from [`VERSION`](VERSION) (e.g. `'0.1.1-alpha'`).  
+Guests see the same loader surface as WAMR imports on module **`wasmmod`**: `version`, `mode`, `verify`, `trust_count`, `call_i32` (dynamic pack export; peer of host `wasm.c_call` / `rs_call`). Callbacks/slots stay on **`wasmmod.host`**.
 
 Optional host trampoline (metalpython): `tools/wasmmod.py` → `extmod/wasmmod/tools/wasmmod.py`.  
 MetalPython host branch layout (`wasmmod` PR track under product `master`): [BRANCHES.md](BRANCHES.md).

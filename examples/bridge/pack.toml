@@ -33,6 +33,21 @@ func = "rs_add3"
 func = "rs_via_hello"
 
 [[exports]]
+func = "rs_via_loader_hello"
+
+[[exports]]
+func = "rs_via_loader_version_len"
+
+[[exports]]
+func = "rs_via_loader_mode"
+
+[[exports]]
+func = "rs_via_loader_verify"
+
+[[exports]]
+func = "rs_via_loader_trust_count"
+
+[[exports]]
 func = "rs_via_host"
 
 [[exports]]
@@ -122,6 +137,21 @@ func = "via_c_self"
 
 [[exports]]
 func = "via_hello"
+
+[[exports]]
+func = "via_loader_hello"
+
+[[exports]]
+func = "via_loader_version_len"
+
+[[exports]]
+func = "via_loader_mode"
+
+[[exports]]
+func = "via_loader_verify"
+
+[[exports]]
+func = "via_loader_trust_count"
 
 [[exports]]
 func = "via_mixed"

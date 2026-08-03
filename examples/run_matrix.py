@@ -617,6 +617,62 @@ case(
 case(
     "G",
     "C",
+    "C",
+    "bridge.via_loader_hello() → wasmmod.call_i32('hello','hello')",
+    b.via_loader_hello(),
+    42,
+)
+case(
+    "G",
+    "RS",
+    "C",
+    "bridge.rs_via_loader_hello() → wasmmod.call_i32('hello','hello')",
+    b.rs_via_loader_hello(),
+    42,
+)
+case(
+    "H",
+    "Py",
+    "C",
+    "bridge.via_loader_version_len() == len(wasm.version)",
+    b.via_loader_version_len(),
+    len(wasm.version),
+)
+case(
+    "H",
+    "Py",
+    "RS",
+    "bridge.rs_via_loader_version_len() == len(wasm.version)",
+    b.rs_via_loader_version_len(),
+    len(wasm.version),
+)
+case(
+    "H",
+    "Py",
+    "C",
+    "bridge.via_loader_mode() == wasm.MODE",
+    b.via_loader_mode(),
+    int(wasm.MODE),
+)
+case(
+    "H",
+    "Py",
+    "C",
+    "bridge.via_loader_verify() == int(bool(wasm.verify()))",
+    b.via_loader_verify(),
+    1 if wasm.verify() else 0,
+)
+case(
+    "H",
+    "Py",
+    "C",
+    "bridge.via_loader_trust_count() == wasm.trust_count()",
+    b.via_loader_trust_count(),
+    int(wasm.trust_count()),
+)
+case(
+    "G",
+    "C",
     "RS",
     "bridge.via_mixed() → import mixed.mixed_answer → C→RS peer",
     b.via_mixed(),
