@@ -95,9 +95,18 @@ Plus any modules on the filesystem
 36
 ```
 
-HTTP roots use the same static layout (native C GET). Example:
-`wasm.verify(False); wasm.install_hook("http://host/packs/")` then `import hello`.
-See `make -C examples test-http`.
+HTTP roots use the same static layout (native C GET). With a baked root CA, signed packs verify over the wire:
+
+```text
+make -C examples test-signed   # → test-http-verify OK
+```
+
+<p align="center">
+  <img src="screenshots/http-verify.png" alt="Signed HTTP pack: baked trust, [httpd] GETs, import hello" width="780" />
+</p>
+
+Example without verify: `wasm.verify(False); wasm.install_hook("http://host/packs/")` then `import hello`.
+See also `make -C examples test-http`.
 
 **FQN → file:** `import a.b.c` searches `wasm.path` then `sys.path`. A pack can sit at any depth; if only the leaf file exists, missing parents are thin namespace packages (PEP 420-ish) so `a.b.c` stays attribute-reachable. VFS pack roots are scanned so `import a` / `a.b` work when children exist (flat `a.b.c.wasm` or tree `a/b/…`).
 
@@ -237,6 +246,7 @@ More shots (click through for full size):
 | [`matrix-table.png`](screenshots/matrix-table.png) | Same-pack Py ↔ C ↔ RS matrix |
 | [`engine-summary.png`](screenshots/engine-summary.png) | Interp · AOT · Fast JIT · LLVM JIT |
 | [`repl-demo.png`](screenshots/repl-demo.png) | Full MicroPython REPL (hero above) |
+| [`http-verify.png`](screenshots/http-verify.png) | Signed HTTP fetch + baked trust |
 
 ---
 

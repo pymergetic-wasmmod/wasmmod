@@ -8,3 +8,4 @@ README: **hero** = `repl-demo.png` (top). **Preview** row at bottom = the other 
 | `pack-calls.png` | Preview — cross-lang call highlights | crop pack-call lines from demo / older annotated session |
 | `matrix-table.png` | Preview — ASCII call-matrix TABLE | `make -C examples test` |
 | `engine-summary.png` | Preview — engine scoreboard | `make -C examples test-engines` |
+| `http-verify.png` | Inline (HTTP/verify) — signed pack over httpd + baked CA | `make -C examples test-signed` |
