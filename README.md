@@ -1,7 +1,8 @@
 # wasmmod
 
-**Signed WASM packs for Python.**  
-One `.wasm` file can ship **C + Rust + embedded Python**, talk to peer packs, and call back into the host — loaded by [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) through a small MicroPython `wasm` module (CPython path planned).
+**v0.1.1-alpha** — signed WASM packs for Python.
+
+One `.wasm` file can ship **C + Rust + embedded Python**, talk to peer packs, and call back into the host — loaded by [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) through a small MicroPython `wasm` module (CPython path planned). Opt-in only (`MICROPY_PY_WASM=0` by default); host trees stay unchanged unless they include the submodule and turn the flag on.
 
 Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
 
@@ -135,6 +136,7 @@ wasmmod/
 ├── screenshots/                             README eye-catchers
 ├── docs/PACK.md                             section format
 ├── BRANCHES.md                              MetalPython host branch layout
+├── VERSION                                  package semver (pre-release)
 └── third_party/wamr                         WAMR (Apache-2.0)
 ```
 
