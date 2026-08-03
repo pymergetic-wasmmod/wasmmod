@@ -30,6 +30,7 @@
 
 #if MICROPY_PY_WASM
 
+#include <stdio.h>
 #include <string.h>
 
 #include "py/obj.h"
@@ -47,6 +48,52 @@
 #ifndef MICROPY_PY_WASM_AOT
 #define MICROPY_PY_WASM_AOT (0)
 #endif
+
+#ifndef MICROPY_WASM_AOT_VERSION
+#define MICROPY_WASM_AOT_VERSION (0)
+#endif
+
+unsigned mp_wasm_aot_format_version(void) {
+    #if MICROPY_PY_WASM_AOT
+    return (unsigned)MICROPY_WASM_AOT_VERSION;
+    #else
+    return 0;
+    #endif
+}
+
+size_t mp_wasm_aot_suffix_len_n(const char *s, size_t n) {
+    if (s == NULL || n < 4) {
+        return 0;
+    }
+    size_t j = n;
+    while (j > 0 && s[j - 1] >= '0' && s[j - 1] <= '9') {
+        j--;
+    }
+    if (j >= 4 && memcmp(s + j - 4, ".aot", 4) == 0) {
+        return n - (j - 4);
+    }
+    return 0;
+}
+
+size_t mp_wasm_aot_suffix_len(const char *s) {
+    return s ? mp_wasm_aot_suffix_len_n(s, strlen(s)) : 0;
+}
+
+bool mp_wasm_path_is_aot(const char *path) {
+    return mp_wasm_aot_suffix_len(path) > 0;
+}
+
+void mp_wasm_aot_format_ext(char *buf, size_t buflen) {
+    if (buf == NULL || buflen < 5) {
+        return;
+    }
+    unsigned v = mp_wasm_aot_format_version();
+    if (v > 0) {
+        snprintf(buf, buflen, ".aot%u", v);
+    } else {
+        snprintf(buf, buflen, ".aot");
+    }
+}
 
 static bool path_is_frozen(const char *root) {
     return root != NULL && strcmp(root, ".frozen") == 0;
@@ -86,6 +133,28 @@ static bool try_url_candidate(const char *root, const char *rel, vstr_t *path_ou
     return ok;
 }
 
+// Prefer whole-artifact zlib envelope (rel + ".zlib") when present.
+static bool try_rel_prefer_zlib(const char *root, const char *rel, bool url, vstr_t *path_out) {
+    vstr_t zrel;
+    vstr_init(&zrel, strlen(rel) + 6);
+    vstr_add_str(&zrel, rel);
+    vstr_add_str(&zrel, ".zlib");
+    bool ok;
+    if (url) {
+        ok = try_url_candidate(root, vstr_null_terminated_str(&zrel), path_out);
+    } else {
+        ok = try_vfs_file(root, vstr_null_terminated_str(&zrel), path_out);
+    }
+    vstr_clear(&zrel);
+    if (ok) {
+        return true;
+    }
+    if (url) {
+        return try_url_candidate(root, rel, path_out);
+    }
+    return try_vfs_file(root, rel, path_out);
+}
+
 // Try stem + optional ".<arch>" + ext under root (VFS or URL).
 static bool try_stem_ext(const char *root, const char *stem, const char *arch,
     const char *ext, bool url, vstr_t *path_out) {
@@ -98,12 +167,7 @@ static bool try_stem_ext(const char *root, const char *stem, const char *arch,
         vstr_add_str(&rel, arch);
     }
     vstr_add_str(&rel, ext);
-    bool ok;
-    if (url) {
-        ok = try_url_candidate(root, vstr_null_terminated_str(&rel), path_out);
-    } else {
-        ok = try_vfs_file(root, vstr_null_terminated_str(&rel), path_out);
-    }
+    bool ok = try_rel_prefer_zlib(root, vstr_null_terminated_str(&rel), url, path_out);
     vstr_clear(&rel);
     return ok;
 }
@@ -121,12 +185,7 @@ static bool try_pkg_init(const char *root, const char *stem, const char *arch,
         vstr_add_str(&rel, arch);
     }
     vstr_add_str(&rel, ext);
-    bool ok;
-    if (url) {
-        ok = try_url_candidate(root, vstr_null_terminated_str(&rel), path_out);
-    } else {
-        ok = try_vfs_file(root, vstr_null_terminated_str(&rel), path_out);
-    }
+    bool ok = try_rel_prefer_zlib(root, vstr_null_terminated_str(&rel), url, path_out);
     vstr_clear(&rel);
     return ok;
 }
@@ -140,8 +199,9 @@ static bool try_one_arch_ext(const char *root, const char *stem, bool allow_pkg,
     return try_stem_ext(root, stem, arch, ext, url, path_out);
 }
 
-// .wasm is portable — no arch infix. .aot is native: try wasm.arch tags as
-// ".<arch>" infix, then plain .aot, then fall back to plain .wasm.
+// .wasm is portable — no arch infix. .aotN is the versioned native format
+// (N = host AOT_CURRENT_VERSION); try wasm.arch tags, then plain .aotN,
+// then legacy unversioned .aot, then portable .wasm.
 static bool try_stem_variants(const char *root, const char *stem, bool allow_pkg,
     bool url, vstr_t *path_out) {
     #if MICROPY_PY_WASM_AOT
@@ -149,6 +209,9 @@ static bool try_stem_variants(const char *root, const char *stem, bool allow_pkg
     size_t n_arch = 0;
     mp_obj_t *arch_items = NULL;
     mp_obj_list_get(mp_wasm_arch_obj(), &n_arch, &arch_items);
+
+    char aot_ext[16];
+    mp_wasm_aot_format_ext(aot_ext, sizeof(aot_ext));
 
     for (size_t ai = 0; ai < n_arch; ++ai) {
         if (!mp_obj_is_str(arch_items[ai])) {
@@ -158,12 +221,30 @@ static bool try_stem_variants(const char *root, const char *stem, bool allow_pkg
         if (arch == NULL || arch[0] == '\0') {
             continue;
         }
-        if (try_one_arch_ext(root, stem, allow_pkg, arch, ".aot", url, path_out)) {
+        if (try_one_arch_ext(root, stem, allow_pkg, arch, aot_ext, url, path_out)) {
             return true;
         }
     }
-    if (try_one_arch_ext(root, stem, allow_pkg, "", ".aot", url, path_out)) {
+    if (try_one_arch_ext(root, stem, allow_pkg, "", aot_ext, url, path_out)) {
         return true;
+    }
+    // Legacy unversioned .aot (pre-format-tag publishes).
+    if (strcmp(aot_ext, ".aot") != 0) {
+        for (size_t ai = 0; ai < n_arch; ++ai) {
+            if (!mp_obj_is_str(arch_items[ai])) {
+                continue;
+            }
+            const char *arch = mp_obj_str_get_str(arch_items[ai]);
+            if (arch == NULL || arch[0] == '\0') {
+                continue;
+            }
+            if (try_one_arch_ext(root, stem, allow_pkg, arch, ".aot", url, path_out)) {
+                return true;
+            }
+        }
+        if (try_one_arch_ext(root, stem, allow_pkg, "", ".aot", url, path_out)) {
+            return true;
+        }
     }
     #endif
     return try_one_arch_ext(root, stem, allow_pkg, "", ".wasm", url, path_out);
@@ -301,18 +382,23 @@ static mp_obj_t ensure_namespace(const char *dotted_name) {
     return mod;
 }
 
-// Map artifact filename → dotted pack stem. Strips .wasm / .aot and a known
-// AOT arch infix. Returns false if not a pack artifact.
+// Map artifact filename → dotted pack stem. Strips optional .zlib, then
+// .wasm / .aotN / .aot and a known AOT arch infix. Returns false if not a pack artifact.
 static bool artifact_to_stem(const char *fname, char *buf, size_t buf_len) {
     size_t n = strlen(fname);
+    if (n > 5 && memcmp(fname + n - 5, ".zlib", 5) == 0) {
+        n -= 5;
+    }
     bool aot = false;
     if (n > 5 && memcmp(fname + n - 5, ".wasm", 5) == 0) {
         n -= 5;
-    } else if (n > 4 && memcmp(fname + n - 4, ".aot", 4) == 0) {
-        n -= 4;
-        aot = true;
     } else {
-        return false;
+        size_t alen = mp_wasm_aot_suffix_len_n(fname, n);
+        if (alen == 0) {
+            return false;
+        }
+        n -= alen;
+        aot = true;
     }
     if (n == 0 || n >= buf_len) {
         return false;

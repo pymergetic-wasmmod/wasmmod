@@ -7,9 +7,9 @@
 Build freestanding guests and load them with MicroPython's optional `wasm`
 module (WAMR-backed, `MICROPY_PY_WASM=1`).
 
-**Pack format / design:** [PACK.md](PACK.md) (same as [docs/PACK.md](../docs/PACK.md)) —
-mixed C/C++/Rust + Python tree, `sys.modules` registration, load/unload,
-host↔guest / guest↔guest.
+**Pack format / design:** [docs/PACK.md](../docs/PACK.md) (`examples/PACK.md` is a
+symlink) — mixed C/C++/Rust + Python tree, `sys.modules` registration,
+load/unload, host↔guest / guest↔guest.
 
 Commands below are run from the **host** tree root (MicroPython / metalpython)
 with this repo checked out as `extmod/wasmmod` (metalpython may also symlink

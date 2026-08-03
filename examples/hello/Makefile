@@ -3,7 +3,7 @@
 #   make -C extmod/wasmmod/examples/hello
 #   make -C ports/unix MICROPY_PY_WASM=1
 #
-# Pack format: see ../PACK.md
+# Pack format: see ../../docs/PACK.md (examples/PACK.md → docs/PACK.md)
 
 include ../find_top.mk
 OUT = ../packs/hello.wasm

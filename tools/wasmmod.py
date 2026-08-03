@@ -33,6 +33,12 @@ Commands:
   sign             PKI / ECDSA sign .wasm / .aot
   embed-ca         Bake zlib-compressed root CA DER(s) into C
   httpd            Static HTTP server for pack smoke tests
+  source           Inspect / extract wasmmod.source section (Python)
+  read             Host reader for source/sig (Rust wasmmod-read)
+  zlib             Wrap / unwrap whole-artifact MPZL (.wasm.zlib / .aot.zlib)
+
+  read needs: cargo build --release -p wasmmod-read
+              (or WASMMOD_READ=/path/to/wasmmod-read)
 
 Each command is also a standalone script: tools/wasmmod_<command>.py
 (with hyphens → underscores, e.g. embed-ca → wasmmod_embed_ca.py).
@@ -52,6 +58,9 @@ COMMANDS: dict[str, str] = {
     "sign": "wasmmod_sign",
     "embed-ca": "wasmmod_embed_ca",
     "httpd": "wasmmod_httpd",
+    "source": "wasmmod_source",
+    "read": "wasmmod_read",
+    "zlib": "wasmmod_zlib",
 }
 
 

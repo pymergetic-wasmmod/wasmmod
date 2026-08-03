@@ -43,7 +43,10 @@
 #define MP_WASM_PACK_KIND_RAW 3
 #define MP_WASM_PACK_KIND_PYC 4 /* CPython bytecode; ignored by MicroPython loader */
 
-// Signature tags (see examples/wasmmod/PACK.md). 0..8 = N i32 args -> i32.
+// Pack file entry flags (version >= 3).
+#define MP_WASM_PACK_FILE_FLAG_ZLIB (1u << 0)
+
+// Signature tags (see docs/PACK.md). 0..8 = N i32 args -> i32.
 // 255 = resolve arity from the Wasm type at bind time.
 #define MP_WASM_PACK_SIG_AUTO 255
 
@@ -52,6 +55,8 @@ typedef struct mp_wasm_pack_file_t {
     const char *path;
     uint16_t path_len;
     uint8_t kind;
+    uint8_t flags;     // v3+; 0 for v1/v2
+    uint32_t raw_len;  // v3+ uncompressed size; == data_len when not zlib
     const uint8_t *data;
     uint32_t data_len;
 } mp_wasm_pack_file_t;
@@ -98,6 +103,9 @@ bool mp_wasm_find_custom_section(const uint8_t *wasm, uint32_t len, const char *
 bool mp_wasm_pack_find_section(const uint8_t *wasm, uint32_t len, const uint8_t **payload, uint32_t *payload_len);
 bool mp_wasm_pack_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_pack_info_t *out);
 void mp_wasm_pack_info_free(mp_wasm_pack_info_t *info);
+// Inflate pack file if needed. *out points at f->data or malloc'd buffer (*to_free).
+// Caller MICROPY_WASM_FREE(*to_free) when non-NULL.
+bool mp_wasm_pack_file_bytes(const mp_wasm_pack_file_t *f, const uint8_t **out, uint32_t *out_len, uint8_t **to_free);
 
 bool mp_wasm_imports_find_section(const uint8_t *wasm, uint32_t len, const uint8_t **payload, uint32_t *payload_len);
 bool mp_wasm_imports_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_imports_info_t *out);

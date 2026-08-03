@@ -26,13 +26,17 @@
 #ifndef MICROPY_INCLUDED_EXTMOD_WASMMOD_FINDER_H
 #define MICROPY_INCLUDED_EXTMOD_WASMMOD_FINDER_H
 
+#include <stddef.h>
+#include <stdbool.h>
+
 #include "py/obj.h"
 
 // Search wasm.path then sys.path for a pack matching the dotted import name.
 // Path form: a/b/c/__init__.wasm | a/b/c.wasm
 // Flat form: a.b.c.wasm  (when name has dots; handy under packs/)
-// With AOT: try a/b/c[.<arch>].aot / a.b.c[.<arch>].aot (wasm.arch tags) then
-// plain .aot, then portable .wasm. Arch infix is AOT-only — .wasm is agnostic.
+// With AOT: try a/b/c[.<arch>].aot{N} / a.b.c[.<arch>].aot{N} where N is
+// WAMR AOT_CURRENT_VERSION (file format), then legacy .aot, then .wasm.
+// Optional trailing .zlib preferred for all candidates.
 // On success writes *path_out (caller vstr_clear).
 bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out);
 
@@ -55,5 +59,14 @@ mp_obj_t mp_wasm_path_obj(void);
 void mp_wasm_arch_ensure(void);
 mp_obj_t mp_wasm_arch_obj(void);
 mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override);
+
+// Host AOT file-format version (WAMR AOT_CURRENT_VERSION), or 0 if unavailable.
+unsigned mp_wasm_aot_format_version(void);
+// Length of trailing .aot / .aot<digits> suffix in s[0..n), or 0.
+size_t mp_wasm_aot_suffix_len_n(const char *s, size_t n);
+size_t mp_wasm_aot_suffix_len(const char *s);
+bool mp_wasm_path_is_aot(const char *path);
+// Write host format ext into buf (e.g. ".aot6"); falls back to ".aot".
+void mp_wasm_aot_format_ext(char *buf, size_t buflen);
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_FINDER_H

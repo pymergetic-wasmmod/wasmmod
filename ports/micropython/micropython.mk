@@ -24,11 +24,14 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/loader.c \
 	$(WASMMOD_DIR)/pack.c \
 	$(WASMMOD_DIR)/runtime.c \
-	$(WASMMOD_DIR)/verify.c
+	$(WASMMOD_DIR)/source.c \
+	$(WASMMOD_DIR)/verify.c \
+	$(WASMMOD_DIR)/zlibutil.c
 
 # Included after extmod.mk's PY_O += SRC_EXTMOD_C, so append objects here.
 PY_O += $(addprefix $(BUILD)/, $(SRC_WASMMOD:.c=.o))
 SRC_QSTR += $(SRC_WASMMOD)
+QSTR_DEFS += $(TOP)/$(WASMMOD_DIR)/qstrdefs.wasmmod
 
 # Nested WAMR: top-level `make submodules` is not recursive by default.
 GIT_SUBMODULES += $(WASMMOD_DIR)
@@ -48,6 +51,8 @@ WAMR_BUILD ?= $(BUILD)/wamr-a$(MICROPY_PY_WASM_AOT)j$(MICROPY_PY_WASM_JIT)f$(MIC
 
 # Package release string → wasm.version (single source: VERSION).
 MICROPY_WASM_VERSION ?= $(shell tr -d '[:space:]' < $(TOP)/$(WASMMOD_DIR)/VERSION)
+# WAMR AOT file-format version → wasm.AOT_VERSION / .aotN filenames.
+MICROPY_WASM_AOT_VERSION ?= $(shell sed -n 's/^#define AOT_CURRENT_VERSION \([0-9][0-9]*\)/\1/p' $(TOP)/$(WAMR_DIR)/core/config.h)
 
 INC += -I$(TOP)/$(WAMR_DIR)/core/iwasm/include
 CFLAGS_EXTMOD += -DMICROPY_PY_WASM=1 \
@@ -56,7 +61,8 @@ CFLAGS_EXTMOD += -DMICROPY_PY_WASM=1 \
 	-DMICROPY_PY_WASM_FAST_JIT=$(MICROPY_PY_WASM_FAST_JIT) \
 	-DMICROPY_PY_WASM_MATRIX=$(MICROPY_PY_WASM_MATRIX) \
 	-DMICROPY_WASM_VERIFY=$(MICROPY_WASM_VERIFY) \
-	-DMICROPY_WASM_VERSION=\"$(MICROPY_WASM_VERSION)\"
+	-DMICROPY_WASM_VERSION=\"$(MICROPY_WASM_VERSION)\" \
+	-DMICROPY_WASM_AOT_VERSION=$(MICROPY_WASM_AOT_VERSION)
 LDFLAGS_EXTMOD += -L$(WAMR_BUILD) -liwasm -lpthread -ldl -lm
 ifneq ($(filter 1,$(MICROPY_PY_WASM_JIT) $(MICROPY_PY_WASM_FAST_JIT)),)
 LDFLAGS_EXTMOD += -lstdc++
@@ -101,6 +107,7 @@ $(WAMR_BUILD)/libiwasm.a:
 		-DWAMR_BUILD_SIMD=0 \
 		-DWAMR_BUILD_MULTI_MODULE=0 \
 		-DWAMR_DISABLE_HW_BOUND_CHECK=1 \
+		-DWAMR_BUILD_LOAD_CUSTOM_SECTION=1 \
 		$(WAMR_CMAKE_EXTRA)
 	$(Q)cmake --build $(WAMR_BUILD) --target vmlib -j
 
@@ -109,7 +116,8 @@ $(BUILD)/$(WASMMOD_DIR)/modapi.o $(BUILD)/$(WASMMOD_DIR)/packload.o \
 $(BUILD)/$(WASMMOD_DIR)/runtime.o \
 $(BUILD)/$(WASMMOD_DIR)/pack.o $(BUILD)/$(WASMMOD_DIR)/finder.o \
 $(BUILD)/$(WASMMOD_DIR)/forward.o $(BUILD)/$(WASMMOD_DIR)/fetch.o \
-$(BUILD)/$(WASMMOD_DIR)/verify.o $(BUILD)/$(WASMMOD_DIR)/host.o: $(WAMR_BUILD)/libiwasm.a
+$(BUILD)/$(WASMMOD_DIR)/verify.o $(BUILD)/$(WASMMOD_DIR)/host.o \
+$(BUILD)/$(WASMMOD_DIR)/source.o $(BUILD)/$(WASMMOD_DIR)/zlibutil.o: $(WAMR_BUILD)/libiwasm.a
 
 ifeq ($(MICROPY_PY_WASM_MATRIX),1)
 WASM_HOST_MATRIX_O = $(BUILD)/$(WASMMOD_DIR)/examples/host_matrix.o

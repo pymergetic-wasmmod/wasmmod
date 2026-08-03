@@ -230,7 +230,9 @@ Mirror Python’s package vs module layout so discovery feels obvious:
 | `mypkg/sub.wasm` / `.aot` | Child pack under package `mypkg` | `mypkg.sub` (nested pack) |
 | `mypkg/sub/__init__.wasm` / `.aot` | Nested package pack | `mypkg.sub` |
 | `mypkg.sub.wasm` | Flat dotted filename (e.g. under `packs/`) | `mypkg.sub` |
-| `mypkg.sub.<arch>.aot` | Arch-tagged **AOT** pack (`wasm.arch` / `MICROPY_WASM_PACK_ARCH`); `.wasm` stays arch-agnostic | `mypkg.sub` |
+| `mypkg.sub.aot{N}` | Versioned **AOT** format (`N` = WAMR `AOT_CURRENT_VERSION`, e.g. `.aot6`) | `mypkg.sub` |
+| `mypkg.sub.<arch>.aot{N}` | Arch-tagged AOT (`wasm.arch` / `MICROPY_WASM_PACK_ARCH`) | `mypkg.sub` |
+| `mypkg.sub.aot` | Legacy unversioned AOT (still probed after `.aot{N}`) | `mypkg.sub` |
 
 Prefer `.aot` over `.wasm` when `MICROPY_PY_WASM_AOT` is enabled (see AOT).
 
@@ -277,8 +279,9 @@ find_wasm(fullname_name) → path_or_url | None
 for root in wasm.path + sys.path:
   # path form / flat dotted (.wasm portable):
   try root/a/b/c/__init__.wasm | root/a/b/c.wasm | root/a.b.c.wasm
-  # AOT only — wasm.arch tags then plain .aot, else .wasm:
-  try root/a/b/c[.<arch>].aot | root/a.b.c[.<arch>].aot | … .aot
+  # AOT — format-tagged .aot{N} (N = wasm.AOT_VERSION), then legacy .aot:
+  try root/a/b/c[.<arch>].aot{N} | … .aot{N} | … .aot
+  # each candidate also tries trailing .zlib first
 ```
 
 So yes: **path-based finder**, same mental model as `sys.path`, just also
@@ -306,6 +309,8 @@ Opt-in so normal `import sensor` hits packs without calling `import_wasm`:
 import wasm
 wasm.verify(False)                       # session gate: all loads (VFS + HTTP)
 wasm.install_hook("https://example.org/packs/")  # optional URL root + import hook
+# Multiple roots, first wins (PyPI-style index priority):
+# wasm.install_hook(url=["https://cdn.example/packs/", "https://mirror.example/packs/"])
 # wasm.path.append("/lib/wasm"); wasm.install_hook()
 
 import sensor           # finder runs; loads sensor/__init__.wasm if needed
@@ -372,30 +377,46 @@ the manifest) — execution engine is an implementation detail.
 
 ### Pack metadata vs AOT bytes
 
-`wasmmod.pack` / `wasmmod.imports` live in **Wasm custom sections**.
-`wamrc` consumes `.wasm` and emits `.aot`; custom sections are not a reliable
-place to read metadata from the `.aot` alone.
+`wasmmod.pack` / `wasmmod.imports` / `wasmmod.source` use the **same named
+payloads** on both engines:
 
-Recommended shipping layouts:
+| Deliverable | How sections are stored |
+|-------------|-------------------------|
+| `.wasm` | Wasm custom sections (`id=0`) |
+| `.aot` | WAMR AOT custom sections (`type=100`, RAW) via `wamrc --emit-custom-sections=…` |
 
-1. **Pair (simple):** `hello.wasm` (or stripped meta-only) + `hello.aot`  
-   Loader reads sections from `.wasm`, executes `.aot` when
-   `MICROPY_PY_WASM_AOT` and load succeeds.
-2. **Sidecar:** `hello.aot` + `hello.mpack` (raw `wasmmod.pack` payload
-   bytes extracted at pack time). No need to keep full Wasm on the device.
-3. **Wasm-only:** interp path (today).
+`tools/wasmmod.py pack … --aot` always passes
+
+`--emit-custom-sections=wasmmod.pack,wasmmod.imports,wasmmod.source`
+
+so a **single `.aot` is enough** for execute + pack load + `wasm.source*` /
+`wasmmod-read` (no sibling `.wasm` required for metadata). The `.wasm` remains
+the portable build input. Host WAMR needs `WAMR_BUILD_LOAD_CUSTOM_SECTION=1`
+(set by the wasmmod port fragment).
+
+**Sign after AOT** (do not copy `wasmmod.sig` through `wamrc` — the digest
+covers the final artifact bytes):
+
+```sh
+wamrc --emit-custom-sections=wasmmod.pack,wasmmod.source \
+  -o hello.aot hello.wasm
+tools/wasmmod.py sign sign --key leaf.key.pem \
+  --chain chain.der hello.aot   # same model as hello.wasm
+wasmmod-read sig hello.aot
+```
+
+Optional still: keep a portable `.wasm` beside arch-tagged `.aot` for hosts
+that are interp-only.
 
 Tooling:
 
 ```sh
-python3 tools/wasmmod.py pack examples/hello/ -o hello.wasm
-wamrc -o hello.aot hello.wasm          # target-specific flags as needed
+python3 tools/wasmmod.py pack examples/hello/ -o hello.wasm --aot
 # optional: wasm_pack --write-mpack hello.mpack
 ```
 
-Signature verify applies to the **bytes that will be instantiated** (the
-`.aot` or `.wasm` actually loaded), and should also cover metadata
-(sidecar hash / same signed envelope).
+Signature verify hashes the **loaded artifact without `wasmmod.sig`**.
+Same rules for `.wasm` and `.aot`. One file — no detached `.sig`/`.crt`.
 
 ### Loader behaviour
 
@@ -425,7 +446,8 @@ same — only the code engine behind the export changes.
 | **HTTP(S)** | Default: native C client in `fetch.c`. Replace via `mp_wasm_io_ops_t` (`io.h` / [ports/PORT.md](../ports/PORT.md)) — Metal async-ready. |
 
 URL roots mirror the VFS layout. Candidate order matches local finder
-(AOT/arch tags → plain `.aot` → portable `.wasm`; tree then flat dotted names).
+(AOT `.aot{N}` + arch → legacy `.aot` → portable `.wasm`; each with `.zlib`
+preferred; tree then flat dotted names).
 HTTP roots are probed with a real HEAD/GET (only **200** counts); no directory listing.
 
 ```python
@@ -433,10 +455,9 @@ import wasm
 wasm.verify(True)                        # session gate (default on): VFS + HTTP
 wasm.install_hook("https://example.org/packs/")
 # or: wasm.path.append("https://example.org/packs/"); wasm.install_hook()
-import hello   # GET …/packs/hello.wasm (then …/hello.wasm.sig if verifying)
+import hello   # GET …/packs/hello.wasm (signed blob; wasmmod.sig inside)
 ```
 
-Detached `{artifact}.sig` is fetched the same way over HTTP as on VFS.
 `wasm.verify(False)` disables signature checks for the session (compile-time
 `MICROPY_WASM_VERIFY=0` is always a no-op). Smoke:
 `make -C examples test-http` (unsigned; uses `wasm.verify(False)`).
@@ -450,11 +471,11 @@ Ports replace I/O with `mp_wasm_io_set` / `MICROPY_WASM_IO_OPS` (see [ports/PORT
 | Layer | Scope | Material |
 |-------|--------|----------|
 | **Trust** | Host / upy project / Metal image | Root CA DER(s) zlib-compressed into ROM at **image build** (`MICROPY_WASM_TRUST_CA`), or flash via `MICROPY_WASM_TRUST_BOOT` / runtime `add_trust`. |
-| **Sign** | Each pack build (CI) | Leaf private key → `.sig` + `.crt` beside the artifact. |
-| **Ship** | With the pack | `.sig` + `.crt` only — never the root, never the leaf key. |
+| **Sign** | Each pack build (CI) | Leaf private key → embed `wasmmod.sig` (MPWS: sig + chain). |
+| **Ship** | With the pack | Signed `.wasm` / `.aot` only — never the root, never the leaf key. |
 
 One leaf may sign many packs; or each build gets its own leaf under the same CA.
-The device only checks that `.crt` chains to a trusted root, then ECDSA over the
+The device only checks that the embedded chain reaches a trusted root, then ECDSA over the
 bytes. Multiple roots: `MICROPY_WASM_TRUST_CA="root_a.der root_b.der"` (or
 repeated `add_trust`). Baked roots inflate **lazily** on first verify /
 `trust_count()` — not on `import wasm`. Omit bake and skip `add_trust` →
@@ -480,30 +501,38 @@ Smoke key layout (`gen-pki -o .keys`):
 .keys/
   trust/root.crt.der     # baked via MICROPY_WASM_TRUST_CA (or add_trust)
   sign/leaf.key.pem      # CI secret
-  sign/chain.der         # → packs/*.crt (leaf || intermediates)
+  sign/chain.der         # embedded into wasmmod.sig (MPWS)
 ```
 
 **PKI (preferred):** trust a **root CA** (compile-in or `wasm.add_trust`).
-Packs ship a detached ECDSA `.sig` plus `.crt` (leaf [+ intermediates], root
+Packs ship an embedded `wasmmod.sig` (MPWS: ECDSA + leaf [+ intermediates]; root
 not included). The loader verifies the X.509 chain to the trusted root, then
 checks the ECDSA-P256/SHA-256 signature with the leaf key.
 
 **Pinned pubkey (still supported):** `wasm.add_trust(leaf.pub.der)` and a
-`.sig` only — no chain check.
+raw (non-MPWS) `wasmmod.sig` — no chain check.
 
 When `MICROPY_SSL_MBEDTLS` is on and `MICROPY_WASM_VERIFY!=0`, packs are
 verified *before* instantiate.
 
-### Distribution shapes
+### Distribution shape
 
-1. **Detached PKI** (default; VFS + HTTP + `.aot`):
-   - `hello.wasm` / `hello.aot`
-   - `hello.wasm.sig` / `hello.aot.sig` (openssl ECDSA-SHA256)
-   - `hello.wasm.crt` / `hello.aot.crt` (leaf DER, then intermediates)
-2. **Embedded** (`.wasm` only):
-   - `tools/wasmmod.py sign sign --embed --chain chain.der` → `wasmmod.sig`
-     section with MPWS envelope (sig + chain)
-   - Loader hashes the module *without* that section
+**Embedded only** (`.wasm` and `.aot`):
+
+- `tools/wasmmod.py sign sign --key … --chain chain.der PATH`
+  → `wasmmod.sig` (Wasm custom section or AOT CUSTOM/RAW) with MPWS (sig + chain)
+- Loader hashes the artifact *without* that section
+- Sign **each** deliverable after it is final (after `wamrc` for AOT)
+
+Inspect:
+
+```bash
+tools/wasmmod.py sign info hello.aot
+tools/wasmmod.py sign verify --trust .keys/trust/root.crt.der hello.aot
+wasmmod-read sig hello.aot
+wasmmod-read verify --trust .keys/trust/root.crt.der hello.aot
+# MicroPython: wasm.sig_info(buf); wasm.verify_sig(buf)  # needs trust loaded
+```
 
 ```bash
 make -C examples test-signed         # PKI sign + VFS + HTTP verify
@@ -533,7 +562,7 @@ tools/wasmmod.py sign sign --key .keys/sign/leaf.key.pem \
 |------|-----------|
 | `MICROPY_WASM_VERIFY=0` | no verify (default matrix smoke) |
 | `MICROPY_WASM_VERIFY=1` | require valid sig every load |
-| `MICROPY_WASM_VERIFY=2` | verify if `.sig` / section present; else allow |
+| `MICROPY_WASM_VERIFY=2` | verify if `wasmmod.sig` present; else allow |
 
 Failed verify → do not instantiate. The root CA never comes from the pack
 itself — only from the image (`MICROPY_WASM_TRUST_CA` / `TRUST_BOOT`) or
@@ -688,9 +717,9 @@ n_files ×:
 | `util.py` | `mypkg.util` |
 | `sub/mod.mpy` | `mypkg.sub.mod` |
 
-### Payload version 2 **(proposed)**
+### Payload version 2 **(shipped)**
 
-Same header with `version = 2`, then after `n_files` entries:
+Same header with `version = 2`, then after `n_files` entries (old file layout):
 
 ```text
 n_exports     4
@@ -716,6 +745,25 @@ n_exports ×:
 
 Unknown `sig` → skip binding that export (still callable via low-level API).
 
+### Payload version 3 **(current writer)**
+
+Same as v2 (always includes `n_exports`, may be 0), but each file entry is:
+
+```text
+  path_len   2
+  path       P
+  kind       1   1=.py  2=.mpy  3=raw  4=.pyc
+  flags      1   bit0 = zlib-compressed payload
+  raw_len    4   uncompressed size
+  data_len   4
+  data       D
+```
+
+Defaults: pack compress **on** for `.py` / `.mpy` / `.pyc` (skip if not smaller);
+raw resources stay uncompressed. Toggle with `--compress` / `[pack] compress`.
+Native Wasm/AOT code is never compressed here — use the whole-artifact MPZL
+envelope for bandwidth.
+
 ### Kind / flags
 
 | kind | meaning |
@@ -723,9 +771,34 @@ Unknown `sig` → skip binding that export (still callable via low-level API).
 | `1` | `.py` source |
 | `2` | `.mpy` bytecode |
 | `3` | raw resource |
+| `4` | `.pyc` (CPython; ignored by MicroPython loader) |
 
-v1 flags: none defined; ignore unknown bits. Readers that do not know
+v1/v2 flags: none; v3 file `flags` bit0 = zlib. Readers that do not know
 `version` skip the whole section.
+
+## Whole-artifact envelope: `*.zlib` (MPZL)
+
+Optional outer wrap for `.wasm` / `.aot` (CDN / VFS bandwidth):
+
+```text
+magic     4   b"MPZL"
+raw_len   4   uncompressed artifact size
+zlib      …   RFC 1950 of the naked .wasm/.aot
+```
+
+Tools: `tools/wasmmod.py zlib wrap|unwrap|info`. Sign the naked artifact first,
+then wrap. Finder prefers `path.wasm.zlib` / `path.aot{N}.zlib` when present;
+loader unwraps **before** verify/load.
+
+CDN-oriented layout (channels + format-tagged AOT):
+
+```text
+…/packs/                    # lead / latest channel
+…/packs/@0.1.0/             # version pin
+  hello.wasm.zlib
+  hello.x86_64.aot6.zlib    # arch + AOT file-format N (= wasm.AOT_VERSION)
+  hello.aot6.zlib           # format only (no arch infix)
+```
 
 ## Custom section: `wasmmod.imports` **(proposed)**
 
@@ -755,13 +828,69 @@ tools/wasmmod.py pack [pack.toml | pack dir | sources…]
   3. optional: freeze [python].mount .py → .mpy via mpy-cross (--freeze / freeze=true)
   4. append wasmmod.pack  (name + tree [+ exports v2]; kind=1 .py / kind=2 .mpy)
   5. append wasmmod.imports from [[imports]]
+  6. optional: append wasmmod.source (`--with-source` / `[source] embed`)
 ```
 
 CLI may stay source-oriented for smoke tests; directory + `pack.toml` is
 the normal pack author path (see `examples/hello/pack.toml`):
 
 ```sh
-python3 tools/wasmmod.py pack examples/hello -o hello.wasm
+python3 tools/wasmmod.py pack examples/hello -o hello.wasm --with-source \
+  --tag arch=x86_64 --tag git=$(git rev-parse --short HEAD)
+python3 tools/wasmmod.py source meta hello.wasm
+python3 tools/wasmmod.py source extract hello.wasm -o ./hello-src/
+```
+
+## Custom section: `wasmmod.source` **(v1)**
+
+Audit/source tree embedded in the same `.wasm` (signed with the module).
+Magic **`MPSR`** (not `MPWS` — that envelope is used by `wasmmod.sig`).
+
+```text
+magic          4   b"MPSR"
+format_ver     2   1
+flags          2   0 (reserved)
+name_len       2
+name           N   pack import name
+version_len    2
+version        V   pack.toml version / --pkg-version
+n_tags         2
+n_tags ×:
+  key_len      2
+  key          K
+  val_len      2
+  val          V
+n_files        4
+n_files ×:
+  path_len     2
+  path         P   pack-root relative, '/' separators, no ".."
+  flags        1   bit0 = zlib-compressed payload
+  raw_len      4   uncompressed size
+  data_len     4   on-wire size
+  data         D
+```
+
+Defaults: source compress **on** (per file, skip if not smaller); pack
+bytecode compress **on** (v3, same policy). Toggle with `--compress-source` /
+`[source] compress` and `--compress` / `[pack] compress`. Whole-artifact
+MPZL wrap is separate (`tools/wasmmod.py zlib`).
+
+Contents: pack tree minus build artifacts (`.wasm`, `.aot`, `build/`,
+`*.o`, …). Includes `pack.toml`, `src/**`, co-located markdown/licenses.
+
+Runtime / tools:
+
+```python
+v = wasm.source_from_file("hello.wasm")  # or wasm.source("hello") if loaded
+v.meta()       # {name, version, tags, n_files}
+v.files()      # all stored paths
+v.modules()    # dotted modules under src/
+v.module("util").files()
+v.read("src/__init__.py")
+```
+
+```sh
+tools/wasmmod.py source meta|list|read|extract …
 ```
 
 ## Loader API (proposed Python surface)

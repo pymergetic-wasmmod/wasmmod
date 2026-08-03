@@ -1,5 +1,4 @@
-# MicroPython wasm pack manifest (see ../PACK.md).
-# Pack manifest (see ../PACK.md).
+# Pack manifest (see ../../docs/PACK.md; examples/PACK.md is a symlink).
 
 type = "package"
 name = "hello"
@@ -29,3 +28,12 @@ func = "hello"
 
 [[exports]]
 func = "add"
+
+# Embed pack sources into wasmmod.source (also: pack --with-source).
+[source]
+embed = true
+compress = true
+
+# Per-file zlib for pack .py/.mpy/.pyc (pack v3; default on).
+[pack]
+compress = true

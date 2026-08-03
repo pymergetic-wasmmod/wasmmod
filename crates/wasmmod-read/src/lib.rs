@@ -1,0 +1,435 @@
+//! Host-side reader for `wasmmod.source` (and helpers for other custom sections).
+//!
+//! No MicroPython / WAMR dependency — safe to build from a solo wasmmod checkout.
+
+use std::path::{Path, PathBuf};
+
+use flate2::read::ZlibDecoder;
+use std::io::Read;
+use thiserror::Error;
+
+pub const SOURCE_SECTION: &str = "wasmmod.source";
+pub const SOURCE_MAGIC: &[u8; 4] = b"MPSR";
+pub const SOURCE_VERSION: u16 = 1;
+pub const FILE_FLAG_ZLIB: u8 = 1 << 0;
+
+pub const SIG_SECTION: &str = "wasmmod.sig";
+pub const MPWS_MAGIC: &[u8; 4] = b"MPWS";
+pub const MPWS_VER: u8 = 1;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("not a Wasm or AOT module")]
+    NotModule,
+    #[error("truncated Wasm / AOT / section")]
+    Truncated,
+    #[error("missing custom section {0}")]
+    MissingSection(String),
+    #[error("bad wasmmod.source magic or version")]
+    BadSource,
+    #[error("bad wasmmod.sig / MPWS")]
+    BadSig,
+    #[error("path not found: {0}")]
+    PathNotFound(String),
+    #[error("inflate failed for {0}")]
+    Inflate(String),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, Clone)]
+pub struct SourceTag {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceFile {
+    pub path: String,
+    pub flags: u8,
+    pub raw_len: u32,
+    /// On-wire bytes (possibly zlib).
+    pub data: Vec<u8>,
+}
+
+impl SourceFile {
+    pub fn is_zlib(&self) -> bool {
+        self.flags & FILE_FLAG_ZLIB != 0
+    }
+
+    pub fn bytes(&self) -> Result<Vec<u8>> {
+        if !self.is_zlib() {
+            return Ok(self.data.clone());
+        }
+        let mut dec = ZlibDecoder::new(self.data.as_slice());
+        let mut out = Vec::with_capacity(self.raw_len as usize);
+        dec.read_to_end(&mut out).map_err(|_| Error::Inflate(self.path.clone()))?;
+        if out.len() != self.raw_len as usize {
+            return Err(Error::Inflate(self.path.clone()));
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceView {
+    pub version: u16,
+    pub flags: u16,
+    pub name: String,
+    pub pkg_version: String,
+    pub tags: Vec<SourceTag>,
+    pub files: Vec<SourceFile>,
+}
+
+impl SourceView {
+    pub fn open_bytes(wasm: &[u8]) -> Result<Self> {
+        let payload = extract_custom_section(wasm, SOURCE_SECTION)?
+            .ok_or_else(|| Error::MissingSection(SOURCE_SECTION.into()))?;
+        parse_source_payload(payload)
+    }
+
+    pub fn open_file(path: impl AsRef<Path>) -> Result<Self> {
+        let wasm = std::fs::read(path)?;
+        Self::open_bytes(&wasm)
+    }
+
+    pub fn file(&self, path: &str) -> Option<&SourceFile> {
+        self.files.iter().find(|f| f.path == path)
+    }
+
+    pub fn read(&self, path: &str) -> Result<Vec<u8>> {
+        self.file(path)
+            .ok_or_else(|| Error::PathNotFound(path.into()))?
+            .bytes()
+    }
+
+    pub fn extract_to(&self, out_dir: impl AsRef<Path>) -> Result<usize> {
+        let root = out_dir.as_ref();
+        for f in &self.files {
+            let dest = root.join(&f.path);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&dest, f.bytes()?)?;
+        }
+        Ok(self.files.len())
+    }
+}
+
+fn read_u16(buf: &[u8], i: &mut usize) -> Result<u16> {
+    if *i + 2 > buf.len() {
+        return Err(Error::Truncated);
+    }
+    let v = u16::from_le_bytes([buf[*i], buf[*i + 1]]);
+    *i += 2;
+    Ok(v)
+}
+
+fn read_u32(buf: &[u8], i: &mut usize) -> Result<u32> {
+    if *i + 4 > buf.len() {
+        return Err(Error::Truncated);
+    }
+    let v = u32::from_le_bytes([buf[*i], buf[*i + 1], buf[*i + 2], buf[*i + 3]]);
+    *i += 4;
+    Ok(v)
+}
+
+fn read_bytes<'a>(buf: &'a [u8], i: &mut usize, n: usize) -> Result<&'a [u8]> {
+    if *i + n > buf.len() {
+        return Err(Error::Truncated);
+    }
+    let s = &buf[*i..*i + n];
+    *i += n;
+    Ok(s)
+}
+
+fn read_uleb(buf: &[u8], i: &mut usize) -> Result<u32> {
+    let mut result: u32 = 0;
+    let mut shift = 0u32;
+    loop {
+        if *i >= buf.len() {
+            return Err(Error::Truncated);
+        }
+        let b = buf[*i];
+        *i += 1;
+        result |= u32::from(b & 0x7f) << shift;
+        if b & 0x80 == 0 {
+            return Ok(result);
+        }
+        shift += 7;
+        if shift > 28 {
+            return Err(Error::Truncated);
+        }
+    }
+}
+
+/// Extract payload of a named custom section from `.wasm` or `.aot`.
+pub fn extract_custom_section<'a>(buf: &'a [u8], name: &str) -> Result<Option<&'a [u8]>> {
+    if buf.len() >= 4 && &buf[0..4] == b"\0asm" {
+        return extract_wasm_custom_section(buf, name);
+    }
+    if buf.len() >= 4 && &buf[0..4] == b"\0aot" {
+        return extract_aot_custom_section(buf, name);
+    }
+    Err(Error::NotModule)
+}
+
+fn extract_wasm_custom_section<'a>(wasm: &'a [u8], name: &str) -> Result<Option<&'a [u8]>> {
+    if wasm.len() < 8 {
+        return Err(Error::Truncated);
+    }
+    let want = name.as_bytes();
+    let mut i = 8usize;
+    while i < wasm.len() {
+        let id = wasm[i];
+        i += 1;
+        let size = read_uleb(wasm, &mut i)? as usize;
+        let sec_end = i + size;
+        if sec_end > wasm.len() {
+            return Err(Error::Truncated);
+        }
+        if id == 0 {
+            let mut j = i;
+            let nlen = read_uleb(wasm, &mut j)? as usize;
+            if j + nlen <= sec_end && &wasm[j..j + nlen] == want {
+                return Ok(Some(&wasm[j + nlen..sec_end]));
+            }
+        }
+        i = sec_end;
+    }
+    Ok(None)
+}
+
+const AOT_SECTION_TYPE_CUSTOM: u32 = 100;
+const AOT_CUSTOM_SECTION_RAW: u32 = 0;
+
+fn extract_aot_custom_section<'a>(aot: &'a [u8], name: &str) -> Result<Option<&'a [u8]>> {
+    if aot.len() < 8 {
+        return Err(Error::Truncated);
+    }
+    let want = name.as_bytes();
+    let mut p = 8usize;
+    while p + 8 <= aot.len() {
+        let typ = u32::from_le_bytes(aot[p..p + 4].try_into().unwrap());
+        let size = u32::from_le_bytes(aot[p + 4..p + 8].try_into().unwrap()) as usize;
+        let content = p + 8;
+        let end = content + size;
+        if end > aot.len() || size > 0x1000_0000 {
+            return Err(Error::Truncated);
+        }
+        if typ == AOT_SECTION_TYPE_CUSTOM && size >= 6 {
+            let sub = u32::from_le_bytes(aot[content..content + 4].try_into().unwrap());
+            if sub == AOT_CUSTOM_SECTION_RAW {
+                let slen = u16::from_le_bytes(aot[content + 4..content + 6].try_into().unwrap()) as usize;
+                let name_off = content + 6;
+                if name_off + slen <= end {
+                    let name_bytes = &aot[name_off..name_off + slen];
+                    let bare = name_bytes.strip_suffix(&[0]).unwrap_or(name_bytes);
+                    if bare == want {
+                        return Ok(Some(&aot[name_off + slen..end]));
+                    }
+                }
+            }
+        }
+        p = (end + 3) & !3;
+    }
+    Ok(None)
+}
+
+pub fn parse_source_payload(payload: &[u8]) -> Result<SourceView> {
+    if payload.len() < 12 || &payload[0..4] != SOURCE_MAGIC {
+        return Err(Error::BadSource);
+    }
+    let mut i = 4usize;
+    let version = read_u16(payload, &mut i)?;
+    let flags = read_u16(payload, &mut i)?;
+    if version != SOURCE_VERSION {
+        return Err(Error::BadSource);
+    }
+    let name_len = read_u16(payload, &mut i)? as usize;
+    let name = String::from_utf8_lossy(read_bytes(payload, &mut i, name_len)?).into_owned();
+    let ver_len = read_u16(payload, &mut i)? as usize;
+    let pkg_version = String::from_utf8_lossy(read_bytes(payload, &mut i, ver_len)?).into_owned();
+    let n_tags = read_u16(payload, &mut i)? as usize;
+    let mut tags = Vec::with_capacity(n_tags);
+    for _ in 0..n_tags {
+        let kl = read_u16(payload, &mut i)? as usize;
+        let key = String::from_utf8_lossy(read_bytes(payload, &mut i, kl)?).into_owned();
+        let vl = read_u16(payload, &mut i)? as usize;
+        let value = String::from_utf8_lossy(read_bytes(payload, &mut i, vl)?).into_owned();
+        tags.push(SourceTag { key, value });
+    }
+    let n_files = read_u32(payload, &mut i)? as usize;
+    let mut files = Vec::with_capacity(n_files);
+    for _ in 0..n_files {
+        let pl = read_u16(payload, &mut i)? as usize;
+        let path = String::from_utf8_lossy(read_bytes(payload, &mut i, pl)?).into_owned();
+        if i >= payload.len() {
+            return Err(Error::Truncated);
+        }
+        let fflags = payload[i];
+        i += 1;
+        let raw_len = read_u32(payload, &mut i)?;
+        let data_len = read_u32(payload, &mut i)? as usize;
+        let data = read_bytes(payload, &mut i, data_len)?.to_vec();
+        files.push(SourceFile {
+            path,
+            flags: fflags,
+            raw_len,
+            data,
+        });
+    }
+    Ok(SourceView {
+        version,
+        flags,
+        name,
+        pkg_version,
+        tags,
+        files,
+    })
+}
+
+/// Resolve a path for CLI help / tests.
+pub fn default_out_dir(wasm: &Path) -> PathBuf {
+    wasm.with_extension("src")
+}
+
+#[derive(Debug, Clone)]
+pub struct SigView {
+    pub is_mpws: bool,
+    pub sig: Vec<u8>,
+    pub chain: Vec<u8>,
+    /// Length of artifact bytes covered by the signature (without wasmmod.sig).
+    pub signed_len: usize,
+}
+
+impl SigView {
+    pub fn open_file(path: impl AsRef<Path>) -> Result<Self> {
+        let data = std::fs::read(path)?;
+        Self::open_bytes(&data)
+    }
+
+    pub fn open_bytes(buf: &[u8]) -> Result<Self> {
+        let payload = extract_custom_section(buf, SIG_SECTION)?
+            .ok_or_else(|| Error::MissingSection(SIG_SECTION.into()))?;
+        let (is_mpws, sig, chain) = parse_mpws(payload)?;
+        let stripped = without_sig_section(buf)?;
+        Ok(Self {
+            is_mpws,
+            sig,
+            chain,
+            signed_len: stripped.len(),
+        })
+    }
+}
+
+pub fn parse_mpws(payload: &[u8]) -> Result<(bool, Vec<u8>, Vec<u8>)> {
+    if payload.len() >= 8 && &payload[0..4] == MPWS_MAGIC && payload[4] == MPWS_VER {
+        let sl = u16::from_be_bytes([payload[6], payload[7]]) as usize;
+        if 8 + sl > payload.len() || sl == 0 {
+            return Err(Error::BadSig);
+        }
+        let sig = payload[8..8 + sl].to_vec();
+        let rest = &payload[8 + sl..];
+        let chain = if rest.len() >= 2 {
+            let cl = u16::from_be_bytes([rest[0], rest[1]]) as usize;
+            if 2 + cl > rest.len() {
+                return Err(Error::BadSig);
+            }
+            rest[2..2 + cl].to_vec()
+        } else {
+            Vec::new()
+        };
+        return Ok((true, sig, chain));
+    }
+    if payload.is_empty() {
+        return Err(Error::BadSig);
+    }
+    Ok((false, payload.to_vec(), Vec::new()))
+}
+
+/// Artifact bytes ECDSA covers for an embedded wasmmod.sig.
+pub fn without_sig_section(buf: &[u8]) -> Result<Vec<u8>> {
+    if buf.len() < 8 || buf[0] != 0 {
+        return Err(Error::NotModule);
+    }
+    let want = SIG_SECTION.as_bytes();
+    if &buf[0..4] == b"\0asm" {
+        let mut out = Vec::with_capacity(buf.len());
+        out.extend_from_slice(&buf[..8]);
+        let mut i = 8usize;
+        while i < buf.len() {
+            let sec_start = i;
+            let id = buf[i];
+            i += 1;
+            let size = read_uleb(buf, &mut i)? as usize;
+            let sec_end = i + size;
+            if sec_end > buf.len() {
+                return Err(Error::Truncated);
+            }
+            let mut skip = false;
+            if id == 0 {
+                let mut j = i;
+                let nlen = read_uleb(buf, &mut j)? as usize;
+                if j + nlen <= sec_end && &buf[j..j + nlen] == want {
+                    skip = true;
+                }
+            }
+            if !skip {
+                out.extend_from_slice(&buf[sec_start..sec_end]);
+            }
+            i = sec_end;
+        }
+        return Ok(out);
+    }
+    if &buf[0..4] == b"\0aot" {
+        let mut out = Vec::with_capacity(buf.len());
+        out.extend_from_slice(&buf[..8]);
+        let mut p = 8usize;
+        while p + 8 <= buf.len() {
+            let typ = u32::from_le_bytes(buf[p..p + 4].try_into().unwrap());
+            let size = u32::from_le_bytes(buf[p + 4..p + 8].try_into().unwrap()) as usize;
+            let content = p + 8;
+            let end = content + size;
+            if end > buf.len() || size > 0x1000_0000 {
+                return Err(Error::Truncated);
+            }
+            let aligned = (end + 3) & !3;
+            let next = if aligned <= buf.len() { aligned } else { buf.len() };
+            let mut skip = false;
+            if typ == AOT_SECTION_TYPE_CUSTOM && size >= 6 {
+                let sub = u32::from_le_bytes(buf[content..content + 4].try_into().unwrap());
+                if sub == AOT_CUSTOM_SECTION_RAW {
+                    let slen =
+                        u16::from_le_bytes(buf[content + 4..content + 6].try_into().unwrap()) as usize;
+                    let name_off = content + 6;
+                    if name_off + slen <= end {
+                        let name_bytes = &buf[name_off..name_off + slen];
+                        let bare = name_bytes.strip_suffix(&[0]).unwrap_or(name_bytes);
+                        if bare == want {
+                            skip = true;
+                        }
+                    }
+                }
+            }
+            if !skip {
+                out.extend_from_slice(&buf[p..next]);
+            }
+            p = next;
+        }
+        return Ok(out);
+    }
+    Err(Error::NotModule)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_non_module() {
+        assert!(matches!(SourceView::open_bytes(b"nope"), Err(Error::NotModule)));
+    }
+}

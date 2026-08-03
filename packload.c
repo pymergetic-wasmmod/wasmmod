@@ -42,16 +42,82 @@
 #include "extmod/wasmmod/finder.h"
 #include "extmod/wasmmod/mod.h"
 #include "extmod/wasmmod/pack.h"
+#include "extmod/wasmmod/zlibutil.h"
+#include "extmod/wasmmod/alloc.h"
 
 int mp_wasm_import_hook_depth;
 
-#if MICROPY_PY_WASM_AOT
 static bool ends_with(const char *s, const char *suf) {
     size_t n = strlen(s), m = strlen(suf);
     return n >= m && strcmp(s + n - m, suf) == 0;
 }
 
-// Replace suffix in path (e.g. .aot → .wasm). Writes into out.
+// Replace vstr contents with unwrapped MPZL payload when present.
+static bool vstr_unwrap_artifact_zlib(vstr_t *buf) {
+    const uint8_t *p = (const uint8_t *)buf->buf;
+    uint32_t len = (uint32_t)buf->len;
+    uint8_t *owned = NULL;
+    if (!mp_wasm_artifact_unwrap_zlib(&p, &len, &owned)) {
+        return false;
+    }
+    if (owned != NULL) {
+        vstr_reset(buf);
+        vstr_add_strn(buf, (const char *)owned, len);
+        MICROPY_WASM_FREE(owned);
+    }
+    return true;
+}
+
+// Fetch path, preferring path+".zlib" when path is not already wrapped.
+static bool fetch_artifact(const char *path, vstr_t *out, char *err, size_t err_len) {
+    if (!ends_with(path, ".zlib")) {
+        vstr_t zpath;
+        size_t n = strlen(path);
+        vstr_init(&zpath, n + 6);
+        vstr_add_strn(&zpath, path, n);
+        vstr_add_str(&zpath, ".zlib");
+        if (mp_wasm_fetch(vstr_null_terminated_str(&zpath), out, err, err_len)) {
+            vstr_clear(&zpath);
+            if (vstr_unwrap_artifact_zlib(out)) {
+                return true;
+            }
+            vstr_clear(out);
+        } else {
+            vstr_clear(&zpath);
+        }
+    }
+    if (!mp_wasm_fetch(path, out, err, err_len)) {
+        return false;
+    }
+    return vstr_unwrap_artifact_zlib(out);
+}
+
+// Path used for .wasm/.aot branching (strip trailing .zlib).
+static const char *logical_artifact_path(const char *path, vstr_t *storage) {
+    if (ends_with(path, ".zlib")) {
+        size_t n = strlen(path) - 5;
+        vstr_init(storage, n + 1);
+        vstr_add_strn(storage, path, n);
+        return vstr_null_terminated_str(storage);
+    }
+    return path;
+}
+
+#if MICROPY_PY_WASM_AOT
+// Strip trailing .aot / .aotN and append new_suf (e.g. ".wasm").
+static bool replace_aot_suffix(const char *path, const char *new_suf, vstr_t *out) {
+    size_t alen = mp_wasm_aot_suffix_len(path);
+    if (alen == 0) {
+        return false;
+    }
+    size_t n = strlen(path);
+    vstr_init(out, n - alen + strlen(new_suf) + 1);
+    vstr_add_strn(out, path, n - alen);
+    vstr_add_str(out, new_suf);
+    return true;
+}
+
+// Replace suffix in path (e.g. .wasm → .aot6). Writes into out.
 static bool replace_suffix(const char *path, const char *old_suf, const char *new_suf, vstr_t *out) {
     size_t n = strlen(path), m = strlen(old_suf);
     if (n < m || strcmp(path + n - m, old_suf) != 0) {
@@ -160,16 +226,27 @@ static int score_pack_file_for_upy_host(const mp_wasm_pack_file_t *f) {
     }
 
     #if MICROPY_PERSISTENT_CODE_LOAD
-    if (f->data_len < 4 || f->data[0] != 'M' || f->data[1] != MPY_VERSION) {
+    const uint8_t *data;
+    uint32_t data_len;
+    uint8_t *to_free = NULL;
+    if (!mp_wasm_pack_file_bytes(f, &data, &data_len, &to_free)) {
+        return -1;
+    }
+    if (data_len < 4 || data[0] != 'M' || data[1] != MPY_VERSION) {
+        MICROPY_WASM_FREE(to_free);
         return -1;
     }
     // Native arch in feature byte: only accept bytecode (arch == 0) for now.
-    if (MPY_FEATURE_DECODE_ARCH(f->data[2]) != MP_NATIVE_ARCH_NONE) {
+    if (MPY_FEATURE_DECODE_ARCH(data[2]) != MP_NATIVE_ARCH_NONE) {
+        MICROPY_WASM_FREE(to_free);
         return -1;
     }
-    if (f->data[3] > MP_SMALL_INT_BITS) {
+    if (data[3] > MP_SMALL_INT_BITS) {
+        MICROPY_WASM_FREE(to_free);
         return -1;
     }
+    int sib_byte = (int)data[3];
+    MICROPY_WASM_FREE(to_free);
 
     // Tagged: ….upy.mpy6.sib31.mpy — prefer highest sib that still fits host.
     const char *tag = NULL;
@@ -208,7 +285,7 @@ static int score_pack_file_for_upy_host(const mp_wasm_pack_file_t *f) {
         return 100 + (int)sib;
     }
     // Legacy untagged .mpy
-    return 50 + (int)f->data[3];
+    return 50 + sib_byte;
     #else
     (void)f;
     return -1;
@@ -248,16 +325,25 @@ static void exec_mpy_into_module(mp_obj_t module_obj, const char *src_name, cons
 #endif
 
 static void exec_pack_file_into_module(mp_obj_t module_obj, const char *src_name, const mp_wasm_pack_file_t *f) {
+    const uint8_t *data;
+    uint32_t data_len;
+    uint8_t *to_free = NULL;
+    if (!mp_wasm_pack_file_bytes(f, &data, &data_len, &to_free)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("wasm pack file inflate failed"));
+    }
     if (f->kind == MP_WASM_PACK_KIND_PY) {
-        exec_py_into_module(module_obj, src_name, f->data, f->data_len);
+        exec_py_into_module(module_obj, src_name, data, data_len);
+        MICROPY_WASM_FREE(to_free);
         return;
     }
     #if MICROPY_PERSISTENT_CODE_LOAD
     if (f->kind == MP_WASM_PACK_KIND_MPY) {
-        exec_mpy_into_module(module_obj, src_name, f->data, f->data_len);
+        exec_mpy_into_module(module_obj, src_name, data, data_len);
+        MICROPY_WASM_FREE(to_free);
         return;
     }
     #endif
+    MICROPY_WASM_FREE(to_free);
     mp_raise_msg_varg(&mp_type_ValueError,
         MP_ERROR_TEXT("wasm pack file kind %d not supported"), (int)f->kind);
 }
@@ -312,11 +398,16 @@ static const char *stem_from_path(const char *path, char *buf, size_t buf_len) {
         }
     }
     size_t n = strlen(base);
-    if (n >= 5 && strcmp(base + n - 5, ".wasm") == 0) {
+    if (n >= 5 && strcmp(base + n - 5, ".zlib") == 0) {
         n -= 5;
     }
-    if (n >= 4 && strcmp(base + n - 4, ".aot") == 0) {
-        n -= 4;
+    if (n >= 5 && strcmp(base + n - 5, ".wasm") == 0) {
+        n -= 5;
+    } else {
+        size_t alen = mp_wasm_aot_suffix_len_n(base, n);
+        if (alen > 0) {
+            n -= alen;
+        }
     }
     if (n == 8 && memcmp(base, "__init__", 8) == 0) {
         // package dir name is the parent folder
@@ -400,7 +491,17 @@ static void bind_pack_exports(mp_obj_t root, mp_wasm_module_t *wmod, const char 
 
 static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
     const uint8_t *meta, uint32_t meta_len, const char *path_hint, const char *name_override) {
-    if (meta == NULL) {
+    uint8_t *code_owned = NULL;
+    uint8_t *meta_owned = NULL;
+    if (!mp_wasm_artifact_unwrap_zlib(&code, &code_len, &code_owned)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("wasm artifact zlib unwrap failed"));
+    }
+    if (meta != NULL) {
+        if (!mp_wasm_artifact_unwrap_zlib(&meta, &meta_len, &meta_owned)) {
+            MICROPY_WASM_FREE(code_owned);
+            mp_raise_ValueError(MP_ERROR_TEXT("wasm artifact zlib unwrap failed"));
+        }
+    } else {
         meta = code;
         meta_len = code_len;
     }
@@ -435,6 +536,8 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
     mp_wasm_module_t *wmod = mp_wasm_module_load_ex(code, code_len, meta, meta_len,
         pack_name, path_hint, err, sizeof(err));
     if (wmod == NULL) {
+        MICROPY_WASM_FREE(code_owned);
+        MICROPY_WASM_FREE(meta_owned);
         mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm load: %s"), err);
     }
     mp_wasm_module_set_name(wmod, pack_name);
@@ -531,6 +634,8 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
     }
 
     mp_wasm_pack_info_free(&info);
+    MICROPY_WASM_FREE(code_owned);
+    MICROPY_WASM_FREE(meta_owned);
     return root;
 }
 
@@ -542,34 +647,62 @@ mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override) {
     vstr_t verify_path_storage;
     const char *verify_path = path;
     bool verify_path_owned = false;
+    vstr_t logical_storage;
+    const char *logical = logical_artifact_path(path, &logical_storage);
+    bool logical_owned = (logical != path);
 
     #if MICROPY_PY_WASM_AOT
-    // Finder may hand us .aot; otherwise prefer sibling .aot next to .wasm.
-    if (ends_with(path, ".aot")) {
-        if (!mp_wasm_fetch(path, &code, err, sizeof(err))) {
+    // Finder may hand us .aotN; otherwise prefer sibling .aotN next to .wasm.
+    // Paths may be *.zlib; branching uses the logical (.wasm/.aotN) name.
+    if (mp_wasm_path_is_aot(logical)) {
+        if (!fetch_artifact(path, &code, err, sizeof(err))) {
+            if (logical_owned) {
+                vstr_clear(&logical_storage);
+            }
             mp_raise_OSError_with_filename(MP_ENOENT, path);
         }
         vstr_t sib;
-        if (replace_suffix(path, ".aot", ".wasm", &sib)) {
-            if (mp_wasm_fetch(vstr_null_terminated_str(&sib), &meta, err, sizeof(err))) {
+        if (replace_aot_suffix(logical, ".wasm", &sib)) {
+            if (fetch_artifact(vstr_null_terminated_str(&sib), &meta, err, sizeof(err))) {
                 have_meta = true;
             }
             vstr_clear(&sib);
         }
-        if (!have_meta && replace_suffix(path, ".aot", ".mpack", &sib)) {
-            if (mp_wasm_fetch(vstr_null_terminated_str(&sib), &meta, err, sizeof(err))) {
+        if (!have_meta && replace_aot_suffix(logical, ".mpack", &sib)) {
+            if (fetch_artifact(vstr_null_terminated_str(&sib), &meta, err, sizeof(err))) {
                 have_meta = true;
             }
             vstr_clear(&sib);
         }
-    } else if (ends_with(path, ".wasm")) {
+    } else if (ends_with(logical, ".wasm")) {
+        char aot_ext[16];
+        mp_wasm_aot_format_ext(aot_ext, sizeof(aot_ext));
         vstr_t aot_path;
-        bool try_aot = replace_suffix(path, ".wasm", ".aot", &aot_path);
-        if (try_aot && mp_wasm_fetch(vstr_null_terminated_str(&aot_path), &code, err, sizeof(err))) {
+        bool got_aot = false;
+        if (replace_suffix(logical, ".wasm", aot_ext, &aot_path)) {
+            if (fetch_artifact(vstr_null_terminated_str(&aot_path), &code, err, sizeof(err))) {
+                got_aot = true;
+            } else {
+                vstr_clear(&aot_path);
+            }
+        }
+        // Legacy sibling .aot when format-tagged name missing.
+        if (!got_aot && strcmp(aot_ext, ".aot") != 0
+            && replace_suffix(logical, ".wasm", ".aot", &aot_path)) {
+            if (fetch_artifact(vstr_null_terminated_str(&aot_path), &code, err, sizeof(err))) {
+                got_aot = true;
+            } else {
+                vstr_clear(&aot_path);
+            }
+        }
+        if (got_aot) {
             // Execute AOT; keep .wasm bytes as metadata.
-            if (!mp_wasm_fetch(path, &meta, err, sizeof(err))) {
+            if (!fetch_artifact(logical, &meta, err, sizeof(err))) {
                 vstr_clear(&code);
                 vstr_clear(&aot_path);
+                if (logical_owned) {
+                    vstr_clear(&logical_storage);
+                }
                 mp_raise_OSError_with_filename(MP_ENOENT, path);
             }
             have_meta = true;
@@ -579,17 +712,20 @@ mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override) {
             verify_path_owned = true;
             vstr_clear(&aot_path);
         } else {
-            if (try_aot) {
-                vstr_clear(&aot_path);
-            }
-            if (!mp_wasm_fetch(path, &code, err, sizeof(err))) {
+            if (!fetch_artifact(path, &code, err, sizeof(err))) {
+                if (logical_owned) {
+                    vstr_clear(&logical_storage);
+                }
                 mp_raise_OSError_with_filename(MP_ENOENT, path);
             }
         }
     } else
     #endif
     {
-        if (!mp_wasm_fetch(path, &code, err, sizeof(err))) {
+        if (!fetch_artifact(path, &code, err, sizeof(err))) {
+            if (logical_owned) {
+                vstr_clear(&logical_storage);
+            }
             mp_raise_OSError_with_filename(MP_ENOENT, path);
         }
     }
@@ -605,6 +741,9 @@ mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override) {
     }
     if (verify_path_owned) {
         vstr_clear(&verify_path_storage);
+    }
+    if (logical_owned) {
+        vstr_clear(&logical_storage);
     }
     return root;
 }
@@ -764,6 +903,82 @@ static void wasm_path_append_unique(const char *root) {
 }
 
 
+static void wasm_path_prepend_unique(const char *root) {
+    mp_wasm_path_ensure();
+    mp_obj_list_t *list = &MP_STATE_VM(mp_wasm_path_obj);
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_list_get(MP_OBJ_FROM_PTR(list), &n, &items);
+    for (size_t i = 0; i < n; ++i) {
+        if (!mp_obj_is_str(items[i])) {
+            continue;
+        }
+        const char *existing = mp_obj_str_get_str(items[i]);
+        if (strcmp(existing, root) == 0) {
+            return;
+        }
+        size_t elen = strlen(existing);
+        size_t rlen = strlen(root);
+        if (elen > 0 && existing[elen - 1] == '/' && elen == rlen + 1
+            && strncmp(existing, root, rlen) == 0) {
+            return;
+        }
+        if (rlen > 0 && root[rlen - 1] == '/' && rlen == elen + 1
+            && strncmp(root, existing, elen) == 0) {
+            return;
+        }
+    }
+    // Insert at front: earlier roots win (PyPI-style index priority).
+    mp_obj_t root_obj = mp_obj_new_str(root, strlen(root));
+    mp_obj_list_append(MP_OBJ_FROM_PTR(list), mp_const_none);
+    mp_obj_list_get(MP_OBJ_FROM_PTR(list), &n, &items);
+    for (size_t i = n; i > 1; --i) {
+        items[i - 1] = items[i - 2];
+    }
+    items[0] = root_obj;
+}
+
+static void wasm_path_add_http_root(const char *url, bool prepend) {
+    if (!mp_wasm_uri_is_http(url)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("install_hook: url must be http(s)"));
+    }
+    size_t len = strlen(url);
+    vstr_t root;
+    vstr_init(&root, len + 2);
+    vstr_add_strn(&root, url, len);
+    if (root.len == 0 || root.buf[root.len - 1] != '/') {
+        vstr_add_char(&root, '/');
+    }
+    if (prepend) {
+        wasm_path_prepend_unique(vstr_null_terminated_str(&root));
+    } else {
+        wasm_path_append_unique(vstr_null_terminated_str(&root));
+    }
+    vstr_clear(&root);
+}
+
+static void wasm_path_add_http_roots(mp_obj_t url_obj) {
+    // One URL, or an ordered list/tuple (index 0 = highest priority).
+    if (mp_obj_is_str(url_obj)) {
+        wasm_path_add_http_root(mp_obj_str_get_str(url_obj), true);
+        return;
+    }
+    size_t n = 0;
+    mp_obj_t *items = NULL;
+    mp_obj_get_array(url_obj, &n, &items);
+    if (n == 0) {
+        return;
+    }
+    // Prepend in reverse so the first list entry ends up first on wasm.path.
+    for (size_t i = n; i > 0; --i) {
+        if (!mp_obj_is_str(items[i - 1])) {
+            mp_raise_TypeError(MP_ERROR_TEXT("install_hook: url entries must be str"));
+        }
+        wasm_path_add_http_root(mp_obj_str_get_str(items[i - 1]), true);
+    }
+}
+
+
 static mp_obj_t mod_wasm_install_hook(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_url };
     static const mp_arg_t allowed_args[] = {
@@ -773,20 +988,7 @@ static mp_obj_t mod_wasm_install_hook(size_t n_args, const mp_obj_t *pos_args, m
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
     if (args[ARG_url].u_obj != mp_const_none) {
-        const char *url = mp_obj_str_get_str(args[ARG_url].u_obj);
-        if (!mp_wasm_uri_is_http(url)) {
-            mp_raise_ValueError(MP_ERROR_TEXT("install_hook: url must be http(s)"));
-        }
-        // Normalize trailing slash for URL roots.
-        size_t len = strlen(url);
-        vstr_t root;
-        vstr_init(&root, len + 2);
-        vstr_add_strn(&root, url, len);
-        if (root.len == 0 || root.buf[root.len - 1] != '/') {
-            vstr_add_char(&root, '/');
-        }
-        wasm_path_append_unique(vstr_null_terminated_str(&root));
-        vstr_clear(&root);
+        wasm_path_add_http_roots(args[ARG_url].u_obj);
     }
 
     #if !MICROPY_CAN_OVERRIDE_BUILTINS

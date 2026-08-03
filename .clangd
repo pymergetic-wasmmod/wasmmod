@@ -1,9 +1,20 @@
 # clangd for this submodule only (does not affect the rest of the host tree).
-# Host loader .c files need MicroPython headers from the parent checkout.
+#
+# IMPORTANT: many editors open only this repo (pymergetic/wasmmod). Host loader
+# .c files still need MicroPython headers from a parent checkout; without
+# ../../ports/unix/... those TUs will not parse. Solo tools (tools/, crates/)
+# do not need the parent tree.
 #
 # CompilationDatabase: None — ignore parent/other compile_commands.json so a
 # stale ports/unix/build-standard genhdr (missing newer root pointers like
-# mp_wasm_arch_obj) cannot win the include search over build-wasm.
+# mp_wasm_arch_obj / MP_QSTR_sig_info) cannot win the include search over
+# build-wasm.
+#
+# Local genhdr/ symlink → ../../ports/unix/build-wasm/genhdr so that
+# #include "genhdr/qstrdefs.generated.h" resolves via -I. first (gitignored).
+# Keep it fresh after adding MP_QSTR_* names:
+#   make -C ../../ports/unix MICROPY_PY_WASM=1 BUILD=build-wasm
+#   ln -sfn ../../ports/unix/build-wasm/genhdr genhdr
 #
 # -xc: clangd often treats orphan .h as Objective-C++, which rejects -std=gnu99.
 
@@ -18,6 +29,7 @@ CompileFlags:
     - -I../..
     - -I../../ports/unix
     - -I../../ports/unix/variants/standard
+    # Prefer build-wasm genhdr (must be before any build-standard from parent flags).
     - -I../../ports/unix/build-wasm
     # WAMR public API (wasm_export.h). Must stay visible in .cursorignore.
     - -Ithird_party/wamr/core/iwasm/include
@@ -25,6 +37,27 @@ CompileFlags:
     - -I../../shared/readline
   Remove:
     - -W*
+    - -I**/build-standard
+    - -I**/build-wasm-aot
+    - -I**/build-wasm-jit
+    - -I**/build-wasm-fjit
+    - -I**/build-wasm-src
+    - -I**/build-wasm-verify
+    - -I**/build-wasm-e2e
+
+# QSTR pool fragments (Q(name)) are not C — makeqstrdata consumes them.
+# Prefer extensionless qstrdefs.wasmmod so clangd does not parse as a header.
+---
+If:
+  PathMatch: .*/qstrdefs(\.wasmmod)?(\.h)?$
+CompileFlags:
+  CompilationDatabase: None
+  Add:
+    - -xc
+    - -std=c11
+    - -DQ(x)=
+Diagnostics:
+  Suppress: '*'
 
 # Freestanding pack guests: Wasm target so import_module/import_name are known.
 ---

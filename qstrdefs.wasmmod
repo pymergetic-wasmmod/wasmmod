@@ -1,0 +1,10 @@
+// QSTR definitions for wasmmod APIs (not a C header — QSTR_DEFS / makeqstrdata only).
+// Wired via ports/micropython/micropython.mk / .cmake.
+
+Q(has)
+Q(sig_info)
+Q(verify_sig)
+Q(mpws)
+Q(sig_len)
+Q(chain_len)
+Q(AOT_VERSION)

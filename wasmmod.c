@@ -42,6 +42,10 @@
 #define MICROPY_WASM_PACK_ARCH ""
 #endif
 
+#ifndef MICROPY_WASM_AOT_VERSION
+#define MICROPY_WASM_AOT_VERSION (0)
+#endif
+
 static const MP_DEFINE_STR_OBJ(mp_wasm_version_obj, MICROPY_WASM_VERSION);
 
 MP_REGISTER_ROOT_POINTER(mp_obj_list_t mp_wasm_path_obj);
@@ -107,7 +111,10 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_arch), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_arch_obj)) },
     { MP_ROM_QSTR(MP_QSTR_VERIFY), MP_ROM_INT(MICROPY_WASM_VERIFY) },
     { MP_ROM_QSTR(MP_QSTR_verify), MP_ROM_PTR(&mod_wasm_verify_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sig_info), MP_ROM_PTR(&mod_wasm_sig_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_verify_sig), MP_ROM_PTR(&mod_wasm_verify_sig_obj) },
     { MP_ROM_QSTR(MP_QSTR_AOT), MP_ROM_INT(MICROPY_PY_WASM_AOT) },
+    { MP_ROM_QSTR(MP_QSTR_AOT_VERSION), MP_ROM_INT(MICROPY_WASM_AOT_VERSION) }, // WAMR AOT file-format N
     { MP_ROM_QSTR(MP_QSTR_JIT), MP_ROM_INT(MICROPY_PY_WASM_JIT) },
     { MP_ROM_QSTR(MP_QSTR_FAST_JIT), MP_ROM_INT(MICROPY_PY_WASM_FAST_JIT) },
     { MP_ROM_QSTR(MP_QSTR_MODE), MP_ROM_INT(MICROPY_WASM_MODE_DEFAULT) },
@@ -140,6 +147,10 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_handle_resolve), MP_ROM_PTR(&mod_wasm_handle_resolve_obj) },
     { MP_ROM_QSTR(MP_QSTR_handle_free), MP_ROM_PTR(&mod_wasm_handle_free_obj) },
     { MP_ROM_QSTR(MP_QSTR_handle_clear), MP_ROM_PTR(&mod_wasm_handle_clear_obj) },
+    { MP_ROM_QSTR(MP_QSTR_source), MP_ROM_PTR(&mod_wasm_source_obj) },
+    { MP_ROM_QSTR(MP_QSTR_source_from_file), MP_ROM_PTR(&mod_wasm_source_from_file_obj) },
+    { MP_ROM_QSTR(MP_QSTR_source_from_bytes), MP_ROM_PTR(&mod_wasm_source_from_bytes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_WasmSource), MP_ROM_PTR(&mp_type_wasm_source) },
     { MP_ROM_QSTR(MP_QSTR_WasmModule), MP_ROM_PTR(&mp_type_wasm_module) },
 };
 

@@ -25,7 +25,7 @@
 # THE SOFTWARE.
 """
 Build a freestanding Wasm guest and optionally append a MicroPython pack
-section (`wasmmod.pack`). See examples/PACK.md (this repo).
+section (`wasmmod.pack`). See docs/PACK.md (this repo).
 
 Examples:
   tools/wasmmod.py pack hello.c -o hello.wasm --export hello --export add
@@ -44,6 +44,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 SECTION_NAME = "wasmmod.pack"
@@ -52,12 +53,17 @@ MAGIC = b"MPWP"
 IMPORTS_MAGIC = b"MPWI"
 PACK_VERSION_V1 = 1
 PACK_VERSION_V2 = 2
+PACK_VERSION_V3 = 3
 IMPORTS_VERSION = 1
 
 KIND_PY = 1
 KIND_MPY = 2
 KIND_RAW = 3
 KIND_PYC = 4
+
+FILE_FLAG_ZLIB = 1 << 0
+COMPRESS_THRESHOLD = 64
+COMPRESS_KINDS = {KIND_PY, KIND_MPY, KIND_PYC}
 
 SIG_AUTO = 255
 C_EXTS = {".c"}
@@ -491,41 +497,93 @@ def build_pack_payload(
     name: str,
     files: list[tuple[str, int, bytes]],
     exports: list[tuple[str, str, str, int]] | None = None,
+    *,
+    compress: bool = True,
 ) -> bytes:
-    """exports entries: (module, func, export_name, sig_tag)."""
+    """exports entries: (module, func, export_name, sig_tag).
+
+    Always writes pack version 3 (per-file flags + raw_len). Compresses
+    .py/.mpy/.pyc when compress=True and the zlib blob is smaller.
+    """
     name_b = name.encode("utf-8")
     if len(name_b) > 0xFFFF:
         raise SystemExit("wasm_pack: package name too long")
-    use_v2 = bool(exports)
+    exports = exports or []
     out = bytearray()
     out += MAGIC
-    out += struct.pack("<HH", PACK_VERSION_V2 if use_v2 else PACK_VERSION_V1, 0)
+    out += struct.pack("<HH", PACK_VERSION_V3, 0)
     out += struct.pack("<H", len(name_b))
     out += name_b
     out += struct.pack("<I", len(files))
+    n_zlib = 0
+    raw_total = 0
+    packed_total = 0
     for rel, kind, data in files:
         rel_b = rel.encode("utf-8")
         if len(rel_b) > 0xFFFF:
             raise SystemExit(f"wasm_pack: path too long: {rel}")
-        if len(data) > 0xFFFFFFFF:
+        raw_len = len(data)
+        if raw_len > 0xFFFFFFFF:
             raise SystemExit(f"wasm_pack: file too large: {rel}")
+        flags = 0
+        payload = data
+        if compress and kind in COMPRESS_KINDS and raw_len >= COMPRESS_THRESHOLD:
+            z = zlib.compress(data, 9)
+            if len(z) < raw_len:
+                payload = z
+                flags |= FILE_FLAG_ZLIB
+                n_zlib += 1
+        raw_total += raw_len
+        packed_total += len(payload)
         out += struct.pack("<H", len(rel_b))
         out += rel_b
         out += struct.pack("<B", kind)
-        out += struct.pack("<I", len(data))
-        out += data
-    if use_v2:
-        assert exports is not None
-        out += struct.pack("<I", len(exports))
-        for module, func, export_name, sig in exports:
-            for label, s in (("module", module), ("func", func), ("export", export_name)):
-                b = s.encode("utf-8")
-                if len(b) > 0xFFFF:
-                    raise SystemExit(f"wasm_pack: {label} too long: {s}")
-                out += struct.pack("<H", len(b))
-                out += b
-            out += struct.pack("<B", sig & 0xFF)
+        out += struct.pack("<B", flags)
+        out += struct.pack("<I", raw_len)
+        out += struct.pack("<I", len(payload))
+        out += payload
+    out += struct.pack("<I", len(exports))
+    for module, func, export_name, sig in exports:
+        for label, s in (("module", module), ("func", func), ("export", export_name)):
+            b = s.encode("utf-8")
+            if len(b) > 0xFFFF:
+                raise SystemExit(f"wasm_pack: {label} too long: {s}")
+            out += struct.pack("<H", len(b))
+            out += b
+        out += struct.pack("<B", sig & 0xFF)
+    # Stash stats for the caller via attribute (optional).
+    build_pack_payload.last_stats = {  # type: ignore[attr-defined]
+        "n_zlib": n_zlib,
+        "raw_total": raw_total,
+        "packed_total": packed_total,
+    }
     return bytes(out)
+
+
+def aot_format_version(wamr_root: Path | None = None) -> int:
+    """Read WAMR AOT_CURRENT_VERSION (file-format N for .aotN names)."""
+    if wamr_root is None:
+        wamr_root = Path(__file__).resolve().parents[1] / "third_party" / "wamr"
+    cfg = wamr_root / "core" / "config.h"
+    if not cfg.is_file():
+        return 0
+    for line in cfg.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("#define AOT_CURRENT_VERSION"):
+            parts = line.split()
+            if len(parts) >= 3 and parts[2].isdigit():
+                return int(parts[2])
+    return 0
+
+
+def aot_output_path(wasm_out: Path, explicit: str | Path | None = None) -> Path:
+    """Default sibling name: hello.wasm → hello.aot6 (format-tagged)."""
+    if explicit is not None and explicit != "":
+        return Path(explicit)
+    ver = aot_format_version()
+    if ver > 0:
+        return wasm_out.with_name(f"{wasm_out.stem}.aot{ver}")
+    return wasm_out.with_suffix(".aot")
 
 
 def append_custom_section(wasm: bytes, section_name: str, payload: bytes) -> bytes:
@@ -859,9 +917,39 @@ def main() -> int:
         nargs="?",
         const="",
         default=None,
-        help="Run wamrc to produce PATH (default: <out>.aot); host-specific",
+        help="Run wamrc to produce PATH (default: <out>.aotN; N=WAMR AOT format)",
     )
     ap.add_argument("--wamrc", default=os.environ.get("WAMRC", "wamrc"), help="wamrc binary")
+    ap.add_argument(
+        "--with-source",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Embed wasmmod.source (pack tree minus build artifacts); default from [source] embed",
+    )
+    ap.add_argument(
+        "--pkg-version",
+        default=None,
+        help="Package version string stored in wasmmod.source (default: pack.toml version)",
+    )
+    ap.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Build tag for wasmmod.source (repeatable)",
+    )
+    ap.add_argument(
+        "--compress-source",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="zlib-compress source entries (default: on)",
+    )
+    ap.add_argument(
+        "--compress",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="zlib-compress pack .py/.mpy/.pyc entries (default: on)",
+    )
     args = ap.parse_args()
 
     sources: list[str] = []
@@ -875,6 +963,12 @@ def main() -> int:
     manifest_freeze: bool | None = None
     manifest_targets: list[str] | None = None
     manifest_keep: bool | None = None
+    pack_root: Path | None = None
+    pkg_version: str | None = args.pkg_version
+    manifest_embed_source: bool | None = None
+    manifest_compress_source: bool | None = None
+    manifest_compress_pack: bool | None = None
+    source_tags: list[tuple[str, str]] = []
 
     for inp in args.inputs:
         path = Path(inp)
@@ -910,12 +1004,37 @@ def main() -> int:
                 manifest_targets = m_targets
             if m_keep is not None:
                 manifest_keep = m_keep
+            pack_root = root
+            if pkg_version is None:
+                ver = data.get("version")
+                if isinstance(ver, str):
+                    pkg_version = ver
+            src_cfg = data.get("source") or {}
+            if isinstance(src_cfg, dict):
+                if "embed" in src_cfg:
+                    manifest_embed_source = bool(src_cfg.get("embed"))
+                if "compress" in src_cfg:
+                    manifest_compress_source = bool(src_cfg.get("compress"))
+                raw_tags = src_cfg.get("tags") or {}
+                if isinstance(raw_tags, dict):
+                    for k, v in raw_tags.items():
+                        if isinstance(k, str) and isinstance(v, str):
+                            source_tags.append((k, v))
+            pack_cfg = data.get("pack") or {}
+            if isinstance(pack_cfg, dict) and "compress" in pack_cfg:
+                manifest_compress_pack = bool(pack_cfg.get("compress"))
             print(f"manifest {manifest}", file=sys.stderr)
             continue
         if path.is_file():
             sources.append(str(path.resolve()))
             continue
         raise SystemExit(f"wasm_pack: not a source, pack dir, or pack.toml: {inp}")
+
+    for t in args.tag:
+        if "=" not in t:
+            raise SystemExit(f"wasm_pack: --tag needs KEY=VALUE, got {t!r}")
+        k, v = t.split("=", 1)
+        source_tags.append((k, v))
 
     target_specs: list[str] = list(args.python_targets)
     if not target_specs and manifest_targets is not None:
@@ -973,12 +1092,22 @@ def main() -> int:
         n_mpy = sum(1 for _, k, _ in files if k == KIND_MPY)
         n_py = sum(1 for _, k, _ in files if k == KIND_PY)
         n_pyc = sum(1 for _, k, _ in files if k == KIND_PYC)
-        payload = build_pack_payload(name, files, pack_exports or None)
+        compress_pack = True
+        if args.compress is not None:
+            compress_pack = args.compress
+        elif manifest_compress_pack is not None:
+            compress_pack = manifest_compress_pack
+        payload = build_pack_payload(name, files, pack_exports or None, compress=compress_pack)
+        stats = getattr(build_pack_payload, "last_stats", {})
         raw = append_custom_section(raw, SECTION_NAME, payload)
+        ratio = ""
+        if stats.get("raw_total"):
+            kept = 100.0 * stats["packed_total"] / stats["raw_total"]
+            ratio = f" compress={compress_pack} zlib_files={stats.get('n_zlib', 0)} kept={kept:.0f}%"
         print(
             f"packed section {SECTION_NAME!r}: name={name!r} files={len(files)} "
             f"(py={n_py} mpy={n_mpy} pyc={n_pyc} targets={len(targets)}) "
-            f"exports={len(pack_exports)} payload={len(payload)}B",
+            f"exports={len(pack_exports)} payload={len(payload)}B{ratio}",
             file=sys.stderr,
         )
     if pack_imports:
@@ -988,7 +1117,42 @@ def main() -> int:
             f"packed section {IMPORTS_SECTION!r}: imports={len(pack_imports)} payload={len(ipayload)}B",
             file=sys.stderr,
         )
-    if want_section or pack_imports:
+
+    want_source = args.with_source
+    if want_source is None:
+        want_source = bool(manifest_embed_source)
+    compress_source = True
+    if args.compress_source is not None:
+        compress_source = args.compress_source
+    elif manifest_compress_source is not None:
+        compress_source = manifest_compress_source
+    if want_source:
+        if pack_root is None:
+            raise SystemExit(
+                "wasm_pack: --with-source needs a pack directory / pack.toml input"
+            )
+        tools_dir = str(Path(__file__).resolve().parent)
+        if tools_dir not in sys.path:
+            sys.path.insert(0, tools_dir)
+        from wasmmod_source import embed_source_section
+
+        name = pkg_name or out.stem
+        ver = pkg_version or "0.0.0"
+        raw, n_src, plen = embed_source_section(
+            raw,
+            pack_root,
+            name,
+            ver,
+            source_tags,
+            compress=compress_source,
+        )
+        print(
+            f"packed section 'wasmmod.source': name={name!r} version={ver!r} "
+            f"files={n_src} tags={len(source_tags)} payload={plen}B compress={compress_source}",
+            file=sys.stderr,
+        )
+
+    if want_section or pack_imports or want_source:
         out.write_bytes(raw)
     else:
         raw = out.read_bytes()
@@ -1002,16 +1166,43 @@ def main() -> int:
         print(f"wrote {mpack_path} ({len(payload)}B)", file=sys.stderr)
 
     if args.aot is not None:
-        aot_path = Path(args.aot) if args.aot else out.with_suffix(".aot")
-        wamrc = shutil.which(args.wamrc) or args.wamrc
-        cmd = [wamrc, "-o", str(aot_path), str(out)]
+        aot_path = aot_output_path(out, args.aot if args.aot else None)
+        wamrc = args.wamrc
+        if not Path(wamrc).is_file():
+            found = shutil.which(wamrc)
+            if found:
+                wamrc = found
+            else:
+                # Common metalpython / wasmmod host build location.
+                cand = (
+                    Path(__file__).resolve().parents[3]
+                    / "ports"
+                    / "unix"
+                    / "build-wamrc"
+                    / "wamrc"
+                )
+                if cand.is_file():
+                    wamrc = str(cand)
+        # Carry pack metadata into the .aot (same payloads as on the .wasm).
+        # Do NOT emit wasmmod.sig here: the signature covers the final artifact
+        # bytes (sign after AOT with `sign sign --key … --chain …`).
+        emit = "wasmmod.pack,wasmmod.imports,wasmmod.source"
+        cmd = [
+            wamrc,
+            f"--emit-custom-sections={emit}",
+            "-o",
+            str(aot_path),
+            str(out),
+        ]
         print("+", " ".join(cmd), file=sys.stderr)
         try:
             subprocess.check_call(cmd)
         except (OSError, subprocess.CalledProcessError) as e:
             raise SystemExit(
-                f"wasm_pack: wamrc failed ({e}); install/build wamrc for --aot"
+                f"wasm_pack: wamrc failed ({e}); install/build wamrc for --aot "
+                f"(or pass --wamrc /path/to/wamrc)"
             ) from e
+        print(aot_path, file=sys.stderr)
         print(aot_path)
 
     print(out)

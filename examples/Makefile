@@ -36,6 +36,9 @@ PACK_WASMS = \
 # Prefer wamrc from this tree's WAMR (version-matched). Override with WAMRC=...
 WAMRC_BUILD ?= $(UNIX)/build-wamrc
 WAMRC ?= $(WAMRC_BUILD)/wamrc
+# AOT file-format tag (WAMR AOT_CURRENT_VERSION) → hello.aot6
+AOT_VER ?= $(shell sed -n 's/^#define AOT_CURRENT_VERSION \([0-9][0-9]*\)/\1/p' $(WAMR_DIR)/core/config.h)
+AOT_EXT := .aot$(AOT_VER)
 LLVM_CMAKE_DIR ?= $(shell llvm-config-18 --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null)
 
 .PHONY: all clean test test-aot test-fast-jit test-jit test-engines test-http test-http-verify \
@@ -61,14 +64,19 @@ sign-packs: packs sign-key
 	@for w in $(PACK_WASMS); do \
 		echo "SIGN $$w"; \
 		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$w; \
-		aot=$${w%.wasm}.aot; \
+		aot=$${w%.wasm}$(AOT_EXT); \
 		if [ -f "$$aot" ]; then \
 			echo "SIGN $$aot"; \
 			python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$aot; \
 		fi; \
+		aot_legacy=$${w%.wasm}.aot; \
+		if [ "$$aot" != "$$aot_legacy" ] && [ -f "$$aot_legacy" ]; then \
+			echo "SIGN $$aot_legacy"; \
+			python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$aot_legacy; \
+		fi; \
 	done
 
-# Build wamrc from nested WAMR so .aot matches the linked AOT loader.
+# Build wamrc from nested WAMR so .aotN matches the linked AOT loader.
 wamrc:
 	@if [ -z "$(LLVM_CMAKE_DIR)" ]; then \
 		echo "FAIL: llvm-config not found (needed to build matching wamrc)"; \
@@ -85,13 +93,14 @@ wamrc:
 
 aot-packs: packs wamrc
 	@for w in $(PACK_WASMS); do \
-		aot=$${w%.wasm}.aot; \
+		aot=$${w%.wasm}$(AOT_EXT); \
 		echo "AOT $$w -> $$aot"; \
-		$(WAMRC) -o $$aot $$w; \
+		$(WAMRC) --emit-custom-sections=wasmmod.pack,wasmmod.imports,wasmmod.source -o $$aot $$w; \
 	done
 	$(MAKE) sign-packs
 
 host:
+	$(call clean-unix-build-qstr,build-wasm)
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) BUILD=build-wasm
 
 host-verify: $(SIGN_ROOT)
@@ -266,4 +275,4 @@ clean:
 	$(MAKE) -C client clean
 	$(MAKE) -C mixed clean
 	$(MAKE) -C bridge clean
-	rm -f packs/*.aot packs/*.sig packs/*.crt
+	rm -f packs/*.aot packs/*.aot[0-9] packs/*.aot[0-9][0-9] packs/*.sig packs/*.crt packs/*.zlib

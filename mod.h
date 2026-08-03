@@ -89,6 +89,8 @@ MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_import_wasm_obj);
 MP_DECLARE_CONST_FUN_OBJ_KW(mod_wasm_install_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_uninstall_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_verify_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_sig_info_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_verify_sig_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_add_trust_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_trust_clear_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_trust_count_obj);
@@ -104,6 +106,9 @@ MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_handle_register_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_handle_resolve_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_handle_free_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_handle_clear_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_from_file_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_from_bytes_obj);
 #if MICROPY_PY_WASM_MATRIX
 MP_DECLARE_CONST_FUN_OBJ_VAR(mod_wasm_c_call_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_c_call_attr_obj);
@@ -113,5 +118,7 @@ MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_rs_call_attr_obj);
 #if MICROPY_MODULE_BUILTIN_INIT
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm___init___obj);
 #endif
+
+extern const mp_obj_type_t mp_type_wasm_source;
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_MOD_H

@@ -32,11 +32,28 @@
 
 // MICROPY_WASM_VERIFY:
 //   0 = off (default)
-//   1 = require a valid signature for every load
-//   2 = verify when .sig / wasmmod.sig present; otherwise allow
+//   1 = require a valid wasmmod.sig for every load
+//   2 = verify when wasmmod.sig present; otherwise allow
 #ifndef MICROPY_WASM_VERIFY
 #define MICROPY_WASM_VERIFY (0)
 #endif
+
+// Embedded section envelope: MPWS + ver + flags + sig + chain (leaf first).
+// Chain DER = leaf || intermediates (root stays in host trust store).
+typedef struct mp_wasm_sig_info_t {
+    const uint8_t *sig;
+    uint32_t sig_len;
+    const uint8_t *chain;
+    uint32_t chain_len;
+    bool is_mpws;
+} mp_wasm_sig_info_t;
+
+// Find wasmmod.sig custom section payload (.wasm or .aot).
+bool mp_wasm_sig_find(const uint8_t *bytes, uint32_t len, const uint8_t **payload, uint32_t *payload_len);
+// Parse MPWS or raw ECDSA payload (pointers into payload).
+bool mp_wasm_sig_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_sig_info_t *out);
+// Copy artifact omitting wasmmod.sig (hash input). Caller MICROPY_WASM_FREE(*out).
+bool mp_wasm_sig_strip(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len);
 
 // Add trust material: CA cert DER/PEM (PKI) and/or leaf SPKI DER (pinned pubkey).
 bool mp_wasm_trust_add(const uint8_t *key, size_t key_len);
@@ -60,8 +77,11 @@ bool mp_wasm_trust_add_blob(const uint8_t *data, uint32_t data_len, uint32_t unc
 void mp_wasm_set_verify_enabled(bool enabled);
 bool mp_wasm_get_verify_enabled(void);
 
-// Verify bytes before instantiate. path_hint may be NULL (bytes-only load).
-// On failure fills errbuf and returns false.
+// Verify embedded wasmmod.sig before instantiate. path_hint is for errors only (may be NULL).
+// Honors the session gate (mp_wasm_set_verify_enabled). On failure fills errbuf and returns false.
 bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_hint, char *errbuf, size_t errbuf_len);
+
+// Explicit check of embedded wasmmod.sig (ignores session gate). Same crypto as load-time verify.
+bool mp_wasm_verify_sig(const uint8_t *bytes, uint32_t len, char *errbuf, size_t errbuf_len);
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_VERIFY_H

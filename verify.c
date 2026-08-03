@@ -133,46 +133,7 @@ size_t mp_wasm_trust_count(void) {
 #endif
 
 #if MICROPY_WASM_TRUST_INFLATE || MICROPY_PY_DEFLATE
-#include "lib/uzlib/uzlib.h"
-#if MICROPY_WASM_TRUST_INFLATE && !MICROPY_PY_DEFLATE
-// Pull inflate when the deflate module is not compiled in.
-#include "lib/uzlib/tinflate.c"
-#include "lib/uzlib/header.c"
-#include "lib/uzlib/adler32.c"
-#endif
-
-static bool trust_inflate_zlib(const uint8_t *src, uint32_t src_len, uint8_t *dst, uint32_t dst_len) {
-    uzlib_uncomp_t decomp;
-    memset(&decomp, 0, sizeof(decomp));
-    decomp.source = src;
-    decomp.source_limit = src + src_len;
-    decomp.dest_start = dst;
-    decomp.dest = dst;
-    decomp.dest_limit = dst + dst_len;
-
-    int wbits = 0;
-    if (uzlib_parse_zlib_gzip_header(&decomp, &wbits) != UZLIB_HEADER_ZLIB) {
-        return false;
-    }
-    if (wbits < 8) {
-        wbits = 8;
-    }
-    if (wbits > 15) {
-        wbits = 15;
-    }
-    size_t dict_len = (size_t)1 << (unsigned)wbits;
-    uint8_t *dict = MICROPY_WASM_MALLOC(dict_len);
-    if (dict == NULL) {
-        return false;
-    }
-    uzlib_uncompress_init(&decomp, dict, (unsigned int)dict_len);
-    int st;
-    do {
-        st = uzlib_uncompress_chksum(&decomp);
-    } while (st == UZLIB_OK);
-    MICROPY_WASM_FREE(dict);
-    return st == UZLIB_DONE && (uint32_t)(decomp.dest - decomp.dest_start) == dst_len;
-}
+#include "extmod/wasmmod/zlibutil.h"
 #endif
 
 bool mp_wasm_trust_add_blob(const uint8_t *data, uint32_t data_len, uint32_t uncompressed_len) {
@@ -187,7 +148,7 @@ bool mp_wasm_trust_add_blob(const uint8_t *data, uint32_t data_len, uint32_t unc
     if (raw == NULL) {
         return false;
     }
-    bool ok = trust_inflate_zlib(data, data_len, raw, uncompressed_len);
+    bool ok = mp_wasm_zlib_inflate(data, data_len, raw, uncompressed_len);
     if (ok) {
         ok = mp_wasm_trust_add(raw, uncompressed_len);
     }
@@ -201,7 +162,6 @@ bool mp_wasm_trust_add_blob(const uint8_t *data, uint32_t data_len, uint32_t unc
 
 #if MICROPY_WASM_VERIFY
 
-#include "extmod/wasmmod/fetch.h"
 #include "extmod/wasmmod/pack.h"
 
 #if MICROPY_SSL_MBEDTLS
@@ -215,87 +175,133 @@ bool mp_wasm_trust_add_blob(const uint8_t *data, uint32_t data_len, uint32_t unc
 #define MP_WASM_MPWS_MAGIC "MPWS"
 #define MP_WASM_MPWS_VER 1
 
-static bool load_sidecar(const char *path_hint, const char *suffix, vstr_t *out) {
-    if (path_hint == NULL) {
-        return false;
-    }
-    vstr_t path;
-    vstr_init(&path, strlen(path_hint) + strlen(suffix) + 1);
-    vstr_add_str(&path, path_hint);
-    vstr_add_str(&path, suffix);
-    char err[64];
-    bool ok = mp_wasm_fetch(vstr_null_terminated_str(&path), out, err, sizeof(err));
-    vstr_clear(&path);
-    return ok;
+bool mp_wasm_sig_find(const uint8_t *bytes, uint32_t len, const uint8_t **payload, uint32_t *payload_len) {
+    return mp_wasm_find_custom_section(bytes, len, MP_WASM_SIG_SECTION, payload, payload_len);
 }
 
-static bool load_section_sig(const uint8_t *bytes, uint32_t len, const uint8_t **sig, uint32_t *sig_len) {
-    return mp_wasm_find_custom_section(bytes, len, MP_WASM_SIG_SECTION, sig, sig_len);
+// Read little-endian helpers (AOT section walk; pack.c has its own static copies).
+static uint16_t verify_read_u16_le(const uint8_t *p) {
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
 
-// Copy wasm omitting wasmmod.sig custom sections (signed payload for --embed).
-static bool copy_without_sig_section(const uint8_t *wasm, uint32_t len, uint8_t **out, uint32_t *out_len) {
-    if (wasm == NULL || len < 8
-        || wasm[0] != 0x00 || wasm[1] != 'a' || wasm[2] != 's' || wasm[3] != 'm') {
+static uint32_t verify_read_u32_le(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8)
+        | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+bool mp_wasm_sig_strip(const uint8_t *mod, uint32_t len, uint8_t **out, uint32_t *out_len) {
+    if (mod == NULL || len < 8 || mod[0] != 0x00) {
         return false;
     }
+    const bool is_wasm = (mod[1] == 'a' && mod[2] == 's' && mod[3] == 'm');
+    const bool is_aot = (mod[1] == 'a' && mod[2] == 'o' && mod[3] == 't');
+    if (!is_wasm && !is_aot) {
+        return false;
+    }
+
     uint8_t *buf = MICROPY_WASM_MALLOC(len);
     if (buf == NULL) {
         return false;
     }
-    memcpy(buf, wasm, 8);
+    memcpy(buf, mod, 8);
     uint32_t w = 8;
-    const uint8_t *p = wasm + 8;
-    const uint8_t *end = wasm + len;
     const size_t want_len = strlen(MP_WASM_SIG_SECTION);
 
-    while (p < end) {
-        const uint8_t *sec_start = p;
-        uint8_t id = *p++;
-        uint32_t size;
-        if (!mp_wasm_read_uleb(&p, end, &size) || p + size > end) {
-            MICROPY_WASM_FREE(buf);
-            return false;
-        }
-        const uint8_t *payload = p;
-        p += size;
-        bool skip = false;
-        if (id == 0) {
-            const uint8_t *q = payload;
-            uint32_t name_len;
-            if (mp_wasm_read_uleb(&q, payload + size, &name_len)
-                && q + name_len <= payload + size
-                && name_len == want_len
-                && memcmp(q, MP_WASM_SIG_SECTION, want_len) == 0) {
-                skip = true;
+    if (is_wasm) {
+        const uint8_t *p = mod + 8;
+        const uint8_t *end = mod + len;
+        while (p < end) {
+            const uint8_t *sec_start = p;
+            uint8_t id = *p++;
+            uint32_t size;
+            if (!mp_wasm_read_uleb(&p, end, &size) || p + size > end) {
+                MICROPY_WASM_FREE(buf);
+                return false;
+            }
+            const uint8_t *payload = p;
+            p += size;
+            bool skip = false;
+            if (id == 0) {
+                const uint8_t *q = payload;
+                uint32_t name_len;
+                if (mp_wasm_read_uleb(&q, payload + size, &name_len)
+                    && q + name_len <= payload + size
+                    && name_len == want_len
+                    && memcmp(q, MP_WASM_SIG_SECTION, want_len) == 0) {
+                    skip = true;
+                }
+            }
+            if (!skip) {
+                size_t n = (size_t)(p - sec_start);
+                memcpy(buf + w, sec_start, n);
+                w += (uint32_t)n;
             }
         }
-        if (!skip) {
-            size_t n = (size_t)(p - sec_start);
-            memcpy(buf + w, sec_start, n);
-            w += (uint32_t)n;
+    } else {
+        // AOT: type/size sections; CUSTOM(100)/RAW(0) with EMIT_STR name.
+        uintptr_t p = 8;
+        while (p + 8 <= len) {
+            const uint8_t *sec_start = mod + p;
+            uint32_t typ = verify_read_u32_le(mod + p);
+            uint32_t size = verify_read_u32_le(mod + p + 4);
+            const uint8_t *content = mod + p + 8;
+            if (content + size > mod + len || size > 0x10000000u) {
+                MICROPY_WASM_FREE(buf);
+                return false;
+            }
+            // Next header is 4-aligned (WAMR read_uint32 align_ptr).
+            uintptr_t aligned = ((uintptr_t)(content + size - mod) + 3u) & ~(uintptr_t)3u;
+            uintptr_t next = aligned <= len ? aligned : len;
+            bool skip = false;
+            if (typ == 100 && size >= 6) {
+                uint32_t sub = verify_read_u32_le(content);
+                if (sub == 0) {
+                    uint16_t slen = verify_read_u16_le(content + 4);
+                    const uint8_t *nb = content + 6;
+                    if (nb + slen <= content + size) {
+                        size_t bare = slen;
+                        if (bare > 0 && nb[bare - 1] == 0) {
+                            bare--;
+                        }
+                        if (bare == want_len && memcmp(nb, MP_WASM_SIG_SECTION, want_len) == 0) {
+                            skip = true;
+                        }
+                    }
+                }
+            }
+            if (!skip) {
+                size_t n = (size_t)(next - p);
+                memcpy(buf + w, sec_start, n);
+                w += (uint32_t)n;
+            } else {
+                // Drop trailing pad after wasmmod.sig (not part of signed body).
+                break;
+            }
+            p = next;
         }
     }
+
     *out = buf;
     *out_len = w;
     return true;
 }
 
 // Split MPWS envelope or treat payload as raw ECDSA sig.
-static bool parse_sig_payload(const uint8_t *payload, uint32_t payload_len,
-    const uint8_t **sig, uint32_t *sig_len,
-    const uint8_t **chain, uint32_t *chain_len) {
-    *chain = NULL;
-    *chain_len = 0;
+bool mp_wasm_sig_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_sig_info_t *out) {
+    if (out == NULL || payload == NULL) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
     if (payload_len >= 8
         && memcmp(payload, MP_WASM_MPWS_MAGIC, 4) == 0
         && payload[4] == MP_WASM_MPWS_VER) {
         uint32_t sl = ((uint32_t)payload[6] << 8) | payload[7];
-        if (8u + sl > payload_len) {
+        if (8u + sl > payload_len || sl == 0) {
             return false;
         }
-        *sig = payload + 8;
-        *sig_len = sl;
+        out->sig = payload + 8;
+        out->sig_len = sl;
+        out->is_mpws = true;
         uint32_t rest = payload_len - 8u - sl;
         if (rest >= 2) {
             const uint8_t *cp = payload + 8 + sl;
@@ -303,14 +309,18 @@ static bool parse_sig_payload(const uint8_t *payload, uint32_t payload_len,
             if (2u + cl > rest) {
                 return false;
             }
-            *chain = cp + 2;
-            *chain_len = cl;
+            out->chain = cp + 2;
+            out->chain_len = cl;
         }
-        return *sig_len > 0;
+        return true;
     }
-    *sig = payload;
-    *sig_len = payload_len;
-    return payload_len > 0;
+    if (payload_len == 0) {
+        return false;
+    }
+    out->sig = payload;
+    out->sig_len = payload_len;
+    out->is_mpws = false;
+    return true;
 }
 
 #if MICROPY_SSL_MBEDTLS
@@ -453,7 +463,7 @@ static bool verify_with_trust(const uint8_t *bytes, uint32_t len, const uint8_t 
         if (verify_pki_chain(bytes, len, sig, sig_len, chain, chain_len)) {
             return true;
         }
-        // Fall through: allow pinned leaf SPKI even if .crt present but CA trust missing.
+        // Fall through: allow pinned leaf SPKI even if chain fails CA trust.
     }
     for (mp_wasm_trust_key_t *k = trust_keys; k != NULL; k = k->next) {
         if (verify_ecdsa_sha256_spki(bytes, len, sig, sig_len, k->key, k->key_len)) {
@@ -473,9 +483,14 @@ static bool verify_with_trust(const uint8_t *bytes, uint32_t len, const uint8_t 
 }
 
 bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_hint, char *errbuf, size_t errbuf_len) {
+    (void)path_hint;
     if (!verify_runtime_enabled) {
         return true;
     }
+    return mp_wasm_verify_sig(bytes, len, errbuf, errbuf_len);
+}
+
+bool mp_wasm_verify_sig(const uint8_t *bytes, uint32_t len, char *errbuf, size_t errbuf_len) {
     mp_wasm_trust_ensure();
     if (bytes == NULL || len == 0) {
         if (errbuf && errbuf_len) {
@@ -484,77 +499,9 @@ bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_h
         return false;
     }
 
-    vstr_t detached;
-    bool have_detached = load_sidecar(path_hint, ".sig", &detached);
-    vstr_t crt;
-    bool have_crt = load_sidecar(path_hint, ".crt", &crt);
     const uint8_t *sec_payload = NULL;
     uint32_t sec_payload_len = 0;
-    bool have_section = load_section_sig(bytes, len, &sec_payload, &sec_payload_len);
-
-    const uint8_t *sig = NULL;
-    uint32_t sig_len = 0;
-    const uint8_t *chain = NULL;
-    uint32_t chain_len = 0;
-    const uint8_t *hash_bytes = bytes;
-    uint32_t hash_len = len;
-    uint8_t *stripped = NULL;
-    uint32_t stripped_len = 0;
-
-    // Prefer embedded section (signed over module without wasmmod.sig).
-    // Else detached .sig (+ optional .crt) over the exact artifact bytes.
-    if (have_section) {
-        if (!copy_without_sig_section(bytes, len, &stripped, &stripped_len)) {
-            if (have_detached) {
-                vstr_clear(&detached);
-            }
-            if (have_crt) {
-                vstr_clear(&crt);
-            }
-            if (errbuf && errbuf_len) {
-                snprintf(errbuf, errbuf_len, "verify: bad wasmmod.sig layout");
-            }
-            return false;
-        }
-        hash_bytes = stripped;
-        hash_len = stripped_len;
-        if (!parse_sig_payload(sec_payload, sec_payload_len, &sig, &sig_len, &chain, &chain_len)) {
-            MICROPY_WASM_FREE(stripped);
-            if (have_detached) {
-                vstr_clear(&detached);
-            }
-            if (have_crt) {
-                vstr_clear(&crt);
-            }
-            if (errbuf && errbuf_len) {
-                snprintf(errbuf, errbuf_len, "verify: bad wasmmod.sig payload");
-            }
-            return false;
-        }
-        // Detached .crt may supplement a raw (non-MPWS) embedded sig.
-        if (chain_len == 0 && have_crt) {
-            chain = (const uint8_t *)crt.buf;
-            chain_len = (uint32_t)crt.len;
-        }
-    } else if (have_detached) {
-        if (!parse_sig_payload((const uint8_t *)detached.buf, (uint32_t)detached.len, &sig, &sig_len, &chain, &chain_len)) {
-            vstr_clear(&detached);
-            if (have_crt) {
-                vstr_clear(&crt);
-            }
-            if (errbuf && errbuf_len) {
-                snprintf(errbuf, errbuf_len, "verify: bad signature");
-            }
-            return false;
-        }
-        if (chain_len == 0 && have_crt) {
-            chain = (const uint8_t *)crt.buf;
-            chain_len = (uint32_t)crt.len;
-        }
-    } else {
-        if (have_crt) {
-            vstr_clear(&crt);
-        }
+    if (!mp_wasm_sig_find(bytes, len, &sec_payload, &sec_payload_len)) {
         #if MICROPY_WASM_VERIFY == 1
         if (errbuf && errbuf_len) {
             snprintf(errbuf, errbuf_len, "verify: signature required");
@@ -565,16 +512,26 @@ bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_h
         #endif
     }
 
-    bool ok = verify_with_trust(hash_bytes, hash_len, sig, sig_len, chain, chain_len);
-    if (stripped != NULL) {
+    uint8_t *stripped = NULL;
+    uint32_t stripped_len = 0;
+    if (!mp_wasm_sig_strip(bytes, len, &stripped, &stripped_len)) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "verify: bad wasmmod.sig layout");
+        }
+        return false;
+    }
+
+    mp_wasm_sig_info_t info;
+    if (!mp_wasm_sig_parse(sec_payload, sec_payload_len, &info)) {
         MICROPY_WASM_FREE(stripped);
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "verify: bad wasmmod.sig payload");
+        }
+        return false;
     }
-    if (have_detached) {
-        vstr_clear(&detached);
-    }
-    if (have_crt) {
-        vstr_clear(&crt);
-    }
+
+    bool ok = verify_with_trust(stripped, stripped_len, info.sig, info.sig_len, info.chain, info.chain_len);
+    MICROPY_WASM_FREE(stripped);
     if (!ok) {
         if (errbuf && errbuf_len) {
             snprintf(errbuf, errbuf_len, "verify: bad signature");
@@ -586,6 +543,29 @@ bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_h
 
 #else // !MICROPY_WASM_VERIFY
 
+bool mp_wasm_sig_find(const uint8_t *bytes, uint32_t len, const uint8_t **payload, uint32_t *payload_len) {
+    (void)bytes;
+    (void)len;
+    (void)payload;
+    (void)payload_len;
+    return false;
+}
+
+bool mp_wasm_sig_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_sig_info_t *out) {
+    (void)payload;
+    (void)payload_len;
+    (void)out;
+    return false;
+}
+
+bool mp_wasm_sig_strip(const uint8_t *bytes, uint32_t len, uint8_t **out, uint32_t *out_len) {
+    (void)bytes;
+    (void)len;
+    (void)out;
+    (void)out_len;
+    return false;
+}
+
 bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_hint, char *errbuf, size_t errbuf_len) {
     (void)bytes;
     (void)len;
@@ -594,6 +574,15 @@ bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_h
     (void)errbuf_len;
     (void)verify_runtime_enabled; // still settable; compile-time off = always allow
     return true;
+}
+
+bool mp_wasm_verify_sig(const uint8_t *bytes, uint32_t len, char *errbuf, size_t errbuf_len) {
+    (void)bytes;
+    (void)len;
+    if (errbuf && errbuf_len) {
+        snprintf(errbuf, errbuf_len, "verify: disabled");
+    }
+    return false;
 }
 
 #endif // MICROPY_WASM_VERIFY
