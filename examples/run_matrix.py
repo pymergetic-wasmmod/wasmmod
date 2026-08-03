@@ -1,4 +1,4 @@
-# This file is part of the MicroPython project, http://micropython.org/
+# This file is part of wasmmod, https://github.com/pymergetic/wasmmod
 #
 # The MIT License (MIT)
 #

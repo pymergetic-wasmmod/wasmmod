@@ -1,4 +1,4 @@
-MIT License
+The MIT License (MIT)
 
 Copyright (c) 2026 Rouven Raudzus <raudzus@pymergetic.com>
 
@@ -19,3 +19,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+Unless specified otherwise, the above license and copyright apply to all files
+in this repository.
+
+Individual files may include additional copyright holders.
+
+Bundled / nested third-party software:
+
+  /third_party/wamr  Apache License 2.0  (Bytecode Alliance wasm-micro-runtime)
+
+See that project's LICENSE for full terms. It is not redistributed under the
+MIT terms above.
