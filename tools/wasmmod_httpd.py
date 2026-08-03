@@ -46,14 +46,14 @@ def main() -> int:
             if quiet:
                 return
             # HEAD probes + GET of .wasm / .sig / .crt show up here.
-            print(f"  http {self.command} {self.path} → {code}", flush=True)
+            print(f"  [httpd] {self.command} {self.path} → {code}", flush=True)
 
     httpd = http.server.ThreadingHTTPServer((args.host, args.port), Handler)
     host, port = httpd.server_address[:2]
     if args.write_port:
         with open(args.write_port, "w", encoding="utf-8") as f:
             f.write(str(port))
-    print(f"serving {root} on http://{host}:{port}/", flush=True)
+    print(f"[httpd] serving {root} on http://{host}:{port}/", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
