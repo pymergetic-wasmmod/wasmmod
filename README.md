@@ -134,6 +134,7 @@ wasmmod/
 │   └── packs/                               built <name>.wasm artifacts
 ├── screenshots/                             README eye-catchers
 ├── docs/PACK.md                             section format
+├── BRANCHES.md                              MetalPython host branch layout
 └── third_party/wamr                         WAMR (Apache-2.0)
 ```
 
@@ -190,7 +191,7 @@ Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JI
 Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`.
 
 Optional host trampoline (metalpython): `tools/wasmmod.py` → `extmod/wasmmod/tools/wasmmod.py`.  
-MetalPython keeps a clean upy-shaped `wasmmod` branch (PR candidate) under product `master` — see that repo’s [`BRANCHES.md`](https://github.com/pymergetic/metalpython/blob/wasmmod/BRANCHES.md).
+MetalPython host branch layout (`wasmmod` PR track under product `master`): [BRANCHES.md](BRANCHES.md).
 
 ---
 
