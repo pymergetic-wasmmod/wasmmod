@@ -138,37 +138,9 @@ static bool find_in_root(const char *root, const char *slash_name, vstr_t *path_
     #endif
     vstr_add_str(&rel, slash_name);
     vstr_add_str(&rel, ".wasm");
-    if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
-        vstr_clear(&rel);
-        return true;
-    }
-
-    // 3) pack-dir layout: name/name.wasm (basename == leaf dir)
-    {
-        const char *leaf = strrchr(slash_name, '/');
-        leaf = leaf ? leaf + 1 : slash_name;
-        vstr_clear(&rel);
-        vstr_init(&rel, strlen(slash_name) + strlen(leaf) + 8);
-        #if MICROPY_PY_WASM_AOT
-        vstr_add_str(&rel, slash_name);
-        vstr_add_char(&rel, '/');
-        vstr_add_str(&rel, leaf);
-        vstr_add_str(&rel, ".aot");
-        if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
-            vstr_clear(&rel);
-            return true;
-        }
-        vstr_clear(&rel);
-        vstr_init(&rel, strlen(slash_name) + strlen(leaf) + 8);
-        #endif
-        vstr_add_str(&rel, slash_name);
-        vstr_add_char(&rel, '/');
-        vstr_add_str(&rel, leaf);
-        vstr_add_str(&rel, ".wasm");
-        bool ok = try_vfs_file(root, vstr_null_terminated_str(&rel), path_out);
-        vstr_clear(&rel);
-        return ok;
-    }
+    bool ok = try_vfs_file(root, vstr_null_terminated_str(&rel), path_out);
+    vstr_clear(&rel);
+    return ok;
 }
 
 static bool find_in_list(mp_obj_t list_obj, const char *slash_name, vstr_t *path_out) {

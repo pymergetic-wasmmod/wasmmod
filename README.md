@@ -85,29 +85,22 @@ Type "help()" for more information.
 …  select            websocket
 …  socket
 Plus any modules on the filesystem
->>> import hello                   # succeeds as empty hello/ dir package (cached)
->>> hasattr(hello, "greet")
-False
 >>> import wasm
+>>> wasm.path.append("packs")
 >>> wasm.install_hook()
->>> del sys.modules["hello"]       # clear cache so re-import hits the hook
->>> import hello, mixed, bridge    # hook → hello/hello.wasm
->>> hasattr(hello, "greet")
-True
+>>> import hello, mixed, bridge    # packs/hello.wasm etc.
 >>> hello.greet()
 'hello from pack py'
 >>> bridge.via_rs(6)
 36
 ```
 
-
 **FQN → file:** `import a.b` searches `wasm.path` then `sys.path` (dots → `/`):
 
 1. `a/b/__init__.wasm` (package)
 2. `a/b.wasm` (module)
-3. `a/b/b.wasm` (pack-dir layout — e.g. `hello/hello.wasm`)
 
-First hit wins. Nested names inside a pack (`hello.util`) come from the pack’s embedded Python after the root `.wasm` is loaded — not a second file. Override roots with `wasm.path`. Explicit path: `wasm.load_pack("…/foo.wasm", "foo")`.
+Examples use `packs/<name>.wasm` on `wasm.path`. Nested names inside a pack (`hello.util`) come from embedded pack-Python — not a second file. Explicit path: `wasm.load_pack("packs/foo.wasm", "foo")`.
 
 ```bash
 make -C examples demo    # real REPL: micropython -i < demo_readme.py
@@ -124,7 +117,8 @@ wasmmod/
 ├── fetch.*  wasmmod.c  finder.*  host.*     MicroPython host
 ├── ports/micropython/                       make / cmake / mpconfig
 ├── tools/wasm_{pack,sign}.py                host-agnostic CLIs
-├── examples/                                packs + call matrix
+├── examples/                                sources + packs/ + call matrix
+│   └── packs/                               built <name>.wasm artifacts
 ├── screenshots/                             README eye-catchers
 ├── docs/PACK.md                             section format
 └── third_party/wamr                         WAMR (Apache-2.0)

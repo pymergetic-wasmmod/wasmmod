@@ -29,7 +29,7 @@
 #include "py/obj.h"
 
 // Search wasm.path then sys.path for (dots → '/'), first hit wins:
-//   1) name/__init__.wasm  2) name.wasm  3) name/name.wasm
+//   1) name/__init__.wasm  2) name.wasm
 // On success writes the path into *path_out (caller vstr_clear).
 bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out);
 

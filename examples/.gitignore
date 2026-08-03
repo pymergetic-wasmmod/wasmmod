@@ -1,4 +1,4 @@
-# Pack build outputs (rebuild with make -C <pack>)
+# Pack build outputs (rebuild with: make packs)
 *.wasm
 *.aot
 *.mpack

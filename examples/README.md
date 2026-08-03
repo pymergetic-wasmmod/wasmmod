@@ -107,7 +107,7 @@ make -C ports/unix MICROPY_PY_WASM=1 MICROPY_PY_BTREE=0 MICROPY_PY_FFI=0 BUILD=b
 # 3) Hello smoke (native + embedded src/, including nested hello.util)
 ports/unix/build-wasm/micropython -c '
 import wasm
-m = wasm.load_pack("extmod/wasmmod/examples/hello/hello.wasm")
+m = wasm.load_pack("extmod/wasmmod/examples/packs/hello.wasm")
 print(m.hello(), m.add(2, 3), m.greet())
 import hello.util
 import hello.util.extra
@@ -121,9 +121,9 @@ wasm.unload("hello")
 ```python
 import wasm
 wasmmod.host_set(0, lambda x: x * 2)   # slot for wasmmod.host.call_i32
-wasm.load_pack("extmod/wasmmod/examples/hello/hello.wasm")
-wasm.load_pack("extmod/wasmmod/examples/mixed/mixed.wasm")
-b = wasm.load_pack("extmod/wasmmod/examples/bridge/bridge.wasm")
+wasm.load_pack("extmod/wasmmod/examples/packs/hello.wasm")
+wasm.load_pack("extmod/wasmmod/examples/packs/mixed.wasm")
+b = wasm.load_pack("extmod/wasmmod/examples/packs/bridge.wasm")
 print(b.via_host(7))   # → 14
 wasmmod.host_clear()
 ```

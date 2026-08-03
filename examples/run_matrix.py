@@ -178,8 +178,8 @@ print(
 )
 
 print("Load peer packs (guest→guest needs them registered first)")
-h = wasm.load_pack(p("hello/hello.wasm"))
-m = wasm.load_pack(p("mixed/mixed.wasm"))
+h = wasm.load_pack(p("packs/hello.wasm"))
+m = wasm.load_pack(p("packs/mixed.wasm"))
 print("  sys.modules: hello, mixed")
 
 
@@ -252,7 +252,7 @@ sys.modules["hostc"] = _HostC()  # type: ignore[assignment]
 sys.modules["hostrs"] = _HostRS()  # type: ignore[assignment]
 print("  sys.modules: hostapi, hostc, hostrs")
 
-b = wasm.load_pack(p("bridge/bridge.wasm"))
+b = wasm.load_pack(p("packs/bridge.wasm"))
 print("  sys.modules: bridge")
 
 # pack-embedded Python (runtime import)
@@ -639,7 +639,7 @@ case(
     17,
 )
 
-c = wasm.load_pack(p("client/client.wasm"))
+c = wasm.load_pack(p("packs/client.wasm"))
 case(
     "G",
     "C",

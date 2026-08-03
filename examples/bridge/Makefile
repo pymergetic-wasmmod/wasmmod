@@ -3,13 +3,14 @@
 #   make -C extmod/wasmmod/examples/bridge
 
 include ../find_top.mk
-OUT = bridge.wasm
+OUT = ../packs/bridge.wasm
 
 .PHONY: all clean
 
 all: $(OUT)
 
 $(OUT): src/bridge.c src/lib.rs src/__init__.py pack.toml ../guest.h $(WASM_PACK)
+	mkdir -p ../packs
 	python3 $(WASM_PACK) . -o $(OUT)
 
 clean:

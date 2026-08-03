@@ -26,10 +26,10 @@ WAMRC ?= $(WAMRC_BUILD)/wamrc
 LLVM_CMAKE_DIR ?= $(shell llvm-config-18 --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null)
 
 PACK_WASMS = \
-	hello/hello.wasm \
-	client/client.wasm \
-	mixed/mixed.wasm \
-	bridge/bridge.wasm
+	packs/hello.wasm \
+	packs/client.wasm \
+	packs/mixed.wasm \
+	packs/bridge.wasm
 
 .PHONY: all clean test test-aot test-fast-jit test-jit test-engines demo repl \
 	packs aot-packs wamrc host host-aot host-fast-jit host-jit
@@ -186,4 +186,4 @@ clean:
 	$(MAKE) -C client clean
 	$(MAKE) -C mixed clean
 	$(MAKE) -C bridge clean
-	rm -f hello/hello.aot client/client.aot mixed/mixed.aot bridge/bridge.aot
+	rm -f packs/*.aot

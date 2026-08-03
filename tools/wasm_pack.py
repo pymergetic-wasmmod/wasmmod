@@ -633,7 +633,8 @@ def compile_wasm(sources: list[str], out: Path, exports: list[str], opt: str) ->
             except ValueError:
                 rel = Path(src.name)
             tag = str(rel).replace("/", "__").replace("\\", "__")
-            obj = out.with_name(f".{out.stem}.{tag}.o")
+            # Keep intermediates in cwd (pack project), not next to -o (e.g. packs/).
+            obj = Path.cwd() / f".{out.stem}.{tag}.o"
             compile_to_obj(src, obj, opt)
             objs.append(obj)
         if wasm_ld:
