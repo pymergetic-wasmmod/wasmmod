@@ -1,6 +1,6 @@
 # Screenshot shot list
 
-Drop PNGs here (same names as below). README embeds them as eye-catchers.
+README embeds these as eye-catchers. Present now: `repl-demo.png`, `matrix-table.png`, `engine-summary.png`.
 
 Suggested terminal: dark theme, ~100–120 cols, JetBrains Mono / Cascadia / Fira Code.
 Crop chrome; keep a little padding.

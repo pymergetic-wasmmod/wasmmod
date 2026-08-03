@@ -5,18 +5,17 @@ One `.wasm` file can ship **C + Rust + embedded Python**, talk to peer packs, an
 
 Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
 
-<!-- Eyecatch: drop PNGs into screenshots/ (see screenshots/SHOTLIST.md), then uncomment:
-
 <p align="center">
-  <img src="screenshots/matrix-table.png" alt="Call matrix table" width="720" />
-</p>
-<p align="center">
-  <img src="screenshots/engine-summary.png" alt="Engine summary" width="480" />
-  &nbsp;
-  <img src="screenshots/repl-demo.png" alt="Host REPL demo" width="480" />
+  <img src="screenshots/repl-demo.png" alt="Host REPL — pack Py, C, Rust, guest→guest" width="520" />
 </p>
 
--->
+<p align="center">
+  <img src="screenshots/matrix-table.png" alt="Same-pack call matrix — Py / C / RS" width="640" />
+</p>
+
+<p align="center">
+  <img src="screenshots/engine-summary.png" alt="Engine summary — Interp AOT Fast JIT LLVM JIT" width="480" />
+</p>
 
 ---
 
