@@ -800,6 +800,9 @@ CDN-oriented layout (channels + format-tagged AOT):
   hello.aot6.zlib           # format only (no arch infix)
 ```
 
+Distribution software (index schema, publish stub, roadmap):
+[pymergetic/metal-cdn](https://github.com/pymergetic/metal-cdn).
+
 ## Custom section: `wasmmod.imports` **(proposed)**
 
 Guest→guest import list:

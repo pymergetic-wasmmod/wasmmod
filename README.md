@@ -148,6 +148,9 @@ wasmmod/
 
 Pack sections are named `wasmmod.pack` / `wasmmod.imports` / `wasmmod.host` / `wasmmod.sig` — see [docs/PACK.md](docs/PACK.md). Host I/O replaceability (Metal async): [ports/PORT.md](ports/PORT.md).
 
+CDN / channel publish (lead + `@version` pins, index schema): separate repo
+[metal-cdn](https://github.com/pymergetic/metal-cdn) (scaffold).
+
 ```mermaid
 flowchart LR
   subgraph host [Host Python]
@@ -236,7 +239,8 @@ LLVM JIT     PASS (57 cases OK)
 ALL ENGINES OK
 ```
 
-Details: [examples/README.md](examples/README.md) · pack format: [docs/PACK.md](docs/PACK.md).
+Details: [examples/README.md](examples/README.md) · pack format: [docs/PACK.md](docs/PACK.md) ·
+CDN channels: [metal-cdn](https://github.com/pymergetic/metal-cdn).
 
 ---
 
