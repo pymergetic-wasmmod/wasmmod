@@ -87,8 +87,7 @@ Type "help()" for more information.
 Plus any modules on the filesystem
 >>> import wasm
 >>> wasm.install_hook()
->>> wasm.load_pack("hello/hello.wasm", "hello")
->>> import hello, mixed, bridge
+>>> import hello, mixed, bridge   # auto: hello/hello.wasm on sys.path
 >>> hello.greet()
 'hello from pack py'
 >>> bridge.via_rs(6)
@@ -96,6 +95,7 @@ Plus any modules on the filesystem
 >>> bridge.via_hello()
 42
 ```
+
 
 ```bash
 make -C examples demo    # real REPL: micropython -i < demo_readme.py

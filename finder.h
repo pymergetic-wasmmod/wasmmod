@@ -28,8 +28,9 @@
 
 #include "py/obj.h"
 
-// Search wasm.path then sys.path for name/__init__.wasm or name.wasm
-// (dots → '/'). On success writes the path into *path_out (caller vstr_clear).
+// Search wasm.path then sys.path for (dots → '/'):
+//   name/__init__.wasm, name/name.wasm, or name.wasm
+// On success writes the path into *path_out (caller vstr_clear).
 bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out);
 
 // Load-or-reuse a pack by dotted import name. Raises on failure.

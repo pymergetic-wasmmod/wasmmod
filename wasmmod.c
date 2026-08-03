@@ -989,6 +989,27 @@ static mp_obj_t mod_wasm_import_hook(size_t n_args, const mp_obj_t *args) {
         prev = MP_OBJ_FROM_PTR(&mp_builtin___import___obj);
     }
 
+    // Prefer a found .wasm pack over a same-named directory on sys.path.
+    // (Unix port treats hello/ as a package even without __init__.py, so the
+    // ImportError fallback below would never run for example pack layouts.)
+    if (wasm_import_hook_depth == 0 && n_args >= 1 && mp_obj_is_str(args[0])) {
+        const char *name = mp_obj_str_get_str(args[0]);
+        vstr_t path;
+        if (mp_wasm_find_pack(name, &path)) {
+            vstr_clear(&path);
+            wasm_import_hook_depth++;
+            nlr_buf_t nlr_pack;
+            if (nlr_push(&nlr_pack) == 0) {
+                (void)mp_wasm_import_wasm(name);
+                nlr_pop();
+                wasm_import_hook_depth--;
+            } else {
+                wasm_import_hook_depth--;
+                nlr_jump(nlr_pack.ret_val);
+            }
+        }
+    }
+
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         mp_obj_t res = mp_call_function_n_kw(prev, n_args, 0, args);

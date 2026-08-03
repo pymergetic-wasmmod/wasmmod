@@ -79,8 +79,12 @@ static bool try_url_candidate(const char *root, const char *rel, vstr_t *path_ou
 }
 
 static bool find_in_root(const char *root, const char *slash_name, vstr_t *path_out) {
-    if (root == NULL || root[0] == '\0' || path_is_frozen(root)) {
+    if (root == NULL || path_is_frozen(root)) {
         return false;
+    }
+    // sys.path "" means cwd — same as "." for VFS lookups.
+    if (root[0] == '\0') {
+        root = ".";
     }
     bool url = mp_wasm_uri_is_http(root);
 
@@ -116,6 +120,34 @@ static bool find_in_root(const char *root, const char *slash_name, vstr_t *path_
     if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
         vstr_clear(&rel);
         return true;
+    }
+
+    // Example / pack-dir layout: hello/hello.wasm (basename == leaf dir).
+    {
+        const char *leaf = strrchr(slash_name, '/');
+        leaf = leaf ? leaf + 1 : slash_name;
+        vstr_clear(&rel);
+        vstr_init(&rel, strlen(slash_name) + strlen(leaf) + 8);
+        #if MICROPY_PY_WASM_AOT
+        vstr_add_str(&rel, slash_name);
+        vstr_add_char(&rel, '/');
+        vstr_add_str(&rel, leaf);
+        vstr_add_str(&rel, ".aot");
+        if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
+            vstr_clear(&rel);
+            return true;
+        }
+        vstr_clear(&rel);
+        vstr_init(&rel, strlen(slash_name) + strlen(leaf) + 8);
+        #endif
+        vstr_add_str(&rel, slash_name);
+        vstr_add_char(&rel, '/');
+        vstr_add_str(&rel, leaf);
+        vstr_add_str(&rel, ".wasm");
+        if (try_vfs_file(root, vstr_null_terminated_str(&rel), path_out)) {
+            vstr_clear(&rel);
+            return true;
+        }
     }
 
     vstr_clear(&rel);
