@@ -1,18 +1,18 @@
 # Resolve:
-#   WASMMOD_ROOT — this repo (has micropython.mk + tools/wasm_pack.py)
+#   WASMMOD_ROOT — this repo (ports/micropython/micropython.mk + tools/wasm_pack.py)
 #   TOP            — host tree (metalpython / MicroPython: ports/unix + py/)
 # Works from extmod/wasmmod/examples or a symlink at examples/wasmmod.
 
 ifeq ($(WASMMOD_ROOT),)
 WASMMOD_ROOT := $(shell d="$(CURDIR)"; while [ -n "$$d" ] && [ "$$d" != / ]; do \
-	if [ -f "$$d/micropython.mk" ] && [ -f "$$d/tools/wasm_pack.py" ]; then \
+	if [ -f "$$d/ports/micropython/micropython.mk" ] && [ -f "$$d/tools/wasm_pack.py" ]; then \
 		printf '%s' "$$d"; exit 0; \
 	fi; \
 	d=$$(dirname "$$d"); \
 	done; exit 1)
 endif
 ifeq ($(WASMMOD_ROOT),)
-$(error cannot find wasmmod root (micropython.mk + tools/wasm_pack.py) from $(CURDIR))
+$(error cannot find wasmmod root (ports/micropython/micropython.mk + tools/wasm_pack.py) from $(CURDIR))
 endif
 
 ifeq ($(TOP),)
