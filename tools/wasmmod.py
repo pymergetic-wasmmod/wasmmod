@@ -37,7 +37,7 @@ Commands:
   httpd            Static HTTP server for pack smoke tests
   source           Inspect / extract wasmmod.source section (Python)
   read             Host reader for source/sig (Rust wasmmod-read)
-  zlib             Wrap / unwrap whole-artifact MPZL (.wasm.zlib / .aot.zlib)
+  zlib             Wrap / unwrap whole-artifact MPZL (.wasm/.aot/.elf .zlib)
   publish          One-shot pack → AOT → sign → zlib → metal-cdn upload
   cdn              Remote index / search / show / get (pip-style)
   inspect          Local pack/source/sig summary (+ optional verify)

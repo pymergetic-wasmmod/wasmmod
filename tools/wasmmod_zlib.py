@@ -27,12 +27,13 @@
 Whole-artifact zlib envelope (MPZL) for bandwidth / CDN-style delivery.
 
   tools/wasmmod.py zlib wrap PATH.wasm [-o PATH.wasm.zlib]
+  tools/wasmmod.py zlib wrap PATH.elf  [-o PATH.elf.zlib]
   tools/wasmmod.py zlib unwrap PATH.wasm.zlib [-o PATH.wasm]
-  tools/wasmmod.py zlib info PATH.wasm.zlib
+  tools/wasmmod.py zlib info PATH.elf.zlib
 
 Layout: magic "MPZL" | u32le raw_len | zlib(bytes).
 
-Sign the naked .wasm/.aot first, then wrap. The loader unwraps before verify.
+Sign the naked .wasm/.aot/.elf first, then wrap. The loader unwraps before verify.
 """
 
 from __future__ import annotations
@@ -109,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="MPZL whole-artifact zlib wrap/unwrap")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p_wrap = sub.add_parser("wrap", help="Wrap .wasm/.aot into .zlib")
+    p_wrap = sub.add_parser("wrap", help="Wrap .wasm/.aot/.elf into .zlib")
     p_wrap.add_argument("path")
     p_wrap.add_argument("-o", "--output", default=None)
     p_wrap.add_argument("--level", type=int, default=9)

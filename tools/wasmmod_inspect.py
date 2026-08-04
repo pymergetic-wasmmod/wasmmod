@@ -66,13 +66,10 @@ def _offline_inspect(path: Path) -> dict[str, Any]:
     source = _load("wasmmod_source")
     data = path.read_bytes()
     try:
-        # MPZL unwrap if present (client-free)
+        # MPZL unwrap if present (client-free): magic(4) + u32le raw_len + zlib body
         if data[:4] == b"MPZL":
-            import zlib
-
-            # MPZL: magic(4) + flags(1) + reserved(3) + u32 uncompressed + zlib body
-            if len(data) >= 12:
-                data = zlib.decompress(data[12:])
+            zmod = _load("wasmmod_zlib")
+            data = zmod.unwrap_bytes(data)
         payload = source.extract_custom_section(data, "wasmmod.source")
         if payload:
             meta = source.parse_source_payload(payload)
@@ -161,7 +158,7 @@ def _print_rich(contents: Any) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("path", type=Path, help="Local .wasm / .aot / .zlib")
+    ap.add_argument("path", type=Path, help="Local .wasm / .aot / .elf / .zlib")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--verify", action="store_true", help="Verify MPWS against --trust roots")
     ap.add_argument(

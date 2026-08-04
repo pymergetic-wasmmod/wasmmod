@@ -142,7 +142,7 @@ wasmmod/
 ├── fetch.*  io.h  wasmmod.c  finder.*  host.*  MicroPython host
 ├── ports/                                   make / cmake / mpconfig / PORT.md
 │   └── micropython/webassembly/             browser: js.fetch I/O + Emscripten WAMR
-├── tools/wasm_{pack,sign}.py                host-agnostic CLIs
+├── tools/wasmmod.py                         unified CLI (pack / pack-elf / sign / …)
 ├── examples/                                sources + packs/ + call matrix
 │   └── packs/                               built <name>.{wasm,elf,aotN} artifacts
 ├── screenshots/                             README eye-catchers

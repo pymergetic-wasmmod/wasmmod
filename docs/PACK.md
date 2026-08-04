@@ -912,24 +912,27 @@ v1/v2 flags: none; v3 file `flags` bit0 = zlib. Readers that do not know
 
 ## Whole-artifact envelope: `*.zlib` (MPZL)
 
-Optional outer wrap for `.wasm` / `.aot` (CDN / VFS bandwidth):
+Optional outer wrap for `.wasm` / `.aot` / `.elf` (CDN / VFS bandwidth):
 
 ```text
 magic     4   b"MPZL"
 raw_len   4   uncompressed artifact size
-zlib      …   RFC 1950 of the naked .wasm/.aot
+zlib      …   RFC 1950 of the naked .wasm/.aot/.elf
 ```
 
 Tools: `tools/wasmmod.py zlib wrap|unwrap|info`. Sign the naked artifact first,
-then wrap. Finder prefers `path.wasm.zlib` / `path.aot{N}.zlib` when present;
-loader unwraps **before** verify/load.
+then wrap. Finder prefers `path.wasm.zlib` / `path.aot{N}.zlib` /
+`path[.arch].elf.zlib` when present; loader unwraps **before** verify/load.
 
-CDN-oriented layout (channels + format-tagged AOT):
+CDN-oriented layout (channels + format-tagged AOT / ELF):
 
 ```text
 …/packs/                    # lead / latest channel
 …/packs/@0.1.0/             # version pin
   hello.wasm.zlib
+  hello.elf.zlib            # in-tree ET_REL (host arch)
+  hello.x86_64.elf.zlib     # arch-tagged ELF twin
+  hello.aarch64.elf.zlib    # cross twin (rejected on other arches)
   hello.x86_64.aot6.zlib    # arch + AOT file-format N (= wasm.AOT_VERSION)
   hello.aot6.zlib           # format only (no arch infix)
 ```
