@@ -43,21 +43,21 @@ static char g_token[MP_WASM_CDN_TOKEN_MAX];
 #endif
 static char g_session_id[MP_WASM_CDN_SESSION_ID_MAX];
 
-static bool looks_like_cdn_base(const char *url) {
-    if (url == NULL) {
-        return false;
-    }
+static size_t url_len_no_slash(const char *url) {
     size_t n = strlen(url);
     while (n > 0 && url[n - 1] == '/') {
         n--;
     }
-    if (n >= 4 && memcmp(url + n - 4, "/cdn", 4) == 0) {
-        return true;
+    return n;
+}
+
+bool mp_wasm_cdn_url_is_base(const char *url) {
+    if (url == NULL || g_base[0] == '\0') {
+        return false;
     }
-    if (n >= 3 && memcmp(url + n - 3, "cdn", 3) == 0) {
-        return true;
-    }
-    return strstr(url, "/cdn/") != NULL;
+    size_t un = url_len_no_slash(url);
+    size_t bn = url_len_no_slash(g_base);
+    return un == bn && un > 0 && strncmp(url, g_base, bn) == 0;
 }
 
 void mp_wasm_cdn_reset(void) {
@@ -72,16 +72,14 @@ void mp_wasm_cdn_configure(const char *base_url, const char *token) {
     g_base[0] = '\0';
     g_token[0] = '\0';
     if (base_url != NULL && base_url[0] != '\0') {
-        size_t n = strlen(base_url);
-        while (n > 0 && base_url[n - 1] == '/') {
-            n--;
-        }
+        size_t n = url_len_no_slash(base_url);
         if (n >= MP_WASM_CDN_BASE_MAX) {
             n = MP_WASM_CDN_BASE_MAX - 1;
         }
         memcpy(g_base, base_url, n);
         g_base[n] = '\0';
-        g_driver = looks_like_cdn_base(g_base) ? MP_WASM_CDN_DRIVER_METAL : MP_WASM_CDN_DRIVER_PATH;
+        // Explicit bind via wasm.cdn() — always metal-cdn (artifacts/index).
+        g_driver = MP_WASM_CDN_DRIVER_METAL;
     } else {
         g_driver = MP_WASM_CDN_DRIVER_PATH;
     }
@@ -100,6 +98,10 @@ void mp_wasm_cdn_configure(const char *base_url, const char *token) {
 
 mp_wasm_cdn_driver_t mp_wasm_cdn_driver(void) {
     return g_driver;
+}
+
+const char *mp_wasm_cdn_base(void) {
+    return g_base[0] != '\0' ? g_base : NULL;
 }
 
 bool mp_wasm_cdn_require_explicit_deps(void) {

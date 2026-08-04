@@ -114,6 +114,9 @@ Diagnostics:
 # Browser platform: host clang has no emscripten.h; io_browser.c stubs under
 # !__EMSCRIPTEN__. Includes are relative (../../../io.h) so metalpython-as-
 # workspace clangd still resolves without relying on -I../...
+# Note: clangd fallback cwd is the source file's directory, so -I../.. from
+# this file is wrong for deep paths (e.g. variant/mbedtls/). That tree has
+# its own .clangd with -I to TOP for extmod/mbedtls/*.h.
 ---
 If:
   PathMatch: .*/ports/micropython/webassembly/.*

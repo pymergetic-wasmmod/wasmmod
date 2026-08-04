@@ -6,3 +6,10 @@ WASMMOD_EMSCRIPTEN = 1
 JSFLAGS += -s ASYNCIFY
 
 CFLAGS += -DMICROPY_WASM_HTTP_NATIVE=0
+
+# Pack signature verify (ECDSA-P256 via mbedtls) + baked demo root CA.
+MICROPY_PY_SSL = 1
+MICROPY_SSL_MBEDTLS = 1
+MICROPY_WASM_VERIFY ?= 1
+# Default: examples PKI from `make -C examples sign-key` / sign-packs.
+MICROPY_WASM_TRUST_CA ?= $(TOP)/extmod/wasmmod/examples/.keys/trust/root.crt.der

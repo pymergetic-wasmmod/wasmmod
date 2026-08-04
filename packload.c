@@ -940,9 +940,10 @@ static mp_obj_t mod_wasm_import_hook(size_t n_args, const mp_obj_t *args) {
         }
 
         // Prefer packs on wasm.path (VFS or HTTP) over a same-named empty directory
-        // on sys.path. Namespace listdir + sys.path packs: ImportError path.
+        // on sys.path — but never when metal-cdn is active (artifacts/ only).
         vstr_t path;
-        if (mp_wasm_find_pack_on_wasm_path(name, &path)) {
+        if (mp_wasm_cdn_driver() != MP_WASM_CDN_DRIVER_METAL
+            && mp_wasm_find_pack_on_wasm_path(name, &path)) {
             mp_wasm_import_hook_depth++;
             nlr_buf_t nlr_pack;
             if (nlr_push(&nlr_pack) == 0) {
@@ -1075,11 +1076,9 @@ static void wasm_path_add_http_root(const char *url, bool prepend) {
 }
 
 static void wasm_path_add_http_roots(mp_obj_t url_obj) {
-    // One URL, or an ordered list/tuple (index 0 = highest priority).
+    // Flat HTTP pack mirrors on wasm.path only. Metal-cdn is wasm.cdn(base).
     if (mp_obj_is_str(url_obj)) {
-        const char *url = mp_obj_str_get_str(url_obj);
-        mp_wasm_cdn_configure(url, NULL);
-        wasm_path_add_http_root(url, true);
+        wasm_path_add_http_root(mp_obj_str_get_str(url_obj), true);
         return;
     }
     size_t n = 0;
@@ -1093,12 +1092,7 @@ static void wasm_path_add_http_roots(mp_obj_t url_obj) {
         if (!mp_obj_is_str(items[i - 1])) {
             mp_raise_TypeError(MP_ERROR_TEXT("install_hook: url entries must be str"));
         }
-        const char *url = mp_obj_str_get_str(items[i - 1]);
-        // First list entry (highest priority) selects the driver.
-        if (i == 1) {
-            mp_wasm_cdn_configure(url, NULL);
-        }
-        wasm_path_add_http_root(url, true);
+        wasm_path_add_http_root(mp_obj_str_get_str(items[i - 1]), true);
     }
 }
 
@@ -1148,11 +1142,21 @@ static mp_obj_t mod_wasm_cdn(size_t n_args, const mp_obj_t *args) {
         token = mp_obj_str_get_str(args[1]);
     }
     mp_wasm_cdn_configure(url, token);
-    // Path driver: flat HTTP pack root on wasm.path. Metal driver uses
-    // /artifacts/lead|pin only — do not add the CDN base as a path root
-    // (avoids HEAD storms on /cdn/foo/bar.wasm before artifacts/).
-    if (mp_wasm_cdn_driver() == MP_WASM_CDN_DRIVER_PATH) {
-        wasm_path_add_http_root(url, true);
+    // Metal uses /artifacts/… only — drop this base from wasm.path if present
+    // (avoids flat probes on {base}/<name>.wasm that can 200 non-pack bodies).
+    mp_wasm_path_ensure();
+    mp_obj_list_t *list = &MP_STATE_VM(mp_wasm_path_obj);
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_list_get(MP_OBJ_FROM_PTR(list), &n, &items);
+    for (size_t i = n; i > 0; --i) {
+        size_t idx = i - 1;
+        if (!mp_obj_is_str(items[idx])) {
+            continue;
+        }
+        if (mp_wasm_cdn_url_is_base(mp_obj_str_get_str(items[idx]))) {
+            mp_obj_list_remove(MP_OBJ_FROM_PTR(list), items[idx]);
+        }
     }
     const char *name = mp_wasm_cdn_driver_name();
     return mp_obj_new_str(name, strlen(name));

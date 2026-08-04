@@ -20,14 +20,19 @@ typedef enum {
     MP_WASM_CDN_DRIVER_METAL = 1,
 } mp_wasm_cdn_driver_t;
 
-// Configure resolve driver from a base URL (metal-cdn if URL looks like …/cdn).
+// Bind metal-cdn driver to base_url (artifacts/index under that prefix).
 // token may be NULL (public lead/pin). Copies strings internally.
+// Flat HTTP pack mirrors belong on wasm.path via install_hook / path.append — not here.
 void mp_wasm_cdn_configure(const char *base_url, const char *token);
 void mp_wasm_cdn_reset(void);
 
 mp_wasm_cdn_driver_t mp_wasm_cdn_driver(void);
 bool mp_wasm_cdn_require_explicit_deps(void);
 const char *mp_wasm_cdn_driver_name(void);
+// Configured base URL (no trailing slash), or NULL if unset.
+const char *mp_wasm_cdn_base(void);
+// True if url equals the configured base (trailing slashes ignored).
+bool mp_wasm_cdn_url_is_base(const char *url);
 
 // Resolve name@version into artifact bytes (tries pin then lead / path candidates).
 // On success: *out_bytes is MICROPY_WASM_MALLOC'd; caller MICROPY_WASM_FREE(*out_bytes).

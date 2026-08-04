@@ -10,10 +10,8 @@ source ~/emsdk/emsdk_env.sh
 # from metalpython root (submodule at extmod/wasmmod):
 make -C extmod/wasmmod/ports/micropython/webassembly -j$(nproc)
 # → ports/webassembly/build-wasmmod/micropython.mjs (+ .wasm)
-
-# copy into metal-cdn (sibling package or clone), or one-shot:
-#   …/metal-cdn/scripts/dev-up.sh          # build µPy + docker + seed samples
-#   …/metal-cdn/scripts/sync-repl-assets.sh ports/webassembly/build-wasmmod
+# Defaults: MICROPY_WASM_VERIFY=1 + trust CA from examples/.keys (sign-key).
+#   MICROPY_WASM_VERIFY=0 make -C …/webassembly   # unsigned smoke
 ```
 
 Equivalent manual invoke:

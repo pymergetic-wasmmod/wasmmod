@@ -262,6 +262,13 @@ static bool find_in_root(const char *root, const char *dotted_name, const char *
     }
     bool url = mp_wasm_uri_is_http(root);
 
+    // Metal CDN uses /artifacts/… only. Never treat the configured base as a
+    // flat pack root — probing {base}/<name>.wasm can 200 HTML/JSON and fail verify.
+    if (url && mp_wasm_cdn_driver() == MP_WASM_CDN_DRIVER_METAL
+        && mp_wasm_cdn_url_is_base(root)) {
+        return false;
+    }
+
     // Path form: a/b/c → a/b/c/__init__.wasm | a/b/c.wasm (+ AOT variants)
     if (try_stem_variants(root, slash_name, true, url, path_out)) {
         return true;
@@ -692,7 +699,7 @@ mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *known_path)
     }
 
     // Metal CDN first: /artifacts/lead|pin (prefer .zlib). Skip flat wasm.path
-    // probes that HEADs /cdn/<slash-or-dot> paths when the CDN base was on path.
+    // probes against the configured base (non-pack bodies that break verify).
     if (known_path == NULL && mp_wasm_cdn_driver() == MP_WASM_CDN_DRIVER_METAL) {
         uint8_t *bytes = NULL;
         uint32_t blen = 0;
@@ -725,7 +732,34 @@ mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *known_path)
             link_on_parent(dotted_name, mod);
             return mod;
         }
-        // Miss: fall through to path/sys.path and namespace discovery.
+        // Metal miss: do not probe flat wasm.path (CDN base ≠ pack mirror).
+        // Dotted intermediates → namespace; else try embedded submodule / ImportError.
+        if (strchr(dotted_name, '.') != NULL && mp_wasm_has_descendants(dotted_name)) {
+            return ensure_namespace(dotted_name);
+        }
+        const char *dot = strrchr(dotted_name, '.');
+        if (dot != NULL) {
+            size_t plen = (size_t)(dot - dotted_name);
+            vstr_t parent;
+            vstr_init(&parent, plen + 1);
+            vstr_add_strn(&parent, dotted_name, plen);
+            const char *parent_name = vstr_null_terminated_str(&parent);
+            if (lookup_loaded(parent_name) == MP_OBJ_NULL) {
+                nlr_buf_t nlr;
+                if (nlr_push(&nlr) == 0) {
+                    (void)mp_wasm_import_wasm(parent_name);
+                    nlr_pop();
+                } else {
+                    ensure_namespace(parent_name);
+                }
+            }
+            vstr_clear(&parent);
+            existing = lookup_loaded(dotted_name);
+            if (existing != MP_OBJ_NULL) {
+                return existing;
+            }
+        }
+        mp_raise_msg_varg(&mp_type_ImportError, MP_ERROR_TEXT("no wasm pack named '%s'"), dotted_name);
     }
 
     // Leaf pack at any depth — parents become namespaces if needed.
