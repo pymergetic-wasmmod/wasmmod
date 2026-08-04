@@ -30,6 +30,7 @@ SIGN_CHAIN = $(SIGN_KEY_DIR)/sign/chain.der
 PACK_WASMS = \
 	packs/hello.wasm \
 	packs/client.wasm \
+	packs/ticks.wasm \
 	packs/mixed.wasm \
 	packs/bridge.wasm \
 	packs/test_a.wasm \

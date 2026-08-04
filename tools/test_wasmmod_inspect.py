@@ -15,12 +15,14 @@ def test_hello_elf_symbols_and_dwarf() -> None:
     names = {s.name for s in insp.list_symbols(data)}
     assert "hello" in names
     assert "add" in names
+    assert "hello.c" not in names  # STT_FILE / SHN_ABS filtered
     hello = next(s for s in insp.list_symbols(data) if s.name == "hello")
     assert hello.kind == "func"
     locs = insp.addr2line(data, hello.offset)
     assert locs
     # Without pyelftools: role=sym; with it: dwarf path.
     assert locs[0].role in ("sym", "dwarf")
+    assert insp.locations_for_symbol(data, "hello")
 
 
 def test_locations_source_scan() -> None:
