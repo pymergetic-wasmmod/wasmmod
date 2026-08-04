@@ -1087,6 +1087,9 @@ optional Capstone (`pip install capstone`) for `.text`; otherwise hex `db` / `op
 C `mp_wasm_inspect_disasm` stays Capstone-free.
 
 ```sh
+# Pack/source/sig summary (CDN client when installed; else offline MPZL-aware dump):
+tools/wasmmod.py inspect hello.elf
+# Ops (first arg is the subcommand):
 tools/wasmmod.py inspect symbols hello.elf
 tools/wasmmod.py inspect addr2line hello.elf 0x10
 wasmmod-read symbols hello.elf
