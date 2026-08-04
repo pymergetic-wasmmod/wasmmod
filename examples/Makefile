@@ -56,7 +56,7 @@ AOT_EXT := .aot$(AOT_VER)
 LLVM_CMAKE_DIR ?= $(shell llvm-config-18 --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null)
 
 .PHONY: all clean test test-aot test-fast-jit test-jit test-engines test-http test-http-verify \
-	test-verify test-signed test-tree test-tree-cdn test-tree-cdn-versions packs tree-packs aot-packs sign-packs sign-key wamrc \
+	test-verify test-signed test-tree test-tree-cdn test-tree-cdn-versions test-elf packs tree-packs aot-packs sign-packs sign-key wamrc \
 	host host-aot host-fast-jit host-jit host-verify demo repl
 
 packs:
@@ -82,6 +82,7 @@ $(SIGN_ROOT) $(SIGN_LEAF_KEY) $(SIGN_CHAIN):
 
 # Detached .sig + .crt (leaf||sub) next to each pack. Device trusts SIGN_ROOT only.
 sign-packs: packs sign-key
+	@$(MAKE) -C hello_elf aarch64 || true
 	@for w in $(PACK_WASMS); do \
 		echo "SIGN $$w"; \
 		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$w; \
@@ -99,8 +100,17 @@ sign-packs: packs sign-key
 	@if [ -f packs/hello.elf ]; then \
 		echo "SIGN packs/hello.elf"; \
 		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) packs/hello.elf; \
-		cp -f packs/hello.elf packs/hello.$$(uname -m).elf; \
 	fi
+	@for f in packs/client.elf packs/hostcall.elf packs/hello.aarch64.elf; do \
+		[ -f "$$f" ] || continue; \
+		echo "SIGN $$f"; \
+		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$f; \
+	done
+	@for base in hello client hostcall; do \
+		if [ -f packs/$$base.elf ]; then \
+			cp -f packs/$$base.elf packs/$$base.$$(uname -m).elf; \
+		fi; \
+	done
 
 # Build wamrc from nested WAMR so .aotN matches the linked AOT loader.
 wamrc:
@@ -167,6 +177,19 @@ repl: packs host
 # Default smoke: interpreter (no AOT/JIT).
 test: packs host
 	$(MPY_INTERP) $(CURDIR)/run_matrix.py
+
+# ELF container smoke (preference elf,aot,wasm — default when MICROPY_PY_WASM_ELF=1).
+test-elf: packs host
+	@set -e; \
+	cd $(CURDIR)/packs; \
+	$(MPY_INTERP) -c "import wasm; \
+wasm.path.append('.'); \
+h=wasm.import_wasm('hello'); assert h.hello()==42 and h.add(2,3)==5; \
+c=wasm.import_wasm('client'); assert c.use_hello()==42; \
+wasm.host_set(0, lambda: 99); \
+hc=wasm.import_wasm('hostcall'); assert hc.via_host0()==99; \
+wasm.host_set(0, lambda x: x*3); assert hc.via_host(7)==21; \
+print('OK elf hello/client/hostcall')"
 
 # Dotted module tree: sibling flat packs + nested monorepo (pack-tree).
 test-tree: tree-packs host
