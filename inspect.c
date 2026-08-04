@@ -25,6 +25,9 @@
 #define STB_GLOBAL 1
 #define STB_WEAK 2
 #define SHN_UNDEF 0
+#define SHN_ABS 0xfff1
+#define SHN_COMMON 0xfff2
+#define STT_FILE 4
 
 typedef struct {
     uint32_t st_name;

@@ -456,21 +456,22 @@ static mp_obj_t mod_wasm_symbols(mp_obj_t path_or_buf) {
     mp_obj_t list = mp_obj_new_list(0, NULL);
     for (size_t i = 0; i < n; ++i) {
         mp_obj_t d = mp_obj_new_dict(6);
-        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_name),
+        // String keys (not QSTR): inspect dicts are dynamic; avoids IDE/genhdr lag.
+        mp_obj_dict_store(d, mp_obj_new_str_from_cstr("name"),
             mp_obj_new_str(syms[i].name, strlen(syms[i].name)));
         if (syms[i].section_index >= 0) {
-            mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_section_index),
+            mp_obj_dict_store(d, mp_obj_new_str_from_cstr("section_index"),
                 MP_OBJ_NEW_SMALL_INT(syms[i].section_index));
         } else {
-            mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_section_index), mp_const_none);
+            mp_obj_dict_store(d, mp_obj_new_str_from_cstr("section_index"), mp_const_none);
         }
-        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_offset),
+        mp_obj_dict_store(d, mp_obj_new_str_from_cstr("offset"),
             mp_obj_new_int_from_ull(syms[i].offset));
-        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_size),
+        mp_obj_dict_store(d, mp_obj_new_str_from_cstr("size"),
             mp_obj_new_int_from_ull(syms[i].size));
-        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_kind),
+        mp_obj_dict_store(d, mp_obj_new_str_from_cstr("kind"),
             mp_obj_new_str_from_cstr(kind_str(syms[i].kind)));
-        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_binding),
+        mp_obj_dict_store(d, mp_obj_new_str_from_cstr("binding"),
             mp_obj_new_str_from_cstr(bind_str(syms[i].binding)));
         mp_obj_list_append(list, d);
     }
@@ -492,15 +493,15 @@ static mp_obj_t mod_wasm_addr2line(mp_obj_t path_or_buf, mp_obj_t addr_in) {
     mp_obj_t list = mp_obj_new_list(0, NULL);
     for (size_t i = 0; i < n; ++i) {
         mp_obj_t d = mp_obj_new_dict(3);
-        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_path),
+        mp_obj_dict_store(d, mp_obj_new_str_from_cstr("path"),
             mp_obj_new_str(locs[i].path, strlen(locs[i].path)));
         if (locs[i].line >= 0) {
-            mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_line),
+            mp_obj_dict_store(d, mp_obj_new_str_from_cstr("line"),
                 MP_OBJ_NEW_SMALL_INT(locs[i].line));
         } else {
-            mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_line), mp_const_none);
+            mp_obj_dict_store(d, mp_obj_new_str_from_cstr("line"), mp_const_none);
         }
-        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_role),
+        mp_obj_dict_store(d, mp_obj_new_str_from_cstr("role"),
             mp_obj_new_str_from_cstr(role_str(locs[i].role)));
         mp_obj_list_append(list, d);
     }
