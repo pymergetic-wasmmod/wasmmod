@@ -301,7 +301,7 @@ test-tree-cdn-versions: tree-packs host
 	echo "$$html" | grep -q '0.2.0'; \
 	echo "OK version bump e2e"
 
-# Require ECDSA signatures (detached .sig+.crt) + baked root CA in the host.
+# Require embedded wasmmod.sig (MPWS) + baked root CA in the host.
 test-verify: sign-packs host-verify
 	@test -f $(SIGN_ROOT) || (echo "FAIL: missing $(SIGN_ROOT)"; exit 1)
 	$(MPY_VERIFY) $(CURDIR)/run_verify.py
