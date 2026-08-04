@@ -200,7 +200,12 @@ try:\
  raise SystemExit('expected micropython.* load failure');\
 except RuntimeError as e:\
  assert 'micropython.* not supported' in str(e), e;\
-print('OK elf hello(+py)/client/hostcall+badupy')"
+try:\
+ wasm.load_pack('hello.aarch64.elf');\
+ raise SystemExit('expected aarch64 reject on host');\
+except RuntimeError as e:\
+ assert 'e_machine' in str(e), e;\
+print('OK elf hello(+py)/client/hostcall+badupy+arch')"
 
 # Dotted module tree: sibling flat packs + nested monorepo (pack-tree).
 test-tree: tree-packs host
