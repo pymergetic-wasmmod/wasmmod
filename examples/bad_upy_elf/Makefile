@@ -2,7 +2,7 @@
 include ../find_top.mk
 OUT ?= /tmp/wasmmod_badupy.elf
 CC ?= gcc
-CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -c
+CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -g -c
 
 .PHONY: all clean
 

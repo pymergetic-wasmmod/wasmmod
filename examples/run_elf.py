@@ -35,6 +35,10 @@ import hello as _h
 setattr(_h, "_elf_abs", abs)
 assert hc.via_py(-7) == 7
 assert hc.host_version_len() > 0
+tk = wasm.import_wasm("ticks")
+assert tk.__pack__.kind == "elf"
+t0 = tk.elapsed()
+assert isinstance(t0, int) and t0 >= 0, t0
 try:
     wasm.load_pack("/tmp/wasmmod_badupy.elf")
     raise SystemExit("expected micropython.* load failure")
@@ -45,4 +49,12 @@ try:
     raise SystemExit("expected aarch64 reject on host")
 except RuntimeError as e:
     assert "e_machine" in str(e), e
-print("OK elf hello(+py)/client/hostcall+badupy+arch")
+# Inspect API on packed ELF bytes
+syms = wasm.symbols("hello.elf")
+names = {s["name"] for s in syms}
+assert "hello" in names and "add" in names, names
+assert wasm.has_dwarf("hello.elf") is True
+hello = next(s for s in syms if s["name"] == "hello")
+locs = wasm.addr2line("hello.elf", hello["offset"])
+assert locs and locs[0]["role"] in ("sym", "dwarf"), locs
+print("OK elf hello(+py)/client/hostcall/ticks+badupy+arch+inspect")

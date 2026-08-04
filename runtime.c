@@ -42,9 +42,10 @@
 #include "extmod/wasmmod/verify.h"
 #include "wasm_export.h"
 
-// Defined in host.c (needs the full MicroPython include path).
+// Defined in host.c / upy_catalog.c (need the full MicroPython include path).
 bool mp_wasm_host_register(void);
 bool mp_wasm_loader_register(void);
+bool mp_wasm_upy_catalog_register(void);
 
 #ifndef MICROPY_PY_WASM_AOT
 #define MICROPY_PY_WASM_AOT (0)
@@ -57,6 +58,9 @@ bool mp_wasm_loader_register(void);
 #endif
 #ifndef MICROPY_PY_WASM_ELF
 #define MICROPY_PY_WASM_ELF (0)
+#endif
+#if MICROPY_PY_WASM_ELF
+void *mp_wasm_upy_catalog_elf_lookup(const char *module, const char *func);
 #endif
 
 // ELF execute is compile-gated (MICROPY_PY_WASM_ELF), not a runtime browser
@@ -174,7 +178,8 @@ bool mp_wasm_runtime_init(void) {
         return false;
     }
     // Guest imports (wasmmod.* / wasmmod.host.*) before any module instantiate.
-    if (!mp_wasm_host_register() || !mp_wasm_loader_register()) {
+    if (!mp_wasm_host_register() || !mp_wasm_loader_register()
+        || !mp_wasm_upy_catalog_register()) {
         wasm_runtime_destroy();
         return false;
     }
@@ -546,6 +551,10 @@ static void *elf_resolve_native(const char *module, const char *func) {
         return mp_wasm_loader_elf_lookup(func);
     }
     if (strncmp(module, "micropython.", 12) == 0) {
+        void *upy = mp_wasm_upy_catalog_elf_lookup(module, func);
+        if (upy != NULL) {
+            return upy;
+        }
         char msg[160];
         // Cap printed names so -Werror=format-truncation stays quiet.
         char mshort[48];

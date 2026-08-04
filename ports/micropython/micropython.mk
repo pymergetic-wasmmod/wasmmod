@@ -51,6 +51,8 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/resolve.c \
 	$(WASMMOD_DIR)/runtime.c \
 	$(WASMMOD_DIR)/source.c \
+	$(WASMMOD_DIR)/inspect.c \
+	$(WASMMOD_DIR)/upy_catalog.c \
 	$(WASMMOD_DIR)/verify.c \
 	$(WASMMOD_DIR)/zlibutil.c \
 	$(WASMMOD_DIR)/format/common/format.c \

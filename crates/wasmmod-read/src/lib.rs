@@ -443,6 +443,319 @@ pub fn section_payload(buf: &[u8], index: u32) -> Result<&[u8]> {
     Ok(&buf[start..end])
 }
 
+/// Symbol from ELF `.symtab` or Wasm export section.
+#[derive(Debug, Clone)]
+pub struct Symbol {
+    pub name: String,
+    pub section_index: Option<u32>,
+    pub offset: u64,
+    pub size: u64,
+    /// `func` | `data` | `export` | `other`
+    pub kind: String,
+    pub binding: String,
+}
+
+/// Source / symbol location (addr2line, defs, twins).
+#[derive(Debug, Clone)]
+pub struct Location {
+    pub path: String,
+    pub line: Option<i32>,
+    /// `sym` | `dwarf` | `def` | `decl` | `twin`
+    pub role: String,
+}
+
+/// One disassembly / hex-dump line.
+#[derive(Debug, Clone)]
+pub struct DisasmLine {
+    pub addr: u64,
+    pub raw: Vec<u8>,
+    pub text: String,
+}
+
+const SHT_SYMTAB: u32 = 2;
+const SHT_STRTAB: u32 = 3;
+const STT_OBJECT: u8 = 1;
+const STT_FUNC: u8 = 2;
+const STB_LOCAL: u8 = 0;
+const STB_GLOBAL: u8 = 1;
+const STB_WEAK: u8 = 2;
+const SHN_UNDEF: u16 = 0;
+const ELF64_SYM_SIZE: usize = 24; // name/info/other/shndx/value/size
+
+fn is_elf64_le(buf: &[u8]) -> bool {
+    buf.len() >= 64 && &buf[0..4] == b"\x7fELF" && buf[4] == 2 && buf[5] == 1
+}
+
+fn elf_shdr_table(elf: &[u8]) -> Result<(usize, usize, usize)> {
+    if !is_elf64_le(elf) {
+        return Err(Error::Truncated);
+    }
+    let shoff = u64::from_le_bytes(elf[40..48].try_into().unwrap()) as usize;
+    let shentsize = u16::from_le_bytes(elf[58..60].try_into().unwrap()) as usize;
+    let shnum = u16::from_le_bytes(elf[60..62].try_into().unwrap()) as usize;
+    if shentsize < 64 || shnum == 0 || shoff + shnum * shentsize > elf.len() {
+        return Err(Error::Truncated);
+    }
+    Ok((shoff, shentsize, shnum))
+}
+
+fn elf_sh_name(shstrtab: &[u8], name_off: usize) -> Option<&str> {
+    if name_off >= shstrtab.len() {
+        return None;
+    }
+    let end = shstrtab[name_off..]
+        .iter()
+        .position(|&b| b == 0)
+        .map(|p| name_off + p)
+        .unwrap_or(shstrtab.len());
+    std::str::from_utf8(&shstrtab[name_off..end]).ok()
+}
+
+fn elf_shstrtab(elf: &[u8]) -> Result<&[u8]> {
+    let (shoff, shentsize, shnum) = elf_shdr_table(elf)?;
+    let shstrndx = u16::from_le_bytes(elf[62..64].try_into().unwrap()) as usize;
+    if shstrndx >= shnum {
+        return Err(Error::Truncated);
+    }
+    let shstr = &elf[shoff + shstrndx * shentsize..];
+    let str_off = u64::from_le_bytes(shstr[24..32].try_into().unwrap()) as usize;
+    let str_sz = u64::from_le_bytes(shstr[32..40].try_into().unwrap()) as usize;
+    if str_off + str_sz > elf.len() {
+        return Err(Error::Truncated);
+    }
+    Ok(&elf[str_off..str_off + str_sz])
+}
+
+/// True if ELF has `.debug_line` or `.debug_info`.
+pub fn has_dwarf(buf: &[u8]) -> bool {
+    if !is_elf64_le(buf) {
+        return false;
+    }
+    let Ok((shoff, shentsize, shnum)) = elf_shdr_table(buf) else {
+        return false;
+    };
+    let Ok(strtab) = elf_shstrtab(buf) else {
+        return false;
+    };
+    for i in 0..shnum {
+        let sh = &buf[shoff + i * shentsize..];
+        let name_off = u32::from_le_bytes(sh[0..4].try_into().unwrap()) as usize;
+        if let Some(name) = elf_sh_name(strtab, name_off) {
+            if name == ".debug_line" || name == ".debug_info" {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn bind_name(info: u8) -> String {
+    match info >> 4 {
+        STB_LOCAL => "local".into(),
+        STB_GLOBAL => "global".into(),
+        STB_WEAK => "weak".into(),
+        b => b.to_string(),
+    }
+}
+
+fn kind_name(info: u8) -> String {
+    match info & 0xf {
+        STT_FUNC => "func".into(),
+        STT_OBJECT => "data".into(),
+        _ => "other".into(),
+    }
+}
+
+fn list_symbols_elf(elf: &[u8]) -> Result<Vec<Symbol>> {
+    let (shoff, shentsize, shnum) = elf_shdr_table(elf)?;
+    let mut out = Vec::new();
+    for i in 0..shnum {
+        let sh = &elf[shoff + i * shentsize..];
+        let sh_type = u32::from_le_bytes(sh[4..8].try_into().unwrap());
+        if sh_type != SHT_SYMTAB {
+            continue;
+        }
+        let sym_off = u64::from_le_bytes(sh[24..32].try_into().unwrap()) as usize;
+        let sym_sz = u64::from_le_bytes(sh[32..40].try_into().unwrap()) as usize;
+        let sh_link = u32::from_le_bytes(sh[40..44].try_into().unwrap()) as usize;
+        let entsize = u64::from_le_bytes(sh[56..64].try_into().unwrap()) as usize;
+        if entsize < ELF64_SYM_SIZE || sh_link >= shnum {
+            continue;
+        }
+        let str_sh = &elf[shoff + sh_link * shentsize..];
+        let str_type = u32::from_le_bytes(str_sh[4..8].try_into().unwrap());
+        if str_type != SHT_STRTAB {
+            continue;
+        }
+        let stab_off = u64::from_le_bytes(str_sh[24..32].try_into().unwrap()) as usize;
+        let stab_sz = u64::from_le_bytes(str_sh[32..40].try_into().unwrap()) as usize;
+        if stab_off + stab_sz > elf.len() || sym_off + sym_sz > elf.len() {
+            return Err(Error::Truncated);
+        }
+        let stab = &elf[stab_off..stab_off + stab_sz];
+        let nsym = sym_sz / entsize;
+        for k in 0..nsym {
+            let off = sym_off + k * entsize;
+            let st_name = u32::from_le_bytes(elf[off..off + 4].try_into().unwrap()) as usize;
+            let st_info = elf[off + 4];
+            let st_shndx = u16::from_le_bytes(elf[off + 6..off + 8].try_into().unwrap());
+            let st_value = u64::from_le_bytes(elf[off + 8..off + 16].try_into().unwrap());
+            let st_size = u64::from_le_bytes(elf[off + 16..off + 24].try_into().unwrap());
+            if st_shndx == SHN_UNDEF || st_name == 0 || st_name >= stab.len() {
+                continue;
+            }
+            let end = stab[st_name..]
+                .iter()
+                .position(|&b| b == 0)
+                .map(|p| st_name + p)
+                .unwrap_or(stab.len());
+            let sname = String::from_utf8_lossy(&stab[st_name..end]).into_owned();
+            if sname.is_empty() || sname.starts_with('.') {
+                continue;
+            }
+            out.push(Symbol {
+                name: sname,
+                section_index: Some(u32::from(st_shndx)),
+                offset: st_value,
+                size: st_size,
+                kind: kind_name(st_info),
+                binding: bind_name(st_info),
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        (
+            a.section_index.unwrap_or(0),
+            a.offset,
+            a.name.as_str(),
+        )
+            .cmp(&(
+                b.section_index.unwrap_or(0),
+                b.offset,
+                b.name.as_str(),
+            ))
+    });
+    Ok(out)
+}
+
+fn list_symbols_wasm(wasm: &[u8]) -> Result<Vec<Symbol>> {
+    if wasm.len() < 8 {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    let mut i = 8usize;
+    // Best-effort like Python: malformed tails yield symbols gathered so far.
+    let walk = (|| -> Result<()> {
+        while i < wasm.len() {
+            let sid = wasm[i];
+            i += 1;
+            let slen = read_uleb(wasm, &mut i)? as usize;
+            let start = i;
+            let end = i + slen;
+            if end > wasm.len() {
+                return Err(Error::Truncated);
+            }
+            if sid == 7 {
+                let mut j = start;
+                let nexp = read_uleb(wasm, &mut j)? as usize;
+                for _ in 0..nexp {
+                    if j >= end {
+                        break;
+                    }
+                    let nlen = read_uleb(wasm, &mut j)? as usize;
+                    if j + nlen > end {
+                        break;
+                    }
+                    let name = String::from_utf8_lossy(&wasm[j..j + nlen]).into_owned();
+                    j += nlen;
+                    if j >= end {
+                        break;
+                    }
+                    let kind = wasm[j];
+                    j += 1;
+                    let _ = read_uleb(wasm, &mut j)?;
+                    out.push(Symbol {
+                        name,
+                        section_index: None,
+                        offset: 0,
+                        size: 0,
+                        kind: if kind == 0 {
+                            "export".into()
+                        } else {
+                            "other".into()
+                        },
+                        binding: "export".into(),
+                    });
+                }
+            }
+            i = end;
+        }
+        Ok(())
+    })();
+    let _ = walk;
+    Ok(out)
+}
+
+/// List symbols from ELF `.symtab` or Wasm exports.
+pub fn list_symbols(buf: &[u8]) -> Result<Vec<Symbol>> {
+    if is_elf64_le(buf) {
+        return list_symbols_elf(buf);
+    }
+    if buf.len() >= 4 && &buf[0..4] == b"\0asm" {
+        return list_symbols_wasm(buf);
+    }
+    Ok(Vec::new())
+}
+
+/// Map address → locations. Overnight: enclosing FUNC as `role=sym` (DWARF stub empty).
+pub fn addr2line(buf: &[u8], addr: u64) -> Result<Vec<Location>> {
+    if !is_elf64_le(buf) {
+        return Ok(Vec::new());
+    }
+    let syms = list_symbols_elf(buf)?;
+    let mut best: Option<&Symbol> = None;
+    for s in &syms {
+        if s.kind != "func" || s.size == 0 {
+            continue;
+        }
+        if s.offset <= addr && addr < s.offset + s.size {
+            if best.map(|b| s.offset >= b.offset).unwrap_or(true) {
+                best = Some(s);
+            }
+        }
+    }
+    Ok(match best {
+        Some(s) => vec![Location {
+            path: s.name.clone(),
+            line: None,
+            role: "sym".into(),
+        }],
+        None => Vec::new(),
+    })
+}
+
+/// Hex `db` lines for a byte window (Capstone-free fallback).
+pub fn disasm_db(data: &[u8], base: u64) -> Vec<DisasmLine> {
+    let mut out = Vec::new();
+    for i in (0..data.len()).step_by(8) {
+        let end = (i + 8).min(data.len());
+        let raw = data[i..end].to_vec();
+        let text = format!(
+            "db {}",
+            raw.iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        out.push(DisasmLine {
+            addr: base + i as u64,
+            raw,
+            text,
+        });
+    }
+    out
+}
+
 fn extract_elf_section<'a>(elf: &'a [u8], name: &str) -> Result<Option<&'a [u8]>> {
     if elf.len() < 64 || elf[4] != 2 || elf[5] != 1 {
         return Err(Error::Truncated);

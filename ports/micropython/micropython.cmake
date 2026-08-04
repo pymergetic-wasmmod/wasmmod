@@ -53,6 +53,8 @@ list(APPEND MICROPY_SOURCE_EXTMOD
     ${MICROPY_WASMMOD_DIR}/resolve.c
     ${MICROPY_WASMMOD_DIR}/runtime.c
     ${MICROPY_WASMMOD_DIR}/source.c
+    ${MICROPY_WASMMOD_DIR}/inspect.c
+    ${MICROPY_WASMMOD_DIR}/upy_catalog.c
     ${MICROPY_WASMMOD_DIR}/verify.c
     ${MICROPY_WASMMOD_DIR}/zlibutil.c
 )

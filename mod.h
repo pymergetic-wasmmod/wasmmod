@@ -118,6 +118,9 @@ MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_handle_resolve_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_handle_free_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_handle_clear_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_has_dwarf_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_symbols_obj);
+MP_DECLARE_CONST_FUN_OBJ_2(mod_wasm_addr2line_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_from_file_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_from_bytes_obj);
 #if MICROPY_PY_WASM_MATRIX

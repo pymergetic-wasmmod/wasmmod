@@ -5,7 +5,10 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
-use wasmmod_read::{list_sections, section_payload, without_sig_section, SigView, SourceView};
+use wasmmod_read::{
+    addr2line, has_dwarf, list_sections, list_symbols, section_payload, without_sig_section,
+    SigView, SourceView,
+};
 
 fn usage() -> ! {
     eprintln!(
@@ -21,6 +24,9 @@ Usage:
   wasmmod-read verify --trust ROOT.crt.der PATH
   wasmmod-read sections PATH
   wasmmod-read section PATH INDEX [--hex]
+  wasmmod-read symbols PATH
+  wasmmod-read addr2line PATH ADDR
+  wasmmod-read has-dwarf PATH
 
 Build (from wasmmod repo root):
   cargo build --release -p wasmmod-read
@@ -404,6 +410,81 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "symbols" => {
+            let path = args.first().map(PathBuf::from).unwrap_or_else(|| usage());
+            match std::fs::read(&path)
+                .map_err(wasmmod_read::Error::from)
+                .and_then(|data| list_symbols(&data))
+            {
+                Ok(syms) => {
+                    for s in syms {
+                        println!(
+                            "{:<6} {:<6} +0x{:04x} sz={:<5} {}",
+                            s.kind, s.binding, s.offset, s.size, s.name
+                        );
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("wasmmod-read: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "addr2line" => {
+            if args.len() < 2 {
+                usage();
+            }
+            let path = PathBuf::from(&args[0]);
+            let addr = match parse_addr(&args[1]) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("wasmmod-read: {e}");
+                    return ExitCode::from(2);
+                }
+            };
+            match std::fs::read(&path)
+                .map_err(wasmmod_read::Error::from)
+                .and_then(|data| addr2line(&data, addr))
+            {
+                Ok(locs) => {
+                    for loc in locs {
+                        let ln = match loc.line {
+                            Some(n) => format!(":{n}"),
+                            None => String::new(),
+                        };
+                        println!("{:<6} {}{}", loc.role, loc.path, ln);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("wasmmod-read: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "has-dwarf" => {
+            let path = args.first().map(PathBuf::from).unwrap_or_else(|| usage());
+            match std::fs::read(&path) {
+                Ok(data) => {
+                    println!("{}", if has_dwarf(&data) { "yes" } else { "no" });
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("wasmmod-read: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
         _ => usage(),
+    }
+}
+
+fn parse_addr(s: &str) -> Result<u64, String> {
+    let t = s.trim();
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        u64::from_str_radix(hex, 16).map_err(|e| format!("bad ADDR: {e}"))
+    } else {
+        t.parse::<u64>().map_err(|e| format!("bad ADDR: {e}"))
     }
 }

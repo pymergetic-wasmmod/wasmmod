@@ -412,8 +412,10 @@ ELF packs are interchangeable containers beside `.wasm` / `.aot`:
   `wasmmod.host` / `wasmmod` bind to System V wrappers. Pointer args replace
   Wasm linear offsets for `call_buf` / `call_py` / `mem_copy_*` and loader
   `version` / `call_i32` (cookies/`call_mem`/`call_obj` / slot calls unchanged).
-  `micropython.*` reserved — ELF load fails with
-  `micropython.* not supported: <module>.<func>` (not registered for Wasm either).
+  `micropython.*` host catalog (minimal): `micropython.runtime.ticks_ms` →
+  `mp_hal_ticks_ms` (Wasm natives + ELF lookup). Unknown names still fail with
+  `micropython.* not supported: <module>.<func>` (see `examples/ticks_elf`,
+  `examples/bad_upy_elf`).
 - Relocs: x86_64 GOT/PC subset; aarch64 `CALL26`/`JUMP26`, ADRP/LO12, GOT page
 - Build: `gcc -c -ffreestanding -fPIC …` then `wasmmod.py pack-elf`
   (optional `make -C examples/hello_elf aarch64` for a CDN twin).

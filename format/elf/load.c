@@ -388,7 +388,13 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
         Elf64_Shdr sh;
         get_shdr(elf, len, &eh, i, &sh);
         if (sh.sh_type != SHT_RELA || sh.sh_entsize < sizeof(Elf64_Rela)
-            || sh.sh_offset + sh.sh_size > len) {
+            || sh.sh_offset + sh.sh_size > len
+            || sh.sh_info >= eh.e_shnum) {
+            continue;
+        }
+        // Ignore .rela.debug_* etc. — target is not mapped into the image.
+        Elf64_Shdr tgt;
+        if (!get_shdr(elf, len, &eh, sh.sh_info, &tgt) || !(tgt.sh_flags & SHF_ALLOC)) {
             continue;
         }
         uint32_t nrel = (uint32_t)(sh.sh_size / sh.sh_entsize);
@@ -502,7 +508,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
         *(uint64_t *)(base + got_base + (size_t)got_off[i] * 8) = (uint64_t)sym_addr[i];
     }
 
-    // Apply RELA
+    // Apply RELA (ALLOC targets only — skip .rela.debug_* into unmapped secs).
     for (uint16_t i = 0; i < eh.e_shnum; ++i) {
         Elf64_Shdr sh;
         get_shdr(elf, len, &eh, i, &sh);
@@ -517,6 +523,10 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             MICROPY_WASM_FREE(sym_addr);
             set_err(errbuf, errbuf_len, "bad rela");
             return false;
+        }
+        Elf64_Shdr tgt;
+        if (!get_shdr(elf, len, &eh, sh.sh_info, &tgt) || !(tgt.sh_flags & SHF_ALLOC)) {
+            continue;
         }
         uint32_t nrel = (uint32_t)(sh.sh_size / sh.sh_entsize);
         uint8_t *target_base = base + sec_addr[sh.sh_info];

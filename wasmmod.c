@@ -172,6 +172,9 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_source_from_file), MP_ROM_PTR(&mod_wasm_source_from_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_source_from_bytes), MP_ROM_PTR(&mod_wasm_source_from_bytes_obj) },
     { MP_ROM_QSTR(MP_QSTR_WasmSource), MP_ROM_PTR(&mp_type_wasm_source) },
+    { MP_ROM_QSTR(MP_QSTR_has_dwarf), MP_ROM_PTR(&mod_wasm_has_dwarf_obj) },
+    { MP_ROM_QSTR(MP_QSTR_symbols), MP_ROM_PTR(&mod_wasm_symbols_obj) },
+    { MP_ROM_QSTR(MP_QSTR_addr2line), MP_ROM_PTR(&mod_wasm_addr2line_obj) },
     { MP_ROM_QSTR(MP_QSTR_PackModule), MP_ROM_PTR(&mp_type_pack_module) },
 };
 

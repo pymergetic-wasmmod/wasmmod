@@ -9,7 +9,7 @@ ARCH ?= $(shell uname -m)
 OUT_ARCH = ../packs/client.$(ARCH).elf
 
 CC ?= gcc
-CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -c
+CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -g -c
 
 .PHONY: all clean
 

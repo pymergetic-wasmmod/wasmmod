@@ -10,7 +10,8 @@ OUT_ARCH = ../packs/hello.$(ARCH).elf
 OUT_AARCH64 = ../packs/hello.aarch64.elf
 
 CC ?= gcc
-CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -c
+# -g keeps .debug_line for CDN/wasmmod inspect addr2line (not stripped by pack-elf).
+CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -g -c
 CLANG ?= clang
 AARCH64_CFLAGS ?= -target aarch64-linux-gnu $(CFLAGS)
 MPY_CROSS ?= $(if $(TOP),$(TOP)/mpy-cross/build/mpy-cross,)

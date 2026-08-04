@@ -35,6 +35,7 @@
 
 #include "extmod/wasmmod/alloc.h"
 #include "extmod/wasmmod/host.h"
+#include "extmod/wasmmod/inspect.h"
 #include "extmod/wasmmod/mod.h"
 #include "extmod/wasmmod/verify.h"
 // wasm.verify() → bool; wasm.verify(False) → session gate for all loads (VFS+HTTP).
@@ -358,6 +359,154 @@ static mp_obj_t wasm_source_make(mp_wasm_source_view_t *view, const char *module
     }
     return MP_OBJ_FROM_PTR(o);
 }
+
+// Load path (str) or buffer into a malloc'd copy; caller frees with MICROPY_WASM_FREE.
+static uint8_t *inspect_load_bytes(mp_obj_t path_or_buf, uint32_t *len_out) {
+    if (mp_obj_is_str(path_or_buf)) {
+        const char *path = mp_obj_str_get_str(path_or_buf);
+        FILE *f = fopen(path, "rb");
+        if (f == NULL) {
+            mp_raise_OSError(MP_ENOENT);
+        }
+        if (fseek(f, 0, SEEK_END) != 0) {
+            fclose(f);
+            mp_raise_OSError(MP_EIO);
+        }
+        long sz = ftell(f);
+        if (sz < 0 || fseek(f, 0, SEEK_SET) != 0) {
+            fclose(f);
+            mp_raise_OSError(MP_EIO);
+        }
+        uint8_t *buf = MICROPY_WASM_MALLOC((size_t)sz ? (size_t)sz : 1);
+        if (buf == NULL) {
+            fclose(f);
+            mp_raise_OSError(MP_ENOMEM);
+        }
+        size_t n = fread(buf, 1, (size_t)sz, f);
+        fclose(f);
+        if (n != (size_t)sz) {
+            MICROPY_WASM_FREE(buf);
+            mp_raise_OSError(MP_EIO);
+        }
+        *len_out = (uint32_t)n;
+        return buf;
+    }
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(path_or_buf, &bi, MP_BUFFER_READ);
+    uint8_t *buf = MICROPY_WASM_MALLOC(bi.len ? bi.len : 1);
+    if (buf == NULL) {
+        mp_raise_OSError(MP_ENOMEM);
+    }
+    if (bi.len) {
+        memcpy(buf, bi.buf, bi.len);
+    }
+    *len_out = (uint32_t)bi.len;
+    return buf;
+}
+
+static const char *kind_str(uint8_t k) {
+    switch (k) {
+        case 1: return "func";
+        case 2: return "data";
+        case 3: return "export";
+        default: return "other";
+    }
+}
+
+static const char *bind_str(uint8_t b) {
+    switch (b) {
+        case 0: return "local";
+        case 1: return "global";
+        case 2: return "weak";
+        case 3: return "export";
+        default: return "";
+    }
+}
+
+static const char *role_str(uint8_t r) {
+    switch (r) {
+        case 0: return "sym";
+        case 1: return "dwarf";
+        case 2: return "def";
+        case 3: return "decl";
+        case 4: return "twin";
+        default: return "sym";
+    }
+}
+
+static mp_obj_t mod_wasm_has_dwarf(mp_obj_t path_or_buf) {
+    uint32_t len = 0;
+    uint8_t *buf = inspect_load_bytes(path_or_buf, &len);
+    bool ok = mp_wasm_inspect_has_dwarf(buf, len);
+    MICROPY_WASM_FREE(buf);
+    return ok ? mp_const_true : mp_const_false;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_has_dwarf_obj, mod_wasm_has_dwarf);
+
+static mp_obj_t mod_wasm_symbols(mp_obj_t path_or_buf) {
+    uint32_t len = 0;
+    uint8_t *buf = inspect_load_bytes(path_or_buf, &len);
+    mp_wasm_sym_t syms[64];
+    size_t n = 0;
+    bool ok = mp_wasm_inspect_symbols(buf, len, syms, 64, &n);
+    MICROPY_WASM_FREE(buf);
+    if (!ok) {
+        mp_raise_ValueError(MP_ERROR_TEXT("inspect symbols failed"));
+    }
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (size_t i = 0; i < n; ++i) {
+        mp_obj_t d = mp_obj_new_dict(6);
+        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_name),
+            mp_obj_new_str(syms[i].name, strlen(syms[i].name)));
+        if (syms[i].section_index >= 0) {
+            mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_section_index),
+                MP_OBJ_NEW_SMALL_INT(syms[i].section_index));
+        } else {
+            mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_section_index), mp_const_none);
+        }
+        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_offset),
+            mp_obj_new_int_from_ull(syms[i].offset));
+        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_size),
+            mp_obj_new_int_from_ull(syms[i].size));
+        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_kind),
+            mp_obj_new_str_from_cstr(kind_str(syms[i].kind)));
+        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_binding),
+            mp_obj_new_str_from_cstr(bind_str(syms[i].binding)));
+        mp_obj_list_append(list, d);
+    }
+    return list;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_symbols_obj, mod_wasm_symbols);
+
+static mp_obj_t mod_wasm_addr2line(mp_obj_t path_or_buf, mp_obj_t addr_in) {
+    uint32_t len = 0;
+    uint8_t *buf = inspect_load_bytes(path_or_buf, &len);
+    uint64_t addr = mp_obj_get_int_truncated(addr_in);
+    mp_wasm_loc_t locs[8];
+    size_t n = 0;
+    bool ok = mp_wasm_inspect_addr2line(buf, len, addr, locs, 8, &n);
+    MICROPY_WASM_FREE(buf);
+    if (!ok) {
+        mp_raise_ValueError(MP_ERROR_TEXT("inspect addr2line failed"));
+    }
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (size_t i = 0; i < n; ++i) {
+        mp_obj_t d = mp_obj_new_dict(3);
+        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_path),
+            mp_obj_new_str(locs[i].path, strlen(locs[i].path)));
+        if (locs[i].line >= 0) {
+            mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_line),
+                MP_OBJ_NEW_SMALL_INT(locs[i].line));
+        } else {
+            mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_line), mp_const_none);
+        }
+        mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_role),
+            mp_obj_new_str_from_cstr(role_str(locs[i].role)));
+        mp_obj_list_append(list, d);
+    }
+    return list;
+}
+MP_DEFINE_CONST_FUN_OBJ_2(mod_wasm_addr2line_obj, mod_wasm_addr2line);
 
 static mp_obj_t mod_wasm_source(mp_obj_t name_in) {
     const char *name = mp_obj_str_get_str(name_in);
