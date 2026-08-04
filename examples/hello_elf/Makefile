@@ -10,7 +10,7 @@ OUT_ARCH = ../packs/hello.$(ARCH).elf
 OUT_AARCH64 = ../packs/hello.aarch64.elf
 
 CC ?= gcc
-CFLAGS ?= -ffreestanding -fno-pic -fno-plt -fno-stack-protector -O2 -c
+CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -c
 CLANG ?= clang
 AARCH64_CFLAGS ?= -target aarch64-linux-gnu $(CFLAGS)
 MPY_CROSS ?= $(if $(TOP),$(TOP)/mpy-cross/build/mpy-cross,)

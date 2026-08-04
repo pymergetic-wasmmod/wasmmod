@@ -384,13 +384,15 @@ ELF packs are interchangeable containers beside `.wasm` / `.aot`:
 - Register / connect / MPWI: **same** as Wasm — only the execute engine differs
 - Undef symbols: resolved at load via MPWI `func` name → registry peer
   (`ELF→ELF` direct pointer; `ELF→Wasm` via i32 PLT stubs). Host modules
-  `wasmmod.host` / `wasmmod` bind to System V wrappers (slot calls, mem
-  cookies, `mode`/`verify`/`trust_count`). Linear-memory APIs (`call_buf`,
-  `call_py`, `mem_copy_*`, loader `version`/`call_i32`) stay Wasm-only.
-  `micropython.*` not wired for ELF yet.
+  `wasmmod.host` / `wasmmod` bind to System V wrappers. Pointer args replace
+  Wasm linear offsets for `call_buf` / `call_py` / `mem_copy_*` and loader
+  `version` / `call_i32` (cookies/`call_mem`/`call_obj` / slot calls unchanged).
+  `micropython.*` still reserved (not registered for Wasm or ELF yet).
 - Relocs: x86_64 GOT/PC subset; aarch64 `CALL26`/`JUMP26`, ADRP/LO12, GOT page
-- Build: `gcc -c -ffreestanding -fno-pic …` then `wasmmod.py pack-elf`
+- Build: `gcc -c -ffreestanding -fPIC …` then `wasmmod.py pack-elf`
   (optional `make -C examples/hello_elf aarch64` for a CDN twin).
+  Prefer `-fPIC` so local data uses PC-relative relocs; `-fno-pic` needs
+  a low-32-bit image map (`MAP_32BIT` on Linux x86_64) for `R_X86_64_32`.
   `pack-elf` embeds the same `[python]` mount tree as Wasm packs
   (examples/hello_elf freezes `.mpy` like the Wasm hello pack).
 - Publish: `wasmmod.py publish … --elf packs/hello.elf [--arch x86_64]`
@@ -694,6 +696,10 @@ Guest declares Wasm imports under `wasmmod.host`. The loader registers:
 | `mem_alloc` / `mem_free` / `mem_len` | … | host-heap cookies (Metal-style) |
 | `mem_copy_in` / `mem_copy_out` | `(cookie,off,n)->i32` | linear ↔ cookie |
 | `mem_copy_*_at` | + cookie offset | partial copy |
+
+**ELF guests** use the same import names with **native pointers** instead of
+linear offsets: `call_buf(slot, ptr, len)`, `call_py(mod,mod_len,attr,attr_len[,arg])`,
+`mem_copy_*(cookie, ptr, n)`, loader `version(buf, maxlen)` / `call_i32(…, args*)`.
 
 **Pointers:** never pass raw host pointers. Guest `char*` is an `i32` linear
 offset (`MP_WASM_PTR(p)` in `guest.h`). Durable buffers → **cookies**

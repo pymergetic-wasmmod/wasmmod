@@ -796,7 +796,7 @@ bool mp_wasm_host_register(void) {
 
 #if MICROPY_PY_WASM_ELF
 // System V entrypoints for in-tree ELF guests (no wasm_exec_env_t).
-// Linear-memory APIs (call_buf, call_py, mem_copy_*) stay Wasm-only.
+// Pointer args replace Wasm linear offsets (call_buf / call_py / mem_copy_*).
 
 static int32_t elf_host_call_i32(int32_t slot, int32_t arg) {
     return host_call_i32(NULL, slot, arg);
@@ -829,6 +829,139 @@ static int32_t elf_host_mem_len(int32_t cookie) {
     return host_mem_len(NULL, cookie);
 }
 
+static bool elf_guest_name(const void *ptr, int32_t len, char *buf, size_t buf_sz) {
+    if (ptr == NULL || len < 0 || (size_t)len >= buf_sz) {
+        return false;
+    }
+    memcpy(buf, ptr, (size_t)len);
+    buf[len] = '\0';
+    return true;
+}
+
+// Guest native [ptr,len] → Python bytes → callable(bytes) → i32.
+static int32_t elf_host_call_buf(int32_t slot, const void *ptr, int32_t len) {
+    if (len < 0 || (len > 0 && ptr == NULL)) {
+        return -1;
+    }
+    mp_obj_t cb = slot_callable(slot);
+    if (cb == MP_OBJ_NULL) {
+        return -1;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t buf = mp_obj_new_bytes(ptr, (size_t)len);
+        mp_obj_t res = mp_call_function_1(cb, buf);
+        int32_t out = (int32_t)mp_obj_get_int(res);
+        nlr_pop();
+        return out;
+    }
+    return -1;
+}
+
+static int32_t elf_host_call0_py(const void *mod, int32_t mod_len,
+    const void *attr, int32_t attr_len) {
+    char mname[MP_WASM_HOST_NAME_MAX];
+    char aname[MP_WASM_HOST_NAME_MAX];
+    if (!elf_guest_name(mod, mod_len, mname, sizeof(mname))
+        || !elf_guest_name(attr, attr_len, aname, sizeof(aname))) {
+        return -1;
+    }
+    mp_obj_t out = MP_OBJ_NULL;
+    if (mp_wasm_host_call_attr(mname, strlen(mname), aname, strlen(aname), 0, 0, &out) != 0) {
+        return -1;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        int32_t v = (int32_t)mp_obj_get_int(out);
+        nlr_pop();
+        return v;
+    }
+    return -1;
+}
+
+static int32_t elf_host_call_py(const void *mod, int32_t mod_len,
+    const void *attr, int32_t attr_len, int32_t arg) {
+    char mname[MP_WASM_HOST_NAME_MAX];
+    char aname[MP_WASM_HOST_NAME_MAX];
+    if (!elf_guest_name(mod, mod_len, mname, sizeof(mname))
+        || !elf_guest_name(attr, attr_len, aname, sizeof(aname))) {
+        return -1;
+    }
+    mp_obj_t out = MP_OBJ_NULL;
+    if (mp_wasm_host_call_attr(mname, strlen(mname), aname, strlen(aname), 1, arg, &out) != 0) {
+        return -1;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        int32_t v = (int32_t)mp_obj_get_int(out);
+        nlr_pop();
+        return v;
+    }
+    return -1;
+}
+
+static int32_t elf_host_mem_copy_in(int32_t cookie, const void *src, int32_t n) {
+    if (n < 0 || (n > 0 && src == NULL)) {
+        return -1;
+    }
+    mp_wasm_cookie_t *slot = cookie_get(cookie);
+    if (slot == NULL || (uint32_t)n > slot->len) {
+        return -1;
+    }
+    if (n > 0) {
+        memcpy(slot->data, src, (size_t)n);
+    }
+    return 0;
+}
+
+static int32_t elf_host_mem_copy_out(int32_t cookie, void *dest, int32_t n) {
+    if (n < 0 || (n > 0 && dest == NULL)) {
+        return -1;
+    }
+    mp_wasm_cookie_t *slot = cookie_get(cookie);
+    if (slot == NULL || (uint32_t)n > slot->len) {
+        return -1;
+    }
+    if (n > 0) {
+        memcpy(dest, slot->data, (size_t)n);
+    }
+    return 0;
+}
+
+static int32_t elf_host_mem_copy_in_at(int32_t cookie, int32_t cookie_off, const void *src, int32_t n) {
+    if (n < 0 || cookie_off < 0 || (n > 0 && src == NULL)) {
+        return -1;
+    }
+    mp_wasm_cookie_t *slot = cookie_get(cookie);
+    if (slot == NULL) {
+        return -1;
+    }
+    if ((uint32_t)cookie_off > slot->len || (uint32_t)n > (slot->len - (uint32_t)cookie_off)) {
+        return -1;
+    }
+    if (n > 0) {
+        memcpy(slot->data + cookie_off, src, (size_t)n);
+    }
+    return 0;
+}
+
+static int32_t elf_host_mem_copy_out_at(int32_t cookie, int32_t cookie_off, void *dest, int32_t n) {
+    if (n < 0 || cookie_off < 0 || (n > 0 && dest == NULL)) {
+        return -1;
+    }
+    mp_wasm_cookie_t *slot = cookie_get(cookie);
+    if (slot == NULL) {
+        return -1;
+    }
+    if ((uint32_t)cookie_off > slot->len || (uint32_t)n > (slot->len - (uint32_t)cookie_off)) {
+        return -1;
+    }
+    if (n > 0) {
+        memcpy(dest, slot->data + cookie_off, (size_t)n);
+    }
+    return 0;
+}
+
 typedef struct {
     const char *name;
     void *addr;
@@ -840,11 +973,18 @@ static const mp_wasm_elf_native_t elf_host_natives[] = {
     { "call_i64", (void *)elf_host_call_i64 },
     { "call_f32", (void *)elf_host_call_f32 },
     { "call_f64", (void *)elf_host_call_f64 },
+    { "call_buf", (void *)elf_host_call_buf },
     { "call_mem", (void *)elf_host_call_mem },
     { "call_obj", (void *)elf_host_call_obj },
+    { "call0_py", (void *)elf_host_call0_py },
+    { "call_py", (void *)elf_host_call_py },
     { "mem_alloc", (void *)elf_host_mem_alloc },
     { "mem_free", (void *)elf_host_mem_free },
     { "mem_len", (void *)elf_host_mem_len },
+    { "mem_copy_in", (void *)elf_host_mem_copy_in },
+    { "mem_copy_out", (void *)elf_host_mem_copy_out },
+    { "mem_copy_in_at", (void *)elf_host_mem_copy_in_at },
+    { "mem_copy_out_at", (void *)elf_host_mem_copy_out_at },
 };
 
 void *mp_wasm_host_elf_lookup(const char *func) {

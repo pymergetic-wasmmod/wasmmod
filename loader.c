@@ -165,7 +165,7 @@ bool mp_wasm_loader_register(void) {
 }
 
 #if MICROPY_PY_WASM_ELF
-// ELF guests have no Wasm linear memory — only parameterless loader queries.
+// ELF guests: pointer args replace Wasm linear offsets.
 
 static int32_t elf_loader_mode(void) {
     return loader_mode(NULL);
@@ -177,15 +177,61 @@ static int32_t elf_loader_trust_count(void) {
     return loader_trust_count(NULL);
 }
 
+static bool elf_loader_name(const void *ptr, int32_t len, char *buf, size_t buf_sz) {
+    if (ptr == NULL || len < 0 || (size_t)len >= buf_sz) {
+        return false;
+    }
+    memcpy(buf, ptr, (size_t)len);
+    buf[len] = '\0';
+    return true;
+}
+
+static int32_t elf_loader_version(void *buf, int32_t maxlen) {
+    const char *ver = MICROPY_WASM_VERSION;
+    size_t n = strlen(ver);
+    if (buf == NULL || maxlen < 0 || (size_t)maxlen < n) {
+        return -1;
+    }
+    if (n > 0) {
+        memcpy(buf, ver, n);
+    }
+    return (int32_t)n;
+}
+
+static int32_t elf_loader_call_i32(const void *pack_ptr, int32_t pack_len,
+    const void *func_ptr, int32_t func_len,
+    int32_t nargs, const int32_t *args) {
+    char pack[MP_WASM_LOADER_NAME_MAX + 1];
+    char func[MP_WASM_LOADER_NAME_MAX + 1];
+    if (!elf_loader_name(pack_ptr, pack_len, pack, sizeof(pack))
+        || !elf_loader_name(func_ptr, func_len, func, sizeof(func))) {
+        return INT32_MIN;
+    }
+    if (nargs < 0 || (uint32_t)nargs > MP_WASM_LOADER_CALL_ARGS_MAX) {
+        return INT32_MIN;
+    }
+    if (nargs > 0 && args == NULL) {
+        return INT32_MIN;
+    }
+    int32_t out = 0;
+    if (mp_wasm_host_call_export_i32(pack, (size_t)pack_len, func, (size_t)func_len,
+            (uint32_t)nargs, args, &out) != 0) {
+        return INT32_MIN;
+    }
+    return out;
+}
+
 typedef struct {
     const char *name;
     void *addr;
 } mp_wasm_elf_loader_native_t;
 
 static const mp_wasm_elf_loader_native_t elf_loader_natives[] = {
+    { "version", (void *)elf_loader_version },
     { "mode", (void *)elf_loader_mode },
     { "verify", (void *)elf_loader_verify },
     { "trust_count", (void *)elf_loader_trust_count },
+    { "call_i32", (void *)elf_loader_call_i32 },
 };
 
 void *mp_wasm_loader_elf_lookup(const char *func) {

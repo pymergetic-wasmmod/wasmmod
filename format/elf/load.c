@@ -346,7 +346,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     const Elf64_Sym *syms = (const Elf64_Sym *)(elf + symsh.sh_offset);
     const char *strtab = (const char *)(elf + strsh.sh_offset);
 
-    // GOT slots for GOTPCREL* (compilers emit these even with -fno-pic).
+    // GOT slots for GOTPCREL* / ADR_GOT (even -fPIC -fno-plt uses these for undefs).
     uint32_t *got_off = MICROPY_WASM_MALLOC((size_t)nsym * sizeof(uint32_t));
     if (got_off == NULL) {
         MICROPY_WASM_FREE(sec_addr);
@@ -386,7 +386,19 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     size_t map_size = align_up(image_size, page);
 
     void *map = mmap(NULL, map_size, PROT_READ | PROT_WRITE | PROT_EXEC,
-        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#if defined(__x86_64__) && defined(MAP_32BIT)
+        // Prefer low 32-bit VA so R_X86_64_32 (-fno-pic .rodata) still works.
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT,
+#else
+        MAP_PRIVATE | MAP_ANONYMOUS,
+#endif
+        -1, 0);
+    if (map == MAP_FAILED) {
+#if defined(__x86_64__) && defined(MAP_32BIT)
+        map = mmap(NULL, map_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
+    }
     if (map == MAP_FAILED) {
         MICROPY_WASM_FREE(sec_addr);
         MICROPY_WASM_FREE(got_off);
@@ -533,9 +545,22 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
                 }
                 case R_X86_64_32:
                 case R_X86_64_32S:
-                case R_AARCH64_ABS32:
-                    *(uint32_t *)P = (uint32_t)(S + (uintptr_t)A);
+                case R_AARCH64_ABS32: {
+                    uint64_t v = (uint64_t)(S + (uintptr_t)A);
+                    if (v > 0xffffffffu) {
+                        char msg[96];
+                        snprintf(msg, sizeof(msg),
+                            "R_*_32 overflow (build with -fPIC or map below 4GiB)");
+                        munmap(map, map_size);
+                        MICROPY_WASM_FREE(sec_addr);
+                        MICROPY_WASM_FREE(got_off);
+                        MICROPY_WASM_FREE(sym_addr);
+                        set_err(errbuf, errbuf_len, msg);
+                        return false;
+                    }
+                    *(uint32_t *)P = (uint32_t)v;
                     break;
+                }
                 case R_X86_64_PC64:
                 case R_AARCH64_PREL64: {
                     int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;

@@ -190,6 +190,10 @@ c=wasm.import_wasm('client'); assert c.use_hello()==42; \
 wasm.host_set(0, lambda: 99); \
 hc=wasm.import_wasm('hostcall'); assert hc.via_host0()==99; \
 wasm.host_set(0, lambda x: x*3); assert hc.via_host(7)==21; \
+wasm.host_set(0, lambda b: len(b)); assert hc.via_buf()==3; \
+wasm.host_set(0, lambda b: len(b)); assert hc.via_mem()==6; \
+import hello as _h; _h._elf_abs=abs; assert hc.via_py(-7)==7; \
+assert hc.host_version_len()>0; \
 print('OK elf hello(+py)/client/hostcall')"
 
 # Dotted module tree: sibling flat packs + nested monorepo (pack-tree).

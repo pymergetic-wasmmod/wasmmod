@@ -8,7 +8,7 @@ ARCH ?= $(shell uname -m)
 OUT_ARCH = ../packs/hostcall.$(ARCH).elf
 
 CC ?= gcc
-CFLAGS ?= -ffreestanding -fno-pic -fno-plt -fno-stack-protector -O2 -c
+CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -c
 
 .PHONY: all clean
 
