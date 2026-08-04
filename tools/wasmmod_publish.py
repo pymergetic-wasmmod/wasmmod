@@ -29,12 +29,16 @@ One-shot CDN release: pack → (AOT) → sign → zlib → metal-cdn upload.
   tools/wasmmod.py publish examples/hello --version 0.1.0 \\
       --key .keys/sign/leaf.key.pem --chain .keys/sign/chain.der
 
+  # Also upload a prebuilt ELF twin:
+  tools/wasmmod.py publish examples/hello --version 0.1.0 --elf packs/hello.elf \\
+      --arch x86_64 --key … --chain …
+
   # Stage artifacts only (no HTTP):
   tools/wasmmod.py publish examples/hello --version 0.1.0 --dry-run \\
       --key … --chain …
 
   # Upload already-built naked artifacts (skip pack/AOT/sign):
-  tools/wasmmod.py publish --from-artifacts packs/hello.wasm \\
+  tools/wasmmod.py publish --from-artifacts packs/hello.wasm packs/hello.elf \\
       --package hello --version 0.1.0 --token "$METAL_CDN_TOKEN" \\
       --cdn-url https://cdn.example/cdn
 
@@ -49,6 +53,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -166,20 +171,42 @@ def _zlib_wrap(path: Path) -> Path:
 
 
 def _cdn_name(path: Path, *, arch: str | None) -> Path:
-    """Optionally insert arch infix before .aotN (CDN layout)."""
+    """Optionally insert arch infix before .aotN / .elf (CDN layout)."""
     if not arch:
         return path
     name = path.name
     m = re.match(r"^(?P<stem>.+)\.aot(?P<ver>\d*)(?P<zlib>\.zlib)?$", name)
-    if not m:
-        return path
-    ver = m.group("ver")
-    zlib_suf = m.group("zlib") or ""
-    renamed = path.with_name(f"{m.group('stem')}.{arch}.aot{ver}{zlib_suf}")
-    if renamed != path:
-        path.rename(renamed)
-        print(f"renamed {path.name} → {renamed.name}", file=sys.stderr)
-    return renamed
+    if m:
+        ver = m.group("ver")
+        zlib_suf = m.group("zlib") or ""
+        renamed = path.with_name(f"{m.group('stem')}.{arch}.aot{ver}{zlib_suf}")
+        if renamed != path:
+            path.rename(renamed)
+            print(f"renamed {path.name} → {renamed.name}", file=sys.stderr)
+        return renamed
+    m = re.match(r"^(?P<stem>.+)\.elf(?P<zlib>\.zlib)?$", name)
+    if m:
+        # Skip if already arch-tagged: hello.x86_64.elf
+        stem = m.group("stem")
+        if "." in Path(stem).name:
+            return path
+        zlib_suf = m.group("zlib") or ""
+        renamed = path.with_name(f"{stem}.{arch}.elf{zlib_suf}")
+        if renamed != path:
+            path.rename(renamed)
+            print(f"renamed {path.name} → {renamed.name}", file=sys.stderr)
+        return renamed
+    return path
+
+
+def _stage_copy(path: Path, out_dir: Path) -> Path:
+    """Copy *path* into *out_dir* unless it already lives there (avoids mutating sources)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    staged = out_dir / path.name
+    if staged.resolve() != path.resolve():
+        shutil.copy2(path, staged)
+        return staged
+    return path
 
 
 def stage_artifacts(
@@ -202,7 +229,7 @@ def stage_artifacts(
                 _cli().die(PROG, "--key required to sign")
                 raise SystemExit(1)  # die() is NoReturn; helps type checkers after dynamic import
             _sign(target, key=key, chain=chain, cert=cert)
-        if arch and ".aot" in target.name:
+        if arch and (".aot" in target.name or target.name.endswith(".elf") or ".elf." in target.name):
             target = _cdn_name(target, arch=arch)
         if do_zlib:
             upload.append(_zlib_wrap(target))
@@ -406,11 +433,13 @@ def _validate_publish_inputs(args: argparse.Namespace) -> None:
 
     if args.from_artifacts:
         for p in args.from_artifacts:
-            _require_file(p, what="artifact (--from-artifacts)", hint="Pass an existing .wasm / .aotN path")
+            _require_file(p, what="artifact (--from-artifacts)", hint="Pass an existing .wasm / .aotN / .elf path")
     elif args.pack is not None:
         pack = args.pack
         if not (pack.is_file() or pack.is_dir()):
             cli.die(PROG, f"pack path not found: {pack}")
+    for elf_path in getattr(args, "elf", None) or []:
+        _require_file(elf_path, what="ELF artifact (--elf)", hint="Build with: make -C examples/hello_elf")
 
     if not args.dry_run:
         url = (args.cdn_url or "").strip()
@@ -447,14 +476,21 @@ def main(argv: list[str] | None = None) -> int:
         "--from-artifacts",
         nargs="+",
         type=Path,
-        help="Existing naked .wasm / .aotN files (skip pack/AOT; still sign+zlib unless --no-sign)",
+        help="Existing naked .wasm / .aotN / .elf files (skip pack/AOT; still sign+zlib unless --no-sign)",
+    )
+    ap.add_argument(
+        "--elf",
+        nargs="+",
+        type=Path,
+        default=[],
+        help="Extra .elf packs to sign/zlib/upload beside the Wasm build (or alone with --from-artifacts)",
     )
     ap.add_argument("--package", help="CDN package name (default: pack.toml name / artifact stem)")
     ap.add_argument("--version", help="Package version (default: pack.toml version)")
     ap.add_argument("-o", "--out-dir", type=Path, default=Path("packs"), help="Build output dir")
     ap.add_argument("--aot", action="store_true", help="Also compile AOT via wamrc")
     ap.add_argument("--wamrc", default=os.environ.get("WAMRC", "wamrc"))
-    ap.add_argument("--arch", help="Arch infix for AOT CDN names (e.g. x86_64)")
+    ap.add_argument("--arch", help="Arch infix for AOT/ELF CDN names (e.g. x86_64)")
     ap.add_argument("--key", type=Path, help="ECDSA leaf key PEM")
     ap.add_argument("--chain", type=Path, help="Certificate chain DER (leaf first)")
     ap.add_argument("--cert", type=Path, help="Leaf cert DER (if no --chain)")
@@ -537,6 +573,21 @@ def main(argv: list[str] | None = None) -> int:
         naked = [wasm_path]
         if aot_path is not None:
             naked.append(aot_path)
+
+    for elf_path in args.elf or []:
+        ep = elf_path.resolve()
+        _require_file(ep, what="ELF artifact (--elf)", hint="Build with: make -C examples/hello_elf")
+        naked.append(_stage_copy(ep, args.out_dir))
+
+    # When --arch will rename AOT/ELF, stage any remaining sources into out_dir first.
+    if args.arch:
+        staged_naked: list[Path] = []
+        for p in naked:
+            if ".aot" in p.name or p.name.endswith(".elf") or ".elf." in p.name:
+                staged_naked.append(_stage_copy(p, args.out_dir))
+            else:
+                staged_naked.append(p)
+        naked = staged_naked
 
     assert package and version
     description = args.description or manifest_meta.get("description") or manifest_meta.get("comment")

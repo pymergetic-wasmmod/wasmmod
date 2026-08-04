@@ -22,7 +22,11 @@ sig = "i32_i32_i32"
 [python]
 mount = "../hello/src"
 keep_source = true
-freeze = false
+freeze = true
+targets = [
+  "upy:mpy6:sib31",
+  "upy:mpy6:sib63",
+]
 
 [pack]
 compress = true
