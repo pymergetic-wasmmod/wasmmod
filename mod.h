@@ -121,6 +121,9 @@ MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_has_dwarf_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_symbols_obj);
 MP_DECLARE_CONST_FUN_OBJ_2(mod_wasm_addr2line_obj);
+MP_DECLARE_CONST_FUN_OBJ_2(mod_wasm_locations_obj);
+MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_disasm_obj);
+MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_mpy_disasm_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_from_file_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_from_bytes_obj);
 #if MICROPY_PY_WASM_MATRIX

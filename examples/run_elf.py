@@ -36,9 +36,15 @@ setattr(_h, "_elf_abs", abs)
 assert hc.via_py(-7) == 7
 assert hc.host_version_len() > 0
 tk = wasm.import_wasm("ticks")
-assert tk.__pack__.kind == "elf"
+assert tk.__pack__.kind == "elf", tk.__pack__.kind
 t0 = tk.elapsed()
 assert isinstance(t0, int) and t0 >= 0, t0
+# Explicit Wasm twin (preference would pick ticks.elf).
+tw = wasm.load_pack("ticks.wasm")
+assert tw.elapsed() >= 0
+assert wasm.locations("hello.elf", "hello")
+hello_sym = next(s for s in wasm.symbols("hello.elf") if s["name"] == "hello")
+assert wasm.disasm("hello.elf", hello_sym["section_index"], 0, 16)
 try:
     wasm.load_pack("/tmp/wasmmod_badupy.elf")
     raise SystemExit("expected micropython.* load failure")

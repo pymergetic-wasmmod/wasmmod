@@ -1,7 +1,7 @@
 /*
  * This file is part of wasmmod, https://github.com/pymergetic/wasmmod
  *
- * Host-side pack inspect (symbols / DWARF hooks). Mirror of tools/wasmmod_inspect.py.
+ * Host-side pack inspect (symbols / DWARF hooks / disasm). Mirror of tools/wasmmod_inspect.py.
  */
 #ifndef MICROPY_INCLUDED_EXTMOD_WASMMOD_INSPECT_H
 #define MICROPY_INCLUDED_EXTMOD_WASMMOD_INSPECT_H
@@ -20,6 +20,10 @@
 #define MP_WASM_INSPECT_NAME_MAX (96)
 #endif
 
+#ifndef MP_WASM_INSPECT_TEXT_MAX
+#define MP_WASM_INSPECT_TEXT_MAX (80)
+#endif
+
 typedef struct mp_wasm_sym_t {
     char name[MP_WASM_INSPECT_NAME_MAX];
     int32_t section_index; // -1 if n/a
@@ -35,14 +39,32 @@ typedef struct mp_wasm_loc_t {
     uint8_t role; // 0=sym 1=dwarf 2=def 3=decl 4=twin
 } mp_wasm_loc_t;
 
+typedef struct mp_wasm_disasm_line_t {
+    uint64_t addr;
+    char text[MP_WASM_INSPECT_TEXT_MAX];
+} mp_wasm_disasm_line_t;
+
 bool mp_wasm_inspect_has_dwarf(const uint8_t *buf, uint32_t len);
 
-// Fill out[0..cap); returns false on truncate/error. *n_out = written count.
+// Fill out[0..cap); returns false on hard error. *n_out = written count.
 bool mp_wasm_inspect_symbols(const uint8_t *buf, uint32_t len,
     mp_wasm_sym_t *out, size_t cap, size_t *n_out);
 
 bool mp_wasm_inspect_addr2line(const uint8_t *buf, uint32_t len, uint64_t addr,
     mp_wasm_loc_t *out, size_t cap, size_t *n_out);
+
+// Locations for a symbol name (addr2line + sym role). Multi-loc when applicable.
+bool mp_wasm_inspect_locations(const uint8_t *buf, uint32_t len, const char *name,
+    mp_wasm_loc_t *out, size_t cap, size_t *n_out);
+
+// section_index: ELF shndx or Wasm section list index (code window for Wasm).
+// Host Capstone optional elsewhere; here always a simple hex/op dump.
+bool mp_wasm_inspect_disasm(const uint8_t *buf, uint32_t len,
+    uint32_t section_index, uint32_t offset, uint32_t limit,
+    mp_wasm_disasm_line_t *out, size_t cap, size_t *n_out);
+
+bool mp_wasm_inspect_mpy_disasm(const uint8_t *mpy, uint32_t len, uint32_t limit,
+    mp_wasm_disasm_line_t *out, size_t cap, size_t *n_out);
 
 #endif // MICROPY_PY_WASM
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_INSPECT_H

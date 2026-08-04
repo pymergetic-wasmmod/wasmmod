@@ -479,17 +479,7 @@ static mp_obj_t mod_wasm_symbols(mp_obj_t path_or_buf) {
 }
 MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_symbols_obj, mod_wasm_symbols);
 
-static mp_obj_t mod_wasm_addr2line(mp_obj_t path_or_buf, mp_obj_t addr_in) {
-    uint32_t len = 0;
-    uint8_t *buf = inspect_load_bytes(path_or_buf, &len);
-    uint64_t addr = mp_obj_get_int_truncated(addr_in);
-    mp_wasm_loc_t locs[8];
-    size_t n = 0;
-    bool ok = mp_wasm_inspect_addr2line(buf, len, addr, locs, 8, &n);
-    MICROPY_WASM_FREE(buf);
-    if (!ok) {
-        mp_raise_ValueError(MP_ERROR_TEXT("inspect addr2line failed"));
-    }
+static mp_obj_t loc_list_from_c(const mp_wasm_loc_t *locs, size_t n) {
     mp_obj_t list = mp_obj_new_list(0, NULL);
     for (size_t i = 0; i < n; ++i) {
         mp_obj_t d = mp_obj_new_dict(3);
@@ -507,7 +497,81 @@ static mp_obj_t mod_wasm_addr2line(mp_obj_t path_or_buf, mp_obj_t addr_in) {
     }
     return list;
 }
+
+static mp_obj_t disasm_list_from_c(const mp_wasm_disasm_line_t *lines, size_t n) {
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (size_t i = 0; i < n; ++i) {
+        mp_obj_t d = mp_obj_new_dict(2);
+        mp_obj_dict_store(d, mp_obj_new_str_from_cstr("addr"),
+            mp_obj_new_int_from_ull(lines[i].addr));
+        mp_obj_dict_store(d, mp_obj_new_str_from_cstr("text"),
+            mp_obj_new_str(lines[i].text, strlen(lines[i].text)));
+        mp_obj_list_append(list, d);
+    }
+    return list;
+}
+
+static mp_obj_t mod_wasm_addr2line(mp_obj_t path_or_buf, mp_obj_t addr_in) {
+    uint32_t len = 0;
+    uint8_t *buf = inspect_load_bytes(path_or_buf, &len);
+    uint64_t addr = mp_obj_get_int_truncated(addr_in);
+    mp_wasm_loc_t locs[8];
+    size_t n = 0;
+    bool ok = mp_wasm_inspect_addr2line(buf, len, addr, locs, 8, &n);
+    MICROPY_WASM_FREE(buf);
+    if (!ok) {
+        mp_raise_ValueError(MP_ERROR_TEXT("inspect addr2line failed"));
+    }
+    return loc_list_from_c(locs, n);
+}
 MP_DEFINE_CONST_FUN_OBJ_2(mod_wasm_addr2line_obj, mod_wasm_addr2line);
+
+static mp_obj_t mod_wasm_locations(mp_obj_t path_or_buf, mp_obj_t name_in) {
+    uint32_t len = 0;
+    uint8_t *buf = inspect_load_bytes(path_or_buf, &len);
+    const char *name = mp_obj_str_get_str(name_in);
+    mp_wasm_loc_t locs[16];
+    size_t n = 0;
+    bool ok = mp_wasm_inspect_locations(buf, len, name, locs, 16, &n);
+    MICROPY_WASM_FREE(buf);
+    if (!ok) {
+        mp_raise_ValueError(MP_ERROR_TEXT("inspect locations failed"));
+    }
+    return loc_list_from_c(locs, n);
+}
+MP_DEFINE_CONST_FUN_OBJ_2(mod_wasm_locations_obj, mod_wasm_locations);
+
+static mp_obj_t mod_wasm_disasm(size_t n_args, const mp_obj_t *args) {
+    uint32_t len = 0;
+    uint8_t *buf = inspect_load_bytes(args[0], &len);
+    uint32_t index = (uint32_t)mp_obj_get_int(args[1]);
+    uint32_t offset = n_args > 2 ? (uint32_t)mp_obj_get_int(args[2]) : 0;
+    uint32_t limit = n_args > 3 ? (uint32_t)mp_obj_get_int(args[3]) : 64;
+    mp_wasm_disasm_line_t lines[64];
+    size_t n = 0;
+    bool ok = mp_wasm_inspect_disasm(buf, len, index, offset, limit, lines, 64, &n);
+    MICROPY_WASM_FREE(buf);
+    if (!ok) {
+        mp_raise_ValueError(MP_ERROR_TEXT("inspect disasm failed"));
+    }
+    return disasm_list_from_c(lines, n);
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_disasm_obj, 2, 4, mod_wasm_disasm);
+
+static mp_obj_t mod_wasm_mpy_disasm(size_t n_args, const mp_obj_t *args) {
+    uint32_t len = 0;
+    uint8_t *buf = inspect_load_bytes(args[0], &len);
+    uint32_t limit = n_args > 1 ? (uint32_t)mp_obj_get_int(args[1]) : 80;
+    mp_wasm_disasm_line_t lines[96];
+    size_t n = 0;
+    bool ok = mp_wasm_inspect_mpy_disasm(buf, len, limit, lines, 96, &n);
+    MICROPY_WASM_FREE(buf);
+    if (!ok) {
+        mp_raise_ValueError(MP_ERROR_TEXT("inspect mpy_disasm failed"));
+    }
+    return disasm_list_from_c(lines, n);
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_mpy_disasm_obj, 1, 2, mod_wasm_mpy_disasm);
 
 static mp_obj_t mod_wasm_source(mp_obj_t name_in) {
     const char *name = mp_obj_str_get_str(name_in);

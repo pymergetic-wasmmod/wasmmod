@@ -153,7 +153,8 @@ Same register/connect/sign path as Wasm; execute is in-tree ET_REL:
 | `hello_elf/` | `packs/hello.elf` | freestanding exports + shared `hello` Python tree (`-fPIC`) |
 | `client_elf/` | `packs/client.elf` | peer `hello` via MPWI + GOT |
 | `host_elf/` | `packs/hostcall.elf` | `wasmmod.host` slots + `via_buf` / `via_mem` / `via_py` + loader `version` |
-| `ticks_elf/` | `packs/ticks.elf` | positive: `micropython.runtime.ticks_ms` catalog |
+| `ticks/` | `packs/ticks.wasm` | positive: `micropython.runtime.ticks_ms` (Wasm) |
+| `ticks_elf/` | `packs/ticks.elf` | positive: `micropython.runtime.ticks_ms` (ELF) |
 | `bad_upy_elf/` | `/tmp/wasmmod_badupy.elf` | negative: unknown `micropython.*` → load error |
 
 ```sh

@@ -29,6 +29,10 @@ STB_WEAK = 2
 EM_X86_64 = 62
 EM_AARCH64 = 183
 SHN_UNDEF = 0
+SHN_LORESERVE = 0xFF00
+SHN_ABS = 0xFFF1
+SHN_COMMON = 0xFFF2
+STT_FILE = 4
 
 Elf64_Sym = struct.Struct("<IBBHQQ")  # name, info, other, shndx, value, size
 
@@ -140,7 +144,13 @@ def _list_symbols_elf(buf: bytes) -> list[Symbol]:
             st_name, st_info, _st_other, st_shndx, st_value, st_size = Elf64_Sym.unpack_from(
                 buf, off
             )
-            if st_shndx == SHN_UNDEF or st_name == 0:
+            if (
+                st_shndx == SHN_UNDEF
+                or st_shndx == SHN_ABS
+                or st_shndx == SHN_COMMON
+                or st_shndx >= SHN_LORESERVE
+                or st_name == 0
+            ):
                 continue
             end = strtab.find(b"\x00", st_name)
             if end < 0:
@@ -149,6 +159,8 @@ def _list_symbols_elf(buf: bytes) -> list[Symbol]:
             if not sname or sname.startswith("."):
                 continue
             t = st_info & 0xF
+            if t == STT_FILE:
+                continue
             if t == STT_FUNC:
                 kind = "func"
             elif t == STT_OBJECT:
@@ -468,6 +480,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("addr2line")
     p.add_argument("path", type=Path)
     p.add_argument("addr", type=lambda s: int(s, 0))
+
+    p = sub.add_parser("locations")
+    p.add_argument("path", type=Path)
+    p.add_argument("name")
 
     p = sub.add_parser("disasm")
     p.add_argument("path", type=Path)

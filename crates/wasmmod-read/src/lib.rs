@@ -480,6 +480,10 @@ const STB_LOCAL: u8 = 0;
 const STB_GLOBAL: u8 = 1;
 const STB_WEAK: u8 = 2;
 const SHN_UNDEF: u16 = 0;
+const SHN_LORESERVE: u16 = 0xff00;
+const SHN_ABS: u16 = 0xfff1;
+const SHN_COMMON: u16 = 0xfff2;
+const STT_FILE: u8 = 4;
 const ELF64_SYM_SIZE: usize = 24; // name/info/other/shndx/value/size
 
 fn is_elf64_le(buf: &[u8]) -> bool {
@@ -601,7 +605,16 @@ fn list_symbols_elf(elf: &[u8]) -> Result<Vec<Symbol>> {
             let st_shndx = u16::from_le_bytes(elf[off + 6..off + 8].try_into().unwrap());
             let st_value = u64::from_le_bytes(elf[off + 8..off + 16].try_into().unwrap());
             let st_size = u64::from_le_bytes(elf[off + 16..off + 24].try_into().unwrap());
-            if st_shndx == SHN_UNDEF || st_name == 0 || st_name >= stab.len() {
+            if st_shndx == SHN_UNDEF
+                || st_shndx == SHN_ABS
+                || st_shndx == SHN_COMMON
+                || st_shndx >= SHN_LORESERVE
+                || st_name == 0
+                || st_name >= stab.len()
+            {
+                continue;
+            }
+            if st_info & 0xf == STT_FILE {
                 continue;
             }
             let end = stab[st_name..]
@@ -751,6 +764,57 @@ pub fn disasm_db(data: &[u8], base: u64) -> Vec<DisasmLine> {
             addr: base + i as u64,
             raw,
             text,
+        });
+    }
+    out
+}
+
+/// Locations for a symbol name (addr2line at func start + `role=sym`).
+pub fn locations_for_symbol(buf: &[u8], name: &str) -> Result<Vec<Location>> {
+    let mut out = Vec::new();
+    for s in list_symbols(buf)? {
+        if s.name != name {
+            continue;
+        }
+        if s.kind == "func" && s.size > 0 {
+            out.extend(addr2line(buf, s.offset)?);
+        }
+        out.push(Location {
+            path: name.into(),
+            line: None,
+            role: "sym".into(),
+        });
+        break;
+    }
+    Ok(out)
+}
+
+/// Basic `.mpy` dump: header + bytecode bytes.
+pub fn mpy_disasm(mpy: &[u8], limit: usize) -> Vec<DisasmLine> {
+    let mut out = Vec::new();
+    if mpy.len() < 4 {
+        out.push(DisasmLine {
+            addr: 0,
+            raw: mpy.to_vec(),
+            text: "truncated mpy".into(),
+        });
+        return out;
+    }
+    out.push(DisasmLine {
+        addr: 0,
+        raw: mpy[..4].to_vec(),
+        text: format!(
+            "mpy_hdr {:02x} {:02x} {:02x} {:02x}",
+            mpy[0], mpy[1], mpy[2], mpy[3]
+        ),
+    });
+    let n = (mpy.len() - 4).min(limit);
+    for i in 0..n {
+        let b = mpy[4 + i];
+        out.push(DisasmLine {
+            addr: 4 + i as u64,
+            raw: vec![b],
+            text: format!("bc 0x{b:02x}"),
         });
     }
     out

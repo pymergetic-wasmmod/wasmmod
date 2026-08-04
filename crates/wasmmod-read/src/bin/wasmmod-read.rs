@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 use wasmmod_read::{
-    addr2line, has_dwarf, list_sections, list_symbols, section_payload, without_sig_section,
-    SigView, SourceView,
+    addr2line, has_dwarf, list_sections, list_symbols, locations_for_symbol, mpy_disasm,
+    section_payload, without_sig_section, SigView, SourceView,
 };
 
 fn usage() -> ! {
@@ -26,6 +26,8 @@ Usage:
   wasmmod-read section PATH INDEX [--hex]
   wasmmod-read symbols PATH
   wasmmod-read addr2line PATH ADDR
+  wasmmod-read locations PATH NAME
+  wasmmod-read mpy PATH [--limit N]
   wasmmod-read has-dwarf PATH
 
 Build (from wasmmod repo root):
@@ -468,6 +470,64 @@ fn main() -> ExitCode {
             match std::fs::read(&path) {
                 Ok(data) => {
                     println!("{}", if has_dwarf(&data) { "yes" } else { "no" });
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("wasmmod-read: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "locations" => {
+            if args.len() < 2 {
+                usage();
+            }
+            let path = PathBuf::from(&args[0]);
+            let name = &args[1];
+            match std::fs::read(&path)
+                .map_err(wasmmod_read::Error::from)
+                .and_then(|data| locations_for_symbol(&data, name))
+            {
+                Ok(locs) => {
+                    for loc in locs {
+                        let ln = match loc.line {
+                            Some(n) => format!(":{n}"),
+                            None => String::new(),
+                        };
+                        println!("{:<6} {}{}", loc.role, loc.path, ln);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("wasmmod-read: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "mpy" => {
+            let mut path: Option<PathBuf> = None;
+            let mut limit = 80usize;
+            let mut i = 0;
+            while i < args.len() {
+                if args[i] == "--limit" {
+                    i += 1;
+                    if i >= args.len() {
+                        usage();
+                    }
+                    limit = args[i].parse().unwrap_or(80);
+                } else if path.is_none() {
+                    path = Some(PathBuf::from(&args[i]));
+                } else {
+                    usage();
+                }
+                i += 1;
+            }
+            let Some(path) = path else { usage() };
+            match std::fs::read(&path) {
+                Ok(data) => {
+                    for line in mpy_disasm(&data, limit) {
+                        println!("0x{:04x}: {}", line.addr, line.text);
+                    }
                     ExitCode::SUCCESS
                 }
                 Err(e) => {

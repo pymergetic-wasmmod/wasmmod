@@ -65,6 +65,7 @@ packs:
 	$(MAKE) -C client
 	$(MAKE) -C client_elf
 	$(MAKE) -C host_elf
+	$(MAKE) -C ticks
 	$(MAKE) -C ticks_elf
 	$(MAKE) -C mixed
 	$(MAKE) -C bridge

@@ -1065,6 +1065,34 @@ v.read("src/__init__.py")
 tools/wasmmod.py source meta|list|read|extract …
 ```
 
+## Pack inspect (symbols / addr2line / disasm)
+
+Shared semantics across **C** (`mp_wasm_inspect_*`), **Python** (`wasm.*` +
+`tools/wasmmod_inspect.py`), **Rust** (`wasmmod-read`), and **CDN** HTTP
+(thin wrap of the Python helper). ELF examples keep `-g` / `.debug_*`; the
+loader skips `.rela.debug_*` so DWARF does not corrupt the image.
+
+```python
+wasm.symbols("hello.elf")              # [{name, offset, size, kind, …}]
+wasm.has_dwarf("hello.elf")            # True when .debug_line present
+wasm.addr2line("hello.elf", 0x10)      # [{path, line, role}]  # multi-loc OK
+wasm.locations("hello.elf", "hello")
+wasm.disasm("hello.elf", section_index, 0, 64)   # hex/op lines (Capstone optional in tools)
+wasm.mpy_disasm("__init__.upy.mpy6.sib31.mpy", 32)
+```
+
+```sh
+tools/wasmmod.py inspect symbols hello.elf
+tools/wasmmod.py inspect addr2line hello.elf 0x10
+wasmmod-read symbols hello.elf
+wasmmod-read has-dwarf hello.elf
+# CDN: GET …/artifacts/lead/hello.elf/{symbols,addr2line,locations,disasm}
+```
+
+`micropython.*` catalog (minimal): `micropython.runtime.ticks_ms` →
+`mp_hal_ticks_ms` (Wasm natives + ELF). Unknown names still fail at load
+(`examples/ticks`, `examples/ticks_elf`, `examples/bad_upy_elf`).
+
 ## Loader API (proposed Python surface)
 
 ```python
