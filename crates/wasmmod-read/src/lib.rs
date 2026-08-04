@@ -404,7 +404,8 @@ fn list_sections_elf(elf: &[u8]) -> Result<Vec<ContainerSection>> {
             SectionRole::Other
         };
         out.push(ContainerSection {
-            index: out.len() as u32,
+            // Real ELF shndx — matches Symbol.section_index / disasm.
+            index: i as u32,
             name,
             type_id: typ,
             offset: off as u64,

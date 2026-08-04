@@ -41,5 +41,14 @@ def test_disasm_text_nonempty() -> None:
             text_i = i
             break
     assert text_i is not None
+    hello = next(s for s in insp.list_symbols(data) if s.name == "hello")
+    assert hello.section_index == text_i
     lines = insp.disasm(data, text_i, 0, 32)
     assert lines
+
+
+def test_mpy_disasm_header() -> None:
+    fake = b"MP\x06\x00" + bytes(range(12))
+    lines = insp.mpy_disasm(fake, limit=8)
+    assert lines[0].text.startswith("mpy_hdr")
+    assert len(lines) >= 2

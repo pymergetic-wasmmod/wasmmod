@@ -1077,9 +1077,14 @@ wasm.symbols("hello.elf")              # [{name, offset, size, kind, …}]
 wasm.has_dwarf("hello.elf")            # True when .debug_line present
 wasm.addr2line("hello.elf", 0x10)      # [{path, line, role}]  # multi-loc OK
 wasm.locations("hello.elf", "hello")
-wasm.disasm("hello.elf", section_index, 0, 64)   # hex/op lines (Capstone optional in tools)
+wasm.disasm("hello.elf", section_index, 0, 64)   # ELF shndx / Wasm code window
 wasm.mpy_disasm("__init__.upy.mpy6.sib31.mpy", 32)
 ```
+
+ELF section list indexes are **real `shndx`** values (same as `Symbol.section_index`),
+not a compacted 0…n−1 sequence — so hex / disasm / symbols agree. Host tools may use
+optional Capstone (`pip install capstone`) for `.text`; otherwise hex `db` / `op_*` lines.
+C `mp_wasm_inspect_disasm` stays Capstone-free.
 
 ```sh
 tools/wasmmod.py inspect symbols hello.elf

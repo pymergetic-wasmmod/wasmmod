@@ -402,6 +402,31 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     if data.get("sig"):
         s = data["sig"]
         print(f"sig format={s.get('format')} len={s.get('sig_len')}")
+    if data.get("has_dwarf") is not None:
+        print(f"has_dwarf={data.get('has_dwarf')}")
+    syms = data.get("symbols") or []
+    if syms:
+        print(f"symbols ({len(syms)}):")
+        for s in syms[:24]:
+            print(
+                f"  {s.get('kind', '?'):6} +0x{int(s.get('offset') or 0):04x} "
+                f"sz={s.get('size', 0)}  {s.get('name')}"
+            )
+        if len(syms) > 24:
+            print(f"  … +{len(syms) - 24} more")
+    else:
+        # Aggregate inspect may omit symbols; hit /symbols when available.
+        try:
+            remote = client.list_symbols_remote(filename, version=pin)
+        except Exception:
+            remote = []
+        if remote:
+            print(f"symbols ({len(remote)}):")
+            for s in remote[:24]:
+                print(
+                    f"  {s.get('kind', '?'):6} +0x{int(s.get('offset') or 0):04x} "
+                    f"sz={s.get('size', 0)}  {s.get('name')}"
+                )
     return 0
 
 
