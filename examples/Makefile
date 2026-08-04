@@ -180,6 +180,7 @@ test: packs host
 
 # ELF container smoke (preference elf,aot,wasm — default when MICROPY_PY_WASM_ELF=1).
 test-elf: packs host
+	@$(MAKE) -C bad_upy_elf
 	@set -e; \
 	cd $(CURDIR)/packs; \
 	$(MPY_INTERP) -c "import wasm; \
@@ -194,7 +195,12 @@ wasm.host_set(0, lambda b: len(b)); assert hc.via_buf()==3; \
 wasm.host_set(0, lambda b: len(b)); assert hc.via_mem()==6; \
 import hello as _h; _h._elf_abs=abs; assert hc.via_py(-7)==7; \
 assert hc.host_version_len()>0; \
-print('OK elf hello(+py)/client/hostcall')"
+try:\
+ wasm.load_pack('/tmp/wasmmod_badupy.elf');\
+ raise SystemExit('expected micropython.* load failure');\
+except RuntimeError as e:\
+ assert 'micropython.* not supported' in str(e), e;\
+print('OK elf hello(+py)/client/hostcall+badupy')"
 
 # Dotted module tree: sibling flat packs + nested monorepo (pack-tree).
 test-tree: tree-packs host
