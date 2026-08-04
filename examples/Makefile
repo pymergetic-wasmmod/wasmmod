@@ -61,6 +61,7 @@ LLVM_CMAKE_DIR ?= $(shell llvm-config-18 --cmakedir 2>/dev/null || llvm-config -
 
 packs:
 	$(MAKE) -C hello
+	$(MAKE) -C hello_elf
 	$(MAKE) -C client
 	$(MAKE) -C mixed
 	$(MAKE) -C bridge
@@ -93,6 +94,11 @@ sign-packs: packs sign-key
 			python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$aot_legacy; \
 		fi; \
 	done
+	@if [ -f packs/hello.elf ]; then \
+		echo "SIGN packs/hello.elf"; \
+		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) packs/hello.elf; \
+		cp -f packs/hello.elf packs/hello.$$(uname -m).elf; \
+	fi
 
 # Build wamrc from nested WAMR so .aotN matches the linked AOT loader.
 wamrc:

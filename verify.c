@@ -163,6 +163,7 @@ bool mp_wasm_trust_add_blob(const uint8_t *data, uint32_t data_len, uint32_t unc
 #if MICROPY_WASM_VERIFY
 
 #include "extmod/wasmmod/pack.h"
+#include "extmod/wasmmod/format/common/format.h"
 
 #if MICROPY_SSL_MBEDTLS
 #include "mbedtls/md.h"
@@ -179,111 +180,8 @@ bool mp_wasm_sig_find(const uint8_t *bytes, uint32_t len, const uint8_t **payloa
     return mp_wasm_find_custom_section(bytes, len, MP_WASM_SIG_SECTION, payload, payload_len);
 }
 
-// Read little-endian helpers (AOT section walk; pack.c has its own static copies).
-static uint16_t verify_read_u16_le(const uint8_t *p) {
-    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
-}
-
-static uint32_t verify_read_u32_le(const uint8_t *p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8)
-        | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
 bool mp_wasm_sig_strip(const uint8_t *mod, uint32_t len, uint8_t **out, uint32_t *out_len) {
-    if (mod == NULL || len < 8 || mod[0] != 0x00) {
-        return false;
-    }
-    const bool is_wasm = (mod[1] == 'a' && mod[2] == 's' && mod[3] == 'm');
-    const bool is_aot = (mod[1] == 'a' && mod[2] == 'o' && mod[3] == 't');
-    if (!is_wasm && !is_aot) {
-        return false;
-    }
-
-    uint8_t *buf = MICROPY_WASM_MALLOC(len);
-    if (buf == NULL) {
-        return false;
-    }
-    memcpy(buf, mod, 8);
-    uint32_t w = 8;
-    const size_t want_len = strlen(MP_WASM_SIG_SECTION);
-
-    if (is_wasm) {
-        const uint8_t *p = mod + 8;
-        const uint8_t *end = mod + len;
-        while (p < end) {
-            const uint8_t *sec_start = p;
-            uint8_t id = *p++;
-            uint32_t size;
-            if (!mp_wasm_read_uleb(&p, end, &size) || p + size > end) {
-                MICROPY_WASM_FREE(buf);
-                return false;
-            }
-            const uint8_t *payload = p;
-            p += size;
-            bool skip = false;
-            if (id == 0) {
-                const uint8_t *q = payload;
-                uint32_t name_len;
-                if (mp_wasm_read_uleb(&q, payload + size, &name_len)
-                    && q + name_len <= payload + size
-                    && name_len == want_len
-                    && memcmp(q, MP_WASM_SIG_SECTION, want_len) == 0) {
-                    skip = true;
-                }
-            }
-            if (!skip) {
-                size_t n = (size_t)(p - sec_start);
-                memcpy(buf + w, sec_start, n);
-                w += (uint32_t)n;
-            }
-        }
-    } else {
-        // AOT: type/size sections; CUSTOM(100)/RAW(0) with EMIT_STR name.
-        uintptr_t p = 8;
-        while (p + 8 <= len) {
-            const uint8_t *sec_start = mod + p;
-            uint32_t typ = verify_read_u32_le(mod + p);
-            uint32_t size = verify_read_u32_le(mod + p + 4);
-            const uint8_t *content = mod + p + 8;
-            if (content + size > mod + len || size > 0x10000000u) {
-                MICROPY_WASM_FREE(buf);
-                return false;
-            }
-            // Next header is 4-aligned (WAMR read_uint32 align_ptr).
-            uintptr_t aligned = ((uintptr_t)(content + size - mod) + 3u) & ~(uintptr_t)3u;
-            uintptr_t next = aligned <= len ? aligned : len;
-            bool skip = false;
-            if (typ == 100 && size >= 6) {
-                uint32_t sub = verify_read_u32_le(content);
-                if (sub == 0) {
-                    uint16_t slen = verify_read_u16_le(content + 4);
-                    const uint8_t *nb = content + 6;
-                    if (nb + slen <= content + size) {
-                        size_t bare = slen;
-                        if (bare > 0 && nb[bare - 1] == 0) {
-                            bare--;
-                        }
-                        if (bare == want_len && memcmp(nb, MP_WASM_SIG_SECTION, want_len) == 0) {
-                            skip = true;
-                        }
-                    }
-                }
-            }
-            if (!skip) {
-                size_t n = (size_t)(next - p);
-                memcpy(buf + w, sec_start, n);
-                w += (uint32_t)n;
-            } else {
-                // Drop trailing pad after wasmmod.sig (not part of signed body).
-                break;
-            }
-            p = next;
-        }
-    }
-
-    *out = buf;
-    *out_len = w;
-    return true;
+    return mp_wasm_format_strip_section(mod, len, MP_WASM_SIG_SECTION, out, out_len);
 }
 
 // Split MPWS envelope or treat payload as raw ECDSA sig.

@@ -1,6 +1,7 @@
 # Pack build outputs (rebuild with: make packs)
 *.wasm
 *.aot
+*.elf
 *.mpack
 *.sig
 *.crt

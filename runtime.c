@@ -54,6 +54,15 @@ bool mp_wasm_loader_register(void);
 #ifndef MICROPY_PY_WASM_FAST_JIT
 #define MICROPY_PY_WASM_FAST_JIT (0)
 #endif
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
+#include "extmod/wasmmod/format/common/format.h"
+#if MICROPY_PY_WASM_ELF
+#include "extmod/wasmmod/format/elf/load.h"
+#include "extmod/wasmmod/pack.h"
+#endif
 
 // Port hooks: override in mpconfigport.h to plug a custom allocator or
 // to observe exports (e.g. a host registry). Defaults keep this module
@@ -74,7 +83,7 @@ bool mp_wasm_loader_register(void);
 
 struct mp_wasm_module_t {
     char name[MP_WASM_NAME_MAX + 1];
-    uint8_t *buf;       // executable (.wasm or .aot)
+    uint8_t *buf;       // executable (.wasm / .aot / .elf bytes)
     uint32_t buf_len;
     uint8_t *meta;      // pack/imports metadata; NULL ⇒ use buf
     uint32_t meta_len;
@@ -82,6 +91,9 @@ struct mp_wasm_module_t {
     wasm_module_t module;
     wasm_module_inst_t inst;
     wasm_exec_env_t exec;
+#if MICROPY_PY_WASM_ELF
+    mp_wasm_elf_image_t *elf; // non-NULL ⇒ in-tree ELF engine (no WAMR)
+#endif
 };
 
 static int runtime_ready;
@@ -191,10 +203,17 @@ mp_wasm_module_t *mp_wasm_module_load_ex(const uint8_t *code, uint32_t code_len,
         return NULL;
     }
 
+    mp_wasm_artifact_kind_t kind = mp_wasm_artifact_kind(code, code_len);
+
     #if !MICROPY_PY_WASM_AOT
-    // Reject AOT magic when AOT support is not compiled in: \0aot / similar.
-    if (code_len >= 4 && code[0] == 0x00 && code[1] == 'a' && code[2] == 'o' && code[3] == 't') {
+    if (kind == MP_WASM_KIND_AOT) {
         set_err(errbuf, errbuf_len, "AOT disabled (build with MICROPY_PY_WASM_AOT=1)");
+        return NULL;
+    }
+    #endif
+    #if !MICROPY_PY_WASM_ELF
+    if (kind == MP_WASM_KIND_ELF) {
+        set_err(errbuf, errbuf_len, "ELF disabled (build with MICROPY_PY_WASM_ELF=1)");
         return NULL;
     }
     #endif
@@ -237,35 +256,31 @@ mp_wasm_module_t *mp_wasm_module_load_ex(const uint8_t *code, uint32_t code_len,
         mod->meta_owned = false;
     }
 
-    // Guest→guest forwarders come from metadata (custom sections on .wasm).
+    // Guest→guest forwarders come from metadata (same for Wasm/AOT/ELF).
     if (!mp_wasm_register_forwarders(mod->meta, mod->meta_len, errbuf, errbuf_len)) {
-        if (mod->meta_owned) {
-            MICROPY_WASM_FREE(mod->meta);
-        }
-        MICROPY_WASM_FREE(mod->buf);
-        MICROPY_WASM_FREE(mod);
-        return NULL;
+        goto fail_mod;
     }
+
+#if MICROPY_PY_WASM_ELF
+    if (kind == MP_WASM_KIND_ELF) {
+        if (!mp_wasm_elf_image_load(mod->buf, mod->buf_len, &mod->elf, errbuf, errbuf_len)) {
+            goto fail_mod;
+        }
+        mp_wasm_registry_add(mod);
+        return mod;
+    }
+#endif
 
     mod->module = wasm_runtime_load(mod->buf, mod->buf_len, errbuf, (uint32_t)errbuf_len);
     if (mod->module == NULL) {
-        if (mod->meta_owned) {
-            MICROPY_WASM_FREE(mod->meta);
-        }
-        MICROPY_WASM_FREE(mod->buf);
-        MICROPY_WASM_FREE(mod);
-        return NULL;
+        goto fail_mod;
     }
 
     mod->inst = wasm_runtime_instantiate(mod->module, MICROPY_WASM_STACK_SIZE, MICROPY_WASM_HEAP_SIZE, errbuf, (uint32_t)errbuf_len);
     if (mod->inst == NULL) {
         wasm_runtime_unload(mod->module);
-        if (mod->meta_owned) {
-            MICROPY_WASM_FREE(mod->meta);
-        }
-        MICROPY_WASM_FREE(mod->buf);
-        MICROPY_WASM_FREE(mod);
-        return NULL;
+        mod->module = NULL;
+        goto fail_mod;
     }
 
     mod->exec = wasm_runtime_create_exec_env(mod->inst, MICROPY_WASM_STACK_SIZE);
@@ -273,16 +288,27 @@ mp_wasm_module_t *mp_wasm_module_load_ex(const uint8_t *code, uint32_t code_len,
         set_err(errbuf, errbuf_len, "create exec env failed");
         wasm_runtime_deinstantiate(mod->inst);
         wasm_runtime_unload(mod->module);
-        if (mod->meta_owned) {
-            MICROPY_WASM_FREE(mod->meta);
-        }
-        MICROPY_WASM_FREE(mod->buf);
-        MICROPY_WASM_FREE(mod);
-        return NULL;
+        mod->inst = NULL;
+        mod->module = NULL;
+        goto fail_mod;
     }
 
     mp_wasm_registry_add(mod);
     return mod;
+
+fail_mod:
+#if MICROPY_PY_WASM_ELF
+    if (mod->elf) {
+        mp_wasm_elf_image_free(mod->elf);
+        mod->elf = NULL;
+    }
+#endif
+    if (mod->meta_owned) {
+        MICROPY_WASM_FREE(mod->meta);
+    }
+    MICROPY_WASM_FREE(mod->buf);
+    MICROPY_WASM_FREE(mod);
+    return NULL;
 }
 
 mp_wasm_module_t *mp_wasm_module_load(const uint8_t *bytes, uint32_t len, const char *name, char *errbuf, size_t errbuf_len) {
@@ -294,6 +320,12 @@ void mp_wasm_module_close(mp_wasm_module_t *mod) {
         return;
     }
     mp_wasm_registry_remove(mod);
+#if MICROPY_PY_WASM_ELF
+    if (mod->elf) {
+        mp_wasm_elf_image_free(mod->elf);
+        mod->elf = NULL;
+    }
+#endif
     if (mod->exec) {
         wasm_runtime_destroy_exec_env(mod->exec);
     }
@@ -325,6 +357,182 @@ static bool kinds_all_numeric(const wasm_valkind_t *kinds, uint32_t n) {
     return true;
 }
 
+
+#if MICROPY_PY_WASM_ELF
+// Resolve i32 arity from pack export sig tag (0..8 = N i32 args → i32).
+// SIG_AUTO / missing → assume 0 params, 1 i32 result when symbol exists.
+static bool elf_pack_sig_arity(mp_wasm_module_t *mod, const char *func,
+    uint32_t *nparams_out, uint32_t *nresults_out) {
+    uint32_t np = 0;
+    uint32_t nr = 1;
+    const uint8_t *payload = NULL;
+    uint32_t plen = 0;
+    if (mod->meta && mp_wasm_pack_find_section(mod->meta, mod->meta_len, &payload, &plen)) {
+        mp_wasm_pack_info_t info;
+        if (mp_wasm_pack_parse(payload, plen, &info)) {
+            for (uint32_t i = 0; i < info.n_exports; ++i) {
+                const mp_wasm_pack_export_t *ex = &info.exports[i];
+                if (ex->export_len == strlen(func)
+                    && memcmp(ex->export_name, func, ex->export_len) == 0) {
+                    if (ex->sig <= 8) {
+                        np = ex->sig;
+                        nr = 1;
+                    }
+                    break;
+                }
+            }
+            mp_wasm_pack_info_free(&info);
+        }
+    }
+    if (nparams_out) {
+        *nparams_out = np;
+    }
+    if (nresults_out) {
+        *nresults_out = nr;
+    }
+    return true;
+}
+
+static bool elf_func_types(mp_wasm_module_t *mod, const char *func,
+    uint32_t *nparams_out, wasm_valkind_t **params_out,
+    uint32_t *nresults_out, wasm_valkind_t **results_out) {
+    if (params_out) {
+        *params_out = NULL;
+    }
+    if (results_out) {
+        *results_out = NULL;
+    }
+    if (mp_wasm_elf_lookup(mod->elf, func) == NULL) {
+        return false;
+    }
+    uint32_t np = 0, nr = 1;
+    elf_pack_sig_arity(mod, func, &np, &nr);
+    wasm_valkind_t *params = NULL;
+    wasm_valkind_t *results = NULL;
+    if (np > 0) {
+        params = MICROPY_WASM_MALLOC(np * sizeof(*params));
+        if (params == NULL) {
+            return false;
+        }
+        for (uint32_t i = 0; i < np; ++i) {
+            params[i] = WASM_I32;
+        }
+    }
+    if (nr > 0) {
+        results = MICROPY_WASM_MALLOC(nr * sizeof(*results));
+        if (results == NULL) {
+            MICROPY_WASM_FREE(params);
+            return false;
+        }
+        for (uint32_t i = 0; i < nr; ++i) {
+            results[i] = WASM_I32;
+        }
+    }
+    if (nparams_out) {
+        *nparams_out = np;
+    }
+    if (nresults_out) {
+        *nresults_out = nr;
+    }
+    if (params_out) {
+        *params_out = params;
+    } else {
+        MICROPY_WASM_FREE(params);
+    }
+    if (results_out) {
+        *results_out = results;
+    } else {
+        MICROPY_WASM_FREE(results);
+    }
+    return true;
+}
+
+// System V x86_64: integer args pass in registers regardless of the callee's
+// declared arity, so casting to a fixed-arity i32(...) signature and calling
+// is safe as long as nargs stays within the register budget (<= 8 here,
+// matching the pack sig range in pack.h: 0..8 = N i32 args -> i32).
+#ifndef MP_WASM_ELF_MAX_ARGS
+#define MP_WASM_ELF_MAX_ARGS (8)
+#endif
+
+static bool elf_invoke_i32(void *fn, uint32_t nargs, const wasm_val_t *args,
+    uint32_t nresults, wasm_val_t *results, char *errbuf, size_t errbuf_len) {
+    if (fn == NULL) {
+        set_err(errbuf, errbuf_len, "elf: null function");
+        return false;
+    }
+    if (nargs > MP_WASM_ELF_MAX_ARGS) {
+        set_err(errbuf, errbuf_len, "elf: too many args (max 8)");
+        return false;
+    }
+    if (nresults > 1) {
+        set_err(errbuf, errbuf_len, "elf: multi-result not supported");
+        return false;
+    }
+    int32_t a[MP_WASM_ELF_MAX_ARGS] = {0};
+    for (uint32_t i = 0; i < nargs; ++i) {
+        a[i] = (args != NULL) ? args[i].of.i32 : 0;
+    }
+    int32_t rv = 0;
+    switch (nargs) {
+        case 0:
+            rv = ((int32_t (*)(void))fn)();
+            break;
+        case 1:
+            rv = ((int32_t (*)(int32_t))fn)(a[0]);
+            break;
+        case 2:
+            rv = ((int32_t (*)(int32_t, int32_t))fn)(a[0], a[1]);
+            break;
+        case 3:
+            rv = ((int32_t (*)(int32_t, int32_t, int32_t))fn)(a[0], a[1], a[2]);
+            break;
+        case 4:
+            rv = ((int32_t (*)(int32_t, int32_t, int32_t, int32_t))fn)(a[0], a[1], a[2], a[3]);
+            break;
+        case 5:
+            rv = ((int32_t (*)(int32_t, int32_t, int32_t, int32_t, int32_t))fn)(
+                a[0], a[1], a[2], a[3], a[4]);
+            break;
+        case 6:
+            rv = ((int32_t (*)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t))fn)(
+                a[0], a[1], a[2], a[3], a[4], a[5]);
+            break;
+        case 7:
+            rv = ((int32_t (*)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t))fn)(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6]);
+            break;
+        default:
+            rv = ((int32_t (*)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t))fn)(
+                a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+            break;
+    }
+    if (nresults > 0 && results != NULL) {
+        results[0].kind = WASM_I32;
+        results[0].of.i32 = rv;
+    }
+    return true;
+}
+
+static bool elf_call_vals(mp_wasm_module_t *mod, const char *func,
+    uint32_t nargs, wasm_val_t *args,
+    uint32_t nresults, wasm_val_t *results,
+    char *errbuf, size_t errbuf_len) {
+    void *fn = mp_wasm_elf_lookup(mod->elf, func);
+    if (fn == NULL) {
+        set_err(errbuf, errbuf_len, "elf: export not found");
+        return false;
+    }
+    uint32_t np = 0, nr = 1;
+    elf_pack_sig_arity(mod, func, &np, &nr);
+    if (nargs != np) {
+        set_err(errbuf, errbuf_len, "elf: bad arity");
+        return false;
+    }
+    return elf_invoke_i32(fn, nargs, args, nresults, results, errbuf, errbuf_len);
+}
+#endif
+
 bool mp_wasm_module_func_types(mp_wasm_module_t *mod, const char *func,
     uint32_t *nparams_out, wasm_valkind_t **params_out,
     uint32_t *nresults_out, wasm_valkind_t **results_out) {
@@ -334,7 +542,15 @@ bool mp_wasm_module_func_types(mp_wasm_module_t *mod, const char *func,
     if (results_out) {
         *results_out = NULL;
     }
-    if (mod == NULL || mod->inst == NULL || func == NULL) {
+    if (mod == NULL || func == NULL) {
+        return false;
+    }
+#if MICROPY_PY_WASM_ELF
+    if (mod->elf != NULL) {
+        return elf_func_types(mod, func, nparams_out, params_out, nresults_out, results_out);
+    }
+#endif
+    if (mod->inst == NULL) {
         return false;
     }
     wasm_function_inst_t f = wasm_runtime_lookup_function(mod->inst, func);
@@ -389,7 +605,15 @@ bool mp_wasm_module_func_types(mp_wasm_module_t *mod, const char *func,
 }
 
 wasm_function_inst_t mp_wasm_module_lookup_fn(mp_wasm_module_t *mod, const char *func) {
-    if (mod == NULL || mod->inst == NULL || func == NULL) {
+    if (mod == NULL || func == NULL) {
+        return NULL;
+    }
+#if MICROPY_PY_WASM_ELF
+    if (mod->elf != NULL) {
+        return (wasm_function_inst_t)mp_wasm_elf_lookup(mod->elf, func);
+    }
+#endif
+    if (mod->inst == NULL) {
         return NULL;
     }
     return wasm_runtime_lookup_function(mod->inst, func);
@@ -406,7 +630,20 @@ bool mp_wasm_module_call_fn(mp_wasm_module_t *mod, wasm_function_inst_t fn,
     }
     errbuf[0] = '\0';
 
-    if (mod == NULL || mod->exec == NULL || fn == NULL) {
+    if (mod == NULL || fn == NULL) {
+        set_err(errbuf, errbuf_len, "invalid module");
+        return false;
+    }
+#if MICROPY_PY_WASM_ELF
+    if (mod->elf != NULL) {
+        // fn is a raw function pointer (see mp_wasm_module_lookup_fn), not a
+        // WAMR object — trust caller-supplied arity, same as the WAMR hot
+        // path below (forwarders already validated nparams/nresults at
+        // register_forwarders time from the *importing* module's Wasm type).
+        return elf_invoke_i32((void *)fn, nargs, args, nresults, results, errbuf, errbuf_len);
+    }
+#endif
+    if (mod->exec == NULL) {
         set_err(errbuf, errbuf_len, "invalid module");
         return false;
     }
@@ -434,7 +671,16 @@ bool mp_wasm_module_call_vals(mp_wasm_module_t *mod, const char *func,
     }
     errbuf[0] = '\0';
 
-    if (mod == NULL || mod->exec == NULL || func == NULL) {
+    if (mod == NULL || func == NULL) {
+        set_err(errbuf, errbuf_len, "invalid module");
+        return false;
+    }
+#if MICROPY_PY_WASM_ELF
+    if (mod->elf != NULL) {
+        return elf_call_vals(mod, func, nargs, args, nresults, results, errbuf, errbuf_len);
+    }
+#endif
+    if (mod->exec == NULL) {
         set_err(errbuf, errbuf_len, "invalid module");
         return false;
     }
@@ -549,8 +795,34 @@ const uint8_t *mp_wasm_module_meta_bytes(const mp_wasm_module_t *mod, uint32_t *
     return mod->meta ? mod->meta : mod->buf;
 }
 
+#if MICROPY_PY_WASM_ELF
+typedef struct {
+    mp_wasm_module_t *mod;
+    mp_wasm_numeric_export_cb cb;
+    void *ctx;
+} elf_foreach_ctx_t;
+
+static void elf_foreach_cb(const char *name, void *addr, void *ctx_in) {
+    (void)addr;
+    elf_foreach_ctx_t *c = ctx_in;
+    uint32_t np = 0, nr = 1;
+    elf_pack_sig_arity(c->mod, name, &np, &nr);
+    c->cb(name, np, nr, c->ctx);
+}
+#endif
+
 void mp_wasm_module_foreach_numeric_export(mp_wasm_module_t *mod, mp_wasm_numeric_export_cb cb, void *ctx) {
-    if (mod == NULL || mod->module == NULL || cb == NULL) {
+    if (mod == NULL || cb == NULL) {
+        return;
+    }
+#if MICROPY_PY_WASM_ELF
+    if (mod->elf != NULL) {
+        elf_foreach_ctx_t c = { .mod = mod, .cb = cb, .ctx = ctx };
+        mp_wasm_elf_foreach_func(mod->elf, elf_foreach_cb, &c);
+        return;
+    }
+#endif
+    if (mod->module == NULL) {
         return;
     }
     int32_t n = wasm_runtime_get_export_count(mod->module);

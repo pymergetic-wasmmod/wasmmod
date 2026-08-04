@@ -3,7 +3,8 @@
 #
 # Enable from the command line (no mpconfig.h / mpconfigport.mk edits needed):
 #   make MICROPY_PY_WASM=1
-# Optional: MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX} MICROPY_WASM_VERIFY
+# Optional: MICROPY_PY_WASM_{AOT,ELF,JIT,FAST_JIT,MATRIX} MICROPY_WASM_VERIFY
+#           MICROPY_WASM_CONTAINERS=elf,aot,wasm
 # Bake host root CA(s) into the image (public DER only):
 #   make MICROPY_WASM_VERIFY=1 MICROPY_WASM_TRUST_CA=/path/to/root.crt.der
 # C defaults (optional): ports/micropython/mpconfig_wasm.h
@@ -13,6 +14,24 @@
 
 WASMMOD_DIR ?= extmod/wasmmod
 WAMR_DIR ?= $(WASMMOD_DIR)/third_party/wamr
+
+# Host I/O: unix product-mini needs pthread/dl; browser (Emscripten) does not.
+WASMMOD_EMSCRIPTEN ?= 0
+
+MICROPY_PY_WASM_AOT ?= 0
+MICROPY_PY_WASM_JIT ?= 0
+MICROPY_PY_WASM_FAST_JIT ?= 0
+MICROPY_PY_WASM_MATRIX ?= 0
+MICROPY_WASM_VERIFY ?= 0
+
+# In-tree ELF64 ET_REL loader (unix/Metal). Off for browser.
+ifeq ($(WASMMOD_EMSCRIPTEN),1)
+MICROPY_PY_WASM_ELF ?= 0
+MICROPY_WASM_CONTAINERS ?= wasm
+else
+MICROPY_PY_WASM_ELF ?= 1
+MICROPY_WASM_CONTAINERS ?= elf,aot,wasm
+endif
 
 SRC_WASMMOD = \
 	$(WASMMOD_DIR)/wasmmod.c \
@@ -30,7 +49,15 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/runtime.c \
 	$(WASMMOD_DIR)/source.c \
 	$(WASMMOD_DIR)/verify.c \
-	$(WASMMOD_DIR)/zlibutil.c
+	$(WASMMOD_DIR)/zlibutil.c \
+	$(WASMMOD_DIR)/format/common/format.c \
+	$(WASMMOD_DIR)/format/wasm/section.c \
+	$(WASMMOD_DIR)/format/aot/section.c \
+	$(WASMMOD_DIR)/format/elf/section.c
+
+ifeq ($(MICROPY_PY_WASM_ELF),1)
+SRC_WASMMOD += $(WASMMOD_DIR)/format/elf/load.c
+endif
 
 # Included after extmod.mk's PY_O += SRC_EXTMOD_C, so append objects here.
 PY_O += $(addprefix $(BUILD)/, $(SRC_WASMMOD:.c=.o))
@@ -44,12 +71,6 @@ submodules: sync-wasmmod-nested
 sync-wasmmod-nested:
 	$(Q)cd $(TOP) && git submodule update --init --recursive $(WASMMOD_DIR)
 
-MICROPY_PY_WASM_AOT ?= 0
-MICROPY_PY_WASM_JIT ?= 0
-MICROPY_PY_WASM_FAST_JIT ?= 0
-MICROPY_PY_WASM_MATRIX ?= 0
-MICROPY_WASM_VERIFY ?= 0
-
 # Config-specific WAMR tree so AOT/JIT flag flips do not require a manual wipe.
 WAMR_BUILD ?= $(BUILD)/wamr-a$(MICROPY_PY_WASM_AOT)j$(MICROPY_PY_WASM_JIT)f$(MICROPY_PY_WASM_FAST_JIT)
 
@@ -61,15 +82,15 @@ MICROPY_WASM_AOT_VERSION ?= $(shell sed -n 's/^#define AOT_CURRENT_VERSION \([0-
 INC += -I$(TOP)/$(WAMR_DIR)/core/iwasm/include
 CFLAGS_EXTMOD += -DMICROPY_PY_WASM=1 \
 	-DMICROPY_PY_WASM_AOT=$(MICROPY_PY_WASM_AOT) \
+	-DMICROPY_PY_WASM_ELF=$(MICROPY_PY_WASM_ELF) \
 	-DMICROPY_PY_WASM_JIT=$(MICROPY_PY_WASM_JIT) \
 	-DMICROPY_PY_WASM_FAST_JIT=$(MICROPY_PY_WASM_FAST_JIT) \
 	-DMICROPY_PY_WASM_MATRIX=$(MICROPY_PY_WASM_MATRIX) \
 	-DMICROPY_WASM_VERIFY=$(MICROPY_WASM_VERIFY) \
 	-DMICROPY_WASM_VERSION=\"$(MICROPY_WASM_VERSION)\" \
-	-DMICROPY_WASM_AOT_VERSION=$(MICROPY_WASM_AOT_VERSION)
+	-DMICROPY_WASM_AOT_VERSION=$(MICROPY_WASM_AOT_VERSION) \
+	-DMICROPY_WASM_CONTAINERS=\"$(MICROPY_WASM_CONTAINERS)\"
 
-# Host: unix product-mini needs pthread/dl; browser (Emscripten) does not.
-WASMMOD_EMSCRIPTEN ?= 0
 ifeq ($(WASMMOD_EMSCRIPTEN),1)
 LDFLAGS_EXTMOD += -L$(WAMR_BUILD) -liwasm -lm
 # Browser platform: js.fetch I/O (ports/micropython/webassembly/).
@@ -144,7 +165,15 @@ $(BUILD)/$(WASMMOD_DIR)/pack.o $(BUILD)/$(WASMMOD_DIR)/finder.o \
 $(BUILD)/$(WASMMOD_DIR)/forward.o $(BUILD)/$(WASMMOD_DIR)/fetch.o \
 $(BUILD)/$(WASMMOD_DIR)/cdn.o $(BUILD)/$(WASMMOD_DIR)/resolve.o \
 $(BUILD)/$(WASMMOD_DIR)/verify.o $(BUILD)/$(WASMMOD_DIR)/host.o \
-$(BUILD)/$(WASMMOD_DIR)/source.o $(BUILD)/$(WASMMOD_DIR)/zlibutil.o: $(WAMR_BUILD)/libiwasm.a
+$(BUILD)/$(WASMMOD_DIR)/source.o $(BUILD)/$(WASMMOD_DIR)/zlibutil.o \
+$(BUILD)/$(WASMMOD_DIR)/format/common/format.o \
+$(BUILD)/$(WASMMOD_DIR)/format/wasm/section.o \
+$(BUILD)/$(WASMMOD_DIR)/format/aot/section.o \
+$(BUILD)/$(WASMMOD_DIR)/format/elf/section.o: $(WAMR_BUILD)/libiwasm.a
+
+ifeq ($(MICROPY_PY_WASM_ELF),1)
+$(BUILD)/$(WASMMOD_DIR)/format/elf/load.o: $(WAMR_BUILD)/libiwasm.a
+endif
 
 ifeq ($(WASMMOD_EMSCRIPTEN),1)
 $(BUILD)/$(WASMMOD_DIR)/ports/micropython/webassembly/io_browser.o: $(WAMR_BUILD)/libiwasm.a

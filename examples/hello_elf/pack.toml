@@ -1,0 +1,26 @@
+# Pack manifest for ELF container demo (see ../../docs/PACK.md).
+
+type = "package"
+name = "hello"
+version = "0.1.0"
+impl = ["c"]
+comment = "ELF64 ET_REL twin of hello.wasm — same register/connect, no WAMR."
+
+[lifecycle]
+load = ""
+unload = ""
+
+[[exports]]
+func = "hello"
+sig = "i32"
+
+[[exports]]
+func = "add"
+sig = "i32_i32_i32"
+
+[python]
+keep_source = false
+freeze = false
+
+[pack]
+compress = false

@@ -56,13 +56,26 @@
 #define MICROPY_PY_WASM_MATRIX (0)
 #endif
 
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
 #ifndef MICROPY_WASM_VERIFY
 #define MICROPY_WASM_VERIFY (0)
 #endif
 
-// Optional default wasm.arch entry for AOT filename tags (e.g. "x86_64"); empty = plain .aot names.
+// Optional default wasm.arch entry for AOT/ELF filename tags (e.g. "x86_64"); empty = plain names.
 #ifndef MICROPY_WASM_PACK_ARCH
 #define MICROPY_WASM_PACK_ARCH ""
+#endif
+
+// Finder/CDN probe order (comma-separated): elf, aot, wasm
+#ifndef MICROPY_WASM_CONTAINERS
+#if MICROPY_PY_WASM_ELF
+#define MICROPY_WASM_CONTAINERS "elf,aot,wasm"
+#else
+#define MICROPY_WASM_CONTAINERS "aot,wasm"
+#endif
 #endif
 
 // Replaceable host I/O / alloc / verify — see extmod/wasmmod/ports/PORT.md

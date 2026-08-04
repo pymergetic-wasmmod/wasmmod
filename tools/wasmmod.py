@@ -30,8 +30,9 @@ Unified wasmmod host tooling.
 
 Commands:
   pack             Build freestanding Wasm + optional pack section
+  pack-elf         Embed wasmmod.pack into an ELF64 ET_REL object
   pack-tree        Walk nested pack.toml markers → one .wasm per package
-  sign             PKI / ECDSA sign .wasm / .aot
+  sign             PKI / ECDSA sign .wasm / .aot / .elf
   embed-ca         Bake zlib-compressed root CA DER(s) into C
   httpd            Static HTTP server for pack smoke tests
   source           Inspect / extract wasmmod.source section (Python)
@@ -59,6 +60,7 @@ TOOLS_DIR = Path(__file__).resolve().parent
 # subcommand → module file stem (without .py)
 COMMANDS: dict[str, str] = {
     "pack": "wasmmod_pack",
+    "pack-elf": "wasmmod_pack_elf",
     "pack-tree": "wasmmod_pack_tree",
     "sign": "wasmmod_sign",
     "embed-ca": "wasmmod_embed_ca",

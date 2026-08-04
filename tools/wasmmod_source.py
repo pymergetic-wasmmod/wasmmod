@@ -151,15 +151,23 @@ def extract_aot_custom_section(aot: bytes, section_name: str) -> bytes | None:
 
 
 def extract_custom_section(buf: bytes, section_name: str) -> bytes | None:
-    """Named custom payload from a .wasm or .aot (1:1 section names)."""
+    """Named custom payload from a .wasm, .aot, or .elf (1:1 section names)."""
     if len(buf) >= 4 and buf[:4] == b"\x00asm":
         return extract_wasm_custom_section(buf, section_name)
     if len(buf) >= 4 and buf[:4] == b"\x00aot":
         return extract_aot_custom_section(buf, section_name)
+    if len(buf) >= 4 and buf[:4] == b"\x7fELF":
+        from wasmmod_elf import find_section
+
+        return find_section(buf, section_name)
     return None
 
 
 def append_custom_section(wasm: bytes, section_name: str, payload: bytes) -> bytes:
+    if len(wasm) >= 4 and wasm[:4] == b"\x7fELF":
+        from wasmmod_elf import append_section
+
+        return append_section(wasm, section_name, payload)
     name_b = section_name.encode("utf-8")
     body = uleb128(len(name_b)) + name_b + payload
     return wasm + bytes([0]) + uleb128(len(body)) + body

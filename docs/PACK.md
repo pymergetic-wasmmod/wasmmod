@@ -243,16 +243,17 @@ Mirror Python’s package vs module layout so discovery feels obvious:
 
 | Artifact | Meaning | `sys.modules` root |
 |----------|---------|---------------------|
-| `mypkg.wasm` / `mypkg.aot` | **Module pack** (interp / AOT; name from manifest or stem) | `mypkg` |
-| `mypkg/__init__.wasm` / `.aot` | **Package pack** (directory is the package) | `mypkg` |
-| `mypkg/sub.wasm` / `.aot` | Child pack under package `mypkg` | `mypkg.sub` (nested pack) |
-| `mypkg/sub/__init__.wasm` / `.aot` | Nested package pack | `mypkg.sub` |
+| `mypkg.wasm` / `mypkg.aot` / `mypkg.elf` | **Module pack** (interp / AOT / in-tree ELF; name from manifest or stem) | `mypkg` |
+| `mypkg/__init__.wasm` / `.aot` / `.elf` | **Package pack** (directory is the package) | `mypkg` |
+| `mypkg/sub.wasm` / `.aot` / `.elf` | Child pack under package `mypkg` | `mypkg.sub` (nested pack) |
+| `mypkg/sub/__init__.wasm` / `.aot` / `.elf` | Nested package pack | `mypkg.sub` |
 | `mypkg.sub.wasm` | Flat dotted filename (e.g. under `packs/`) | `mypkg.sub` |
 | `mypkg.sub.aot{N}` | Versioned **AOT** format (`N` = WAMR `AOT_CURRENT_VERSION`, e.g. `.aot6`) | `mypkg.sub` |
 | `mypkg.sub.<arch>.aot{N}` | Arch-tagged AOT (`wasm.arch` / `MICROPY_WASM_PACK_ARCH`) | `mypkg.sub` |
 | `mypkg.sub.aot` | Legacy unversioned AOT (still probed after `.aot{N}`) | `mypkg.sub` |
+| `mypkg.sub.elf` / `mypkg.sub.<arch>.elf` | **ELF64 ET_REL** pack (in-tree reloc loader; not `dlopen`) | `mypkg.sub` |
 
-Prefer `.aot` over `.wasm` when `MICROPY_PY_WASM_AOT` is enabled (see AOT).
+Probe order is `MICROPY_WASM_CONTAINERS` (with `MICROPY_PY_WASM_ELF=1`: default `elf,aot,wasm`; otherwise `wasm`). Browser builds use `wasm` only.
 
 Rules:
 
@@ -371,6 +372,17 @@ Hook must be careful to:
   stdlib names unless a pack is intentionally on `wasm.path` first
 - Re-entrancy: loading a pack that `import`s `.py` children must not
   recurse forever (children come from the pack VFS, not the hook)
+
+## ELF (in-tree ET_REL — no WAMR, no `dlopen`)
+
+ELF packs are interchangeable containers beside `.wasm` / `.aot`:
+
+- Filename: `name.elf` or `name.<arch>.elf` (+ optional `.zlib`)
+- Kind: **ELF64 ET_REL** under the hood; wasmmod maps, relocates, and calls
+- Metadata: `SHT_PROGBITS` sections `.wasmmod.pack` / `.imports` / `.deps` / `.sig` / `.source`
+- Register / connect / MPWI: **same** as Wasm — only the execute engine differs
+- Build: `gcc -c -ffreestanding -fno-pic … -o hello.o` then `wasmmod.py pack-elf`
+- Enable: `MICROPY_PY_WASM_ELF=1`; preference via `MICROPY_WASM_CONTAINERS`
 
 ## AOT (in addition to interpreter Wasm)
 

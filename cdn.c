@@ -15,6 +15,9 @@
 #ifndef MICROPY_PY_WASM_AOT
 #define MICROPY_PY_WASM_AOT (0)
 #endif
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
 
 #if MICROPY_PY_WASM
 
@@ -158,11 +161,12 @@ static bool try_fetch_uri(const char *uri, uint8_t **out_bytes, uint32_t *out_le
         uint32_t n = *out_len;
         bool ok_magic = n >= 4
             && ((b[0] == 0x00 && b[1] == 'a' && b[2] == 's' && b[3] == 'm')
-                || (b[0] == 0x00 && b[1] == 'a' && b[2] == 'o' && b[3] == 't'));
+                || (b[0] == 0x00 && b[1] == 'a' && b[2] == 'o' && b[3] == 't')
+                || (b[0] == 0x7f && b[1] == 'E' && b[2] == 'L' && b[3] == 'F'));
         if (!ok_magic) {
             if (errbuf && errbuf_len) {
                 snprintf(errbuf, errbuf_len,
-                    "cdn: not a wasm/aot artifact (len=%u magic=%02x%02x%02x%02x)",
+                    "cdn: not a wasm/aot/elf artifact (len=%u magic=%02x%02x%02x%02x)",
                     (unsigned)n,
                     n > 0 ? b[0] : 0, n > 1 ? b[1] : 0,
                     n > 2 ? b[2] : 0, n > 3 ? b[3] : 0);
@@ -186,20 +190,57 @@ static bool metal_fetch(const char *name, const char *version,
     }
     const char *ver = (version != NULL) ? version : "";
 
-    // One host AOT format tag only (WAMR AOT_CURRENT_VERSION → ".aotN").
-    // When AOT is enabled, prefer that artifact; else wasm. Always try .zlib first.
-    const char *exts[5];
+    // Probe order follows MICROPY_WASM_CONTAINERS (zlib preferred per try_fetch path).
+    const char *exts[12];
     unsigned n = 0;
-    #if MICROPY_PY_WASM_AOT
+#ifndef MICROPY_WASM_CONTAINERS
+#define MICROPY_WASM_CONTAINERS "elf,aot,wasm"
+#endif
+#if MICROPY_PY_WASM_AOT
     char aot_ext[16];
     char aot_zlib[24];
     mp_wasm_aot_format_ext(aot_ext, sizeof(aot_ext));
     snprintf(aot_zlib, sizeof(aot_zlib), "%s.zlib", aot_ext);
-    exts[n++] = aot_zlib;
-    exts[n++] = aot_ext;
-    #endif
-    exts[n++] = ".wasm.zlib";
-    exts[n++] = ".wasm";
+#endif
+    {
+        const char *pref = MICROPY_WASM_CONTAINERS;
+        const char *p = pref;
+        while (*p && n + 2 < 12) {
+            while (*p == ',' || *p == ' ') {
+                p++;
+            }
+            if (!*p) {
+                break;
+            }
+            const char *start = p;
+            while (*p && *p != ',' && *p != ' ') {
+                p++;
+            }
+            size_t kn = (size_t)(p - start);
+#if MICROPY_PY_WASM_ELF
+            if (kn == 3 && memcmp(start, "elf", 3) == 0) {
+                exts[n++] = ".elf.zlib";
+                exts[n++] = ".elf";
+                continue;
+            }
+#endif
+#if MICROPY_PY_WASM_AOT
+            if (kn == 3 && memcmp(start, "aot", 3) == 0) {
+                exts[n++] = aot_zlib;
+                exts[n++] = aot_ext;
+                continue;
+            }
+#endif
+            if (kn == 4 && memcmp(start, "wasm", 4) == 0) {
+                exts[n++] = ".wasm.zlib";
+                exts[n++] = ".wasm";
+            }
+        }
+    }
+    if (n == 0) {
+        exts[n++] = ".wasm.zlib";
+        exts[n++] = ".wasm";
+    }
     exts[n] = NULL;
 
     char uri[MP_WASM_CDN_BASE_MAX + 128];

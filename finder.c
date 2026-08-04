@@ -51,6 +51,10 @@
 #define MICROPY_PY_WASM_AOT (0)
 #endif
 
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
 #ifndef MICROPY_WASM_AOT_VERSION
 #define MICROPY_WASM_AOT_VERSION (0)
 #endif
@@ -83,6 +87,21 @@ size_t mp_wasm_aot_suffix_len(const char *s) {
 
 bool mp_wasm_path_is_aot(const char *path) {
     return mp_wasm_aot_suffix_len(path) > 0;
+}
+
+size_t mp_wasm_elf_suffix_len_n(const char *s, size_t n) {
+    if (s == NULL || n < 4) {
+        return 0;
+    }
+    return memcmp(s + n - 4, ".elf", 4) == 0 ? 4 : 0;
+}
+
+size_t mp_wasm_elf_suffix_len(const char *s) {
+    return s ? mp_wasm_elf_suffix_len_n(s, strlen(s)) : 0;
+}
+
+bool mp_wasm_path_is_elf(const char *path) {
+    return mp_wasm_elf_suffix_len(path) > 0;
 }
 
 void mp_wasm_aot_format_ext(char *buf, size_t buflen) {
@@ -201,12 +220,10 @@ static bool try_one_arch_ext(const char *root, const char *stem, bool allow_pkg,
     return try_stem_ext(root, stem, arch, ext, url, path_out);
 }
 
-// .wasm is portable — no arch infix. .aotN is the versioned native format
-// (N = host AOT_CURRENT_VERSION); try wasm.arch tags, then plain .aotN,
-// then legacy unversioned .aot, then portable .wasm.
-static bool try_stem_variants(const char *root, const char *stem, bool allow_pkg,
+// Container preference (MICROPY_WASM_CONTAINERS): elf, aot, wasm.
+static bool try_aot_variants(const char *root, const char *stem, bool allow_pkg,
     bool url, vstr_t *path_out) {
-    #if MICROPY_PY_WASM_AOT
+#if MICROPY_PY_WASM_AOT
     mp_wasm_arch_ensure();
     size_t n_arch = 0;
     mp_obj_t *arch_items = NULL;
@@ -230,7 +247,6 @@ static bool try_stem_variants(const char *root, const char *stem, bool allow_pkg
     if (try_one_arch_ext(root, stem, allow_pkg, "", aot_ext, url, path_out)) {
         return true;
     }
-    // Legacy unversioned .aot (pre-format-tag publishes).
     if (strcmp(aot_ext, ".aot") != 0) {
         for (size_t ai = 0; ai < n_arch; ++ai) {
             if (!mp_obj_is_str(arch_items[ai])) {
@@ -248,7 +264,87 @@ static bool try_stem_variants(const char *root, const char *stem, bool allow_pkg
             return true;
         }
     }
-    #endif
+#else
+    (void)root;
+    (void)stem;
+    (void)allow_pkg;
+    (void)url;
+    (void)path_out;
+#endif
+    return false;
+}
+
+static bool try_elf_variants(const char *root, const char *stem, bool allow_pkg,
+    bool url, vstr_t *path_out) {
+#if MICROPY_PY_WASM_ELF
+    mp_wasm_arch_ensure();
+    size_t n_arch = 0;
+    mp_obj_t *arch_items = NULL;
+    mp_obj_list_get(mp_wasm_arch_obj(), &n_arch, &arch_items);
+    for (size_t ai = 0; ai < n_arch; ++ai) {
+        if (!mp_obj_is_str(arch_items[ai])) {
+            continue;
+        }
+        const char *arch = mp_obj_str_get_str(arch_items[ai]);
+        if (arch == NULL || arch[0] == '\0') {
+            continue;
+        }
+        if (try_one_arch_ext(root, stem, allow_pkg, arch, ".elf", url, path_out)) {
+            return true;
+        }
+    }
+    return try_one_arch_ext(root, stem, allow_pkg, "", ".elf", url, path_out);
+#else
+    (void)root;
+    (void)stem;
+    (void)allow_pkg;
+    (void)url;
+    (void)path_out;
+    return false;
+#endif
+}
+
+// Preference from MICROPY_WASM_CONTAINERS (e.g. "elf,aot,wasm").
+static bool try_stem_variants(const char *root, const char *stem, bool allow_pkg,
+    bool url, vstr_t *path_out) {
+#ifndef MICROPY_WASM_CONTAINERS
+#define MICROPY_WASM_CONTAINERS "elf,aot,wasm"
+#endif
+    const char *pref = MICROPY_WASM_CONTAINERS;
+    const char *p = pref;
+    while (*p) {
+        while (*p == ',' || *p == ' ') {
+            p++;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        const char *start = p;
+        while (*p && *p != ',' && *p != ' ') {
+            p++;
+        }
+        size_t n = (size_t)(p - start);
+        if (n == 3 && memcmp(start, "elf", 3) == 0) {
+            if (try_elf_variants(root, stem, allow_pkg, url, path_out)) {
+                return true;
+            }
+        } else if (n == 3 && memcmp(start, "aot", 3) == 0) {
+            if (try_aot_variants(root, stem, allow_pkg, url, path_out)) {
+                return true;
+            }
+        } else if (n == 4 && memcmp(start, "wasm", 4) == 0) {
+            if (try_one_arch_ext(root, stem, allow_pkg, "", ".wasm", url, path_out)) {
+                return true;
+            }
+        }
+    }
+    // Fallback if preference string empty/unknown.
+    if (try_elf_variants(root, stem, allow_pkg, url, path_out)) {
+        return true;
+    }
+    if (try_aot_variants(root, stem, allow_pkg, url, path_out)) {
+        return true;
+    }
     return try_one_arch_ext(root, stem, allow_pkg, "", ".wasm", url, path_out);
 }
 
@@ -393,22 +489,25 @@ static mp_obj_t ensure_namespace(const char *dotted_name) {
 }
 
 // Map artifact filename → dotted pack stem. Strips optional .zlib, then
-// .wasm / .aotN / .aot and a known AOT arch infix. Returns false if not a pack artifact.
+// .wasm / .elf / .aotN / .aot and a known arch infix. Returns false if not a pack artifact.
 static bool artifact_to_stem(const char *fname, char *buf, size_t buf_len) {
     size_t n = strlen(fname);
     if (n > 5 && memcmp(fname + n - 5, ".zlib", 5) == 0) {
         n -= 5;
     }
-    bool aot = false;
+    bool tagged = false;
     if (n > 5 && memcmp(fname + n - 5, ".wasm", 5) == 0) {
         n -= 5;
+    } else if (n > 4 && memcmp(fname + n - 4, ".elf", 4) == 0) {
+        n -= 4;
+        tagged = true;
     } else {
         size_t alen = mp_wasm_aot_suffix_len_n(fname, n);
         if (alen == 0) {
             return false;
         }
         n -= alen;
-        aot = true;
+        tagged = true;
     }
     if (n == 0 || n >= buf_len) {
         return false;
@@ -416,8 +515,7 @@ static bool artifact_to_stem(const char *fname, char *buf, size_t buf_len) {
     memcpy(buf, fname, n);
     buf[n] = '\0';
 
-    #if MICROPY_PY_WASM_AOT
-    if (aot) {
+    if (tagged) {
         mp_wasm_arch_ensure();
         size_t n_arch = 0;
         mp_obj_t *arch_items = NULL;
@@ -438,9 +536,6 @@ static bool artifact_to_stem(const char *fname, char *buf, size_t buf_len) {
             }
         }
     }
-    #else
-    (void)aot;
-    #endif
     return n > 0;
 }
 

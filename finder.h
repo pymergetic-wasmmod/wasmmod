@@ -72,4 +72,9 @@ bool mp_wasm_path_is_aot(const char *path);
 // Write host format ext into buf (e.g. ".aot6"); falls back to ".aot".
 void mp_wasm_aot_format_ext(char *buf, size_t buflen);
 
+// Length of trailing ".elf" suffix in s[0..n), or 0 (in-tree ELF64 engine).
+size_t mp_wasm_elf_suffix_len_n(const char *s, size_t n);
+size_t mp_wasm_elf_suffix_len(const char *s);
+bool mp_wasm_path_is_elf(const char *path);
+
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_FINDER_H

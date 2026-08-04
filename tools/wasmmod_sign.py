@@ -24,10 +24,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """
-Sign .wasm / .aot for MICROPY_WASM_VERIFY (ECDSA-P256 + SHA-256).
+Sign .wasm / .aot / .elf for MICROPY_WASM_VERIFY (ECDSA-P256 + SHA-256).
 
 Embed-only: writes `wasmmod.sig` (MPWS: sig + chain) into the artifact.
-Digest = artifact bytes without that section (same for .wasm and .aot).
+Digest = artifact bytes without that section (same for .wasm, .aot, and .elf).
 
   tools/wasmmod.py sign gen-pki -o .keys
   tools/wasmmod.py sign sign --key .keys/sign/leaf.key.pem \\
@@ -346,7 +346,12 @@ def without_sig_section(buf: bytes) -> bytes:
                 break
         return bytes(out)
 
-    raise SystemExit("not a .wasm or .aot (need \\0asm / \\0aot magic)")
+    if buf[:4] == b"\x7fELF":
+        from wasmmod_elf import strip_section
+
+        return strip_section(buf, SIG_SECTION)
+
+    raise SystemExit("not a .wasm/.aot/.elf (need \\0asm / \\0aot / \\x7fELF magic)")
 
 
 def append_sig_section(buf: bytes, payload: bytes) -> bytes:
@@ -374,7 +379,12 @@ def append_sig_section(buf: bytes, payload: bytes) -> bytes:
         )
         return buf + struct.pack("<II", AOT_SECTION_TYPE_CUSTOM, len(body)) + body
 
-    raise SystemExit("not a .wasm or .aot (need \\0asm / \\0aot magic)")
+    if buf[:4] == b"\x7fELF":
+        from wasmmod_elf import append_section
+
+        return append_section(buf, SIG_SECTION, payload)
+
+    raise SystemExit("not a .wasm/.aot/.elf (need \\0asm / \\0aot / \\x7fELF magic)")
 
 
 def _read_uleb(buf: bytes, i: int) -> tuple[int, int]:
@@ -658,7 +668,7 @@ def main() -> int:
     p.add_argument("--sub-ca", action="store_true", help="insert intermediate CA under root")
     p.add_argument("--days", type=int, default=3650, help="cert lifetime (default 10y)")
 
-    s = sub.add_parser("sign", help="embed wasmmod.sig (MPWS) into .wasm / .aot")
+    s = sub.add_parser("sign", help="embed wasmmod.sig (MPWS) into .wasm / .aot / .elf")
     s.add_argument("--key", type=Path, required=True, help="private key PEM (leaf or raw)")
     s.add_argument("--cert", type=Path, help="leaf cert DER → MPWS chain (prefer --chain)")
     s.add_argument(
@@ -671,15 +681,15 @@ def main() -> int:
         action="store_true",
         help=argparse.SUPPRESS,  # legacy no-op; embed is the only mode
     )
-    s.add_argument("target", type=Path, help=".wasm / .aot path")
+    s.add_argument("target", type=Path, help=".wasm / .aot / .elf path")
 
     i = sub.add_parser("info", help="inspect embedded wasmmod.sig")
-    i.add_argument("target", type=Path, help=".wasm / .aot path")
+    i.add_argument("target", type=Path, help=".wasm / .aot / .elf path")
 
     v = sub.add_parser("verify", help="verify embedded wasmmod.sig (openssl)")
     v.add_argument("--trust", type=Path, help="root CA DER/PEM (PKI; uses MPWS chain)")
     v.add_argument("--pubkey", type=Path, help="pinned leaf SPKI DER or PEM (skip chain)")
-    v.add_argument("target", type=Path, help=".wasm / .aot path")
+    v.add_argument("target", type=Path, help=".wasm / .aot / .elf path")
 
     args = ap.parse_args()
     if args.cmd == "gen-key":

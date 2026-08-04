@@ -165,7 +165,7 @@ fn read_uleb(buf: &[u8], i: &mut usize) -> Result<u32> {
     }
 }
 
-/// Extract payload of a named custom section from `.wasm` or `.aot`.
+/// Extract payload of a named custom section from `.wasm`, `.aot`, or `.elf`.
 pub fn extract_custom_section<'a>(buf: &'a [u8], name: &str) -> Result<Option<&'a [u8]>> {
     if buf.len() >= 4 && &buf[0..4] == b"\0asm" {
         return extract_wasm_custom_section(buf, name);
@@ -173,7 +173,66 @@ pub fn extract_custom_section<'a>(buf: &'a [u8], name: &str) -> Result<Option<&'
     if buf.len() >= 4 && &buf[0..4] == b"\0aot" {
         return extract_aot_custom_section(buf, name);
     }
+    if buf.len() >= 4 && &buf[0..4] == b"\x7fELF" {
+        return extract_elf_section(buf, name);
+    }
     Err(Error::NotModule)
+}
+
+fn extract_elf_section<'a>(elf: &'a [u8], name: &str) -> Result<Option<&'a [u8]>> {
+    if elf.len() < 64 || elf[4] != 2 || elf[5] != 1 {
+        return Err(Error::Truncated);
+    }
+    let shoff = u64::from_le_bytes(elf[40..48].try_into().unwrap()) as usize;
+    let shentsize = u16::from_le_bytes(elf[58..60].try_into().unwrap()) as usize;
+    let shnum = u16::from_le_bytes(elf[60..62].try_into().unwrap()) as usize;
+    let shstrndx = u16::from_le_bytes(elf[62..64].try_into().unwrap()) as usize;
+    if shentsize < 64 || shnum == 0 || shstrndx >= shnum {
+        return Err(Error::Truncated);
+    }
+    if shoff + shnum * shentsize > elf.len() {
+        return Err(Error::Truncated);
+    }
+    let shstr = &elf[shoff + shstrndx * shentsize..];
+    let str_off = u64::from_le_bytes(shstr[24..32].try_into().unwrap()) as usize;
+    let str_sz = u64::from_le_bytes(shstr[32..40].try_into().unwrap()) as usize;
+    if str_off + str_sz > elf.len() {
+        return Err(Error::Truncated);
+    }
+    let strtab = &elf[str_off..str_off + str_sz];
+    let want = name.as_bytes();
+    let want_dot = if name.starts_with('.') {
+        name.as_bytes().to_vec()
+    } else {
+        format!(".{name}").into_bytes()
+    };
+    for i in 0..shnum {
+        let sh = &elf[shoff + i * shentsize..];
+        let name_off = u32::from_le_bytes(sh[0..4].try_into().unwrap()) as usize;
+        let typ = u32::from_le_bytes(sh[4..8].try_into().unwrap());
+        if typ != 1 && typ != 7 {
+            continue; // PROGBITS / NOTE
+        }
+        if name_off >= strtab.len() {
+            continue;
+        }
+        let end = strtab[name_off..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|p| name_off + p)
+            .unwrap_or(strtab.len());
+        let sname = &strtab[name_off..end];
+        if sname != want && sname != want_dot.as_slice() {
+            continue;
+        }
+        let off = u64::from_le_bytes(sh[24..32].try_into().unwrap()) as usize;
+        let sz = u64::from_le_bytes(sh[32..40].try_into().unwrap()) as usize;
+        if off + sz > elf.len() {
+            return Err(Error::Truncated);
+        }
+        return Ok(Some(&elf[off..off + sz]));
+    }
+    Ok(None)
 }
 
 fn extract_wasm_custom_section<'a>(wasm: &'a [u8], name: &str) -> Result<Option<&'a [u8]>> {

@@ -32,6 +32,14 @@
 
 #include "wasm_export.h"
 
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
+#if MICROPY_PY_WASM_ELF
+#include "extmod/wasmmod/format/elf/load.h"
+#endif
+
 // Match MicroPython qstr length (see qstr.h); +1 for NUL.
 #ifndef MP_WASM_NAME_MAX
 #define MP_WASM_NAME_MAX (255)

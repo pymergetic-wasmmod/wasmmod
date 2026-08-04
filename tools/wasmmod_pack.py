@@ -590,6 +590,10 @@ def aot_output_path(wasm_out: Path, explicit: str | Path | None = None) -> Path:
 
 
 def append_custom_section(wasm: bytes, section_name: str, payload: bytes) -> bytes:
+    if len(wasm) >= 4 and wasm[:4] == b"\x7fELF":
+        from wasmmod_elf import append_section
+
+        return append_section(wasm, section_name, payload)
     name_b = section_name.encode("utf-8")
     body = uleb128(len(name_b)) + name_b + payload
     return wasm + bytes([0]) + uleb128(len(body)) + body
@@ -1293,6 +1297,10 @@ def main() -> int:
 
 
 def extract_custom_section(wasm: bytes, section_name: str) -> bytes | None:
+    if len(wasm) >= 4 and wasm[:4] == b"\x7fELF":
+        from wasmmod_elf import find_section
+
+        return find_section(wasm, section_name)
     if len(wasm) < 8 or wasm[:4] != b"\x00asm":
         return None
     name_b = section_name.encode("utf-8")

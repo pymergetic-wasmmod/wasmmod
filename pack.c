@@ -35,6 +35,7 @@
 #include "extmod/wasmmod/pack.h"
 
 #include "extmod/wasmmod/alloc.h"
+#include "extmod/wasmmod/format/common/format.h"
 #include "extmod/wasmmod/zlibutil.h"
 
 bool mp_wasm_read_uleb(const uint8_t **p, const uint8_t *end, uint32_t *out) {
@@ -86,78 +87,7 @@ bool mp_wasm_find_section_id(const uint8_t *wasm, uint32_t len, uint8_t want_id,
 }
 
 bool mp_wasm_find_custom_section(const uint8_t *buf, uint32_t len, const char *name, const uint8_t **payload, uint32_t *payload_len) {
-    if (buf == NULL || len < 8 || name == NULL) {
-        return false;
-    }
-    // Wasm custom section (id 0).
-    if (buf[0] == 0x00 && buf[1] == 'a' && buf[2] == 's' && buf[3] == 'm') {
-        const uint8_t *p = buf + 8;
-        const uint8_t *end = buf + len;
-        const size_t want_len = strlen(name);
-
-        while (p < end) {
-            uint8_t id = *p++;
-            uint32_t size;
-            if (!mp_wasm_read_uleb(&p, end, &size) || p + size > end) {
-                return false;
-            }
-            const uint8_t *sec = p;
-            p += size;
-            if (id != 0) {
-                continue;
-            }
-            const uint8_t *q = sec;
-            uint32_t name_len;
-            if (!mp_wasm_read_uleb(&q, sec + size, &name_len) || q + name_len > sec + size) {
-                continue;
-            }
-            if (name_len == want_len && memcmp(q, name, want_len) == 0) {
-                q += name_len;
-                *payload = q;
-                *payload_len = (uint32_t)((sec + size) - q);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // WAMR AOT: section type 100 (CUSTOM), sub-type 0 (RAW), u16 name incl. NUL.
-    if (buf[0] == 0x00 && buf[1] == 'a' && buf[2] == 'o' && buf[3] == 't') {
-        const uint8_t *end = buf + len;
-        const size_t want_len = strlen(name);
-        uintptr_t p = 8;
-        while (p + 8 <= len) {
-            uint32_t typ = read_u32_le(buf + p);
-            uint32_t size = read_u32_le(buf + p + 4);
-            const uint8_t *content = buf + p + 8;
-            if (content + size > end || size > 0x10000000u) {
-                return false;
-            }
-            if (typ == 100 && size >= 6) {
-                uint32_t sub = read_u32_le(content);
-                if (sub == 0) {
-                    uint16_t slen = read_u16_le(content + 4);
-                    const uint8_t *nb = content + 6;
-                    if (nb + slen <= content + size) {
-                        size_t bare = slen;
-                        if (bare > 0 && nb[bare - 1] == 0) {
-                            bare--;
-                        }
-                        if (bare == want_len && memcmp(nb, name, want_len) == 0) {
-                            *payload = nb + slen;
-                            *payload_len = (uint32_t)((content + size) - (nb + slen));
-                            return true;
-                        }
-                    }
-                }
-            }
-            // Next header is 4-aligned (WAMR read_uint32 align_ptr).
-            p = ((uintptr_t)(content + size - buf) + 3u) & ~(uintptr_t)3u;
-        }
-        return false;
-    }
-
-    return false;
+    return mp_wasm_format_find_section(buf, len, name, payload, payload_len);
 }
 
 bool mp_wasm_pack_find_section(const uint8_t *wasm, uint32_t len, const uint8_t **payload, uint32_t *payload_len) {
