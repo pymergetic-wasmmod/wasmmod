@@ -96,6 +96,11 @@ struct mp_wasm_module_t {
 #endif
 };
 
+#if MICROPY_PY_WASM_ELF
+static void *elf_resolve_import(const char *name, void *ctx);
+void mp_wasm_elf_plt_invalidate(mp_wasm_module_t *mod);
+#endif
+
 static int runtime_ready;
 
 static void *mp_wasm_malloc_cb(size_t size) {
@@ -263,7 +268,8 @@ mp_wasm_module_t *mp_wasm_module_load_ex(const uint8_t *code, uint32_t code_len,
 
 #if MICROPY_PY_WASM_ELF
     if (kind == MP_WASM_KIND_ELF) {
-        if (!mp_wasm_elf_image_load(mod->buf, mod->buf_len, &mod->elf, errbuf, errbuf_len)) {
+        if (!mp_wasm_elf_image_load(mod->buf, mod->buf_len, elf_resolve_import, mod,
+                &mod->elf, errbuf, errbuf_len)) {
             goto fail_mod;
         }
         mp_wasm_registry_add(mod);
@@ -321,6 +327,7 @@ void mp_wasm_module_close(mp_wasm_module_t *mod) {
     }
     mp_wasm_registry_remove(mod);
 #if MICROPY_PY_WASM_ELF
+    mp_wasm_elf_plt_invalidate(mod);
     if (mod->elf) {
         mp_wasm_elf_image_free(mod->elf);
         mod->elf = NULL;
@@ -391,6 +398,184 @@ static bool elf_pack_sig_arity(mp_wasm_module_t *mod, const char *func,
         *nresults_out = nr;
     }
     return true;
+}
+
+// ELF→Wasm PLT: fixed C stubs (no JIT). Each slot holds a peer + export name;
+// stubs take up to 8 i32 args (System V unused regs ignored) and return i32.
+#ifndef MP_WASM_ELF_PLT_SLOTS
+#define MP_WASM_ELF_PLT_SLOTS (32)
+#endif
+
+typedef struct {
+    bool used;
+    mp_wasm_module_t *mod;
+    char func[MP_WASM_NAME_MAX + 1];
+    uint32_t nargs;
+} mp_wasm_elf_plt_slot_t;
+
+static mp_wasm_elf_plt_slot_t elf_plt_slots[MP_WASM_ELF_PLT_SLOTS];
+
+static int32_t elf_plt_dispatch(unsigned idx, int32_t a0, int32_t a1, int32_t a2, int32_t a3,
+    int32_t a4, int32_t a5, int32_t a6, int32_t a7) {
+    if (idx >= MP_WASM_ELF_PLT_SLOTS || !elf_plt_slots[idx].used || elf_plt_slots[idx].mod == NULL) {
+        return 0;
+    }
+    mp_wasm_elf_plt_slot_t *s = &elf_plt_slots[idx];
+    wasm_function_inst_t fn = mp_wasm_module_lookup_fn(s->mod, s->func);
+    if (fn == NULL) {
+        return 0;
+    }
+    wasm_val_t args[8];
+    wasm_val_t result;
+    memset(args, 0, sizeof(args));
+    memset(&result, 0, sizeof(result));
+    const int32_t av[8] = { a0, a1, a2, a3, a4, a5, a6, a7 };
+    uint32_t n = s->nargs;
+    if (n > 8) {
+        n = 8;
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        args[i].kind = WASM_I32;
+        args[i].of.i32 = av[i];
+    }
+    if (!mp_wasm_module_call_fn(s->mod, fn, n, args, 1, &result, NULL, 0)) {
+        return 0;
+    }
+    return result.of.i32;
+}
+
+#define MP_WASM_ELF_PLT_STUB(i) \
+    static int32_t elf_plt_stub_##i(int32_t a0, int32_t a1, int32_t a2, int32_t a3, \
+        int32_t a4, int32_t a5, int32_t a6, int32_t a7) { \
+        return elf_plt_dispatch((unsigned)(i), a0, a1, a2, a3, a4, a5, a6, a7); \
+    }
+
+MP_WASM_ELF_PLT_STUB(0)  MP_WASM_ELF_PLT_STUB(1)  MP_WASM_ELF_PLT_STUB(2)  MP_WASM_ELF_PLT_STUB(3)
+MP_WASM_ELF_PLT_STUB(4)  MP_WASM_ELF_PLT_STUB(5)  MP_WASM_ELF_PLT_STUB(6)  MP_WASM_ELF_PLT_STUB(7)
+MP_WASM_ELF_PLT_STUB(8)  MP_WASM_ELF_PLT_STUB(9)  MP_WASM_ELF_PLT_STUB(10) MP_WASM_ELF_PLT_STUB(11)
+MP_WASM_ELF_PLT_STUB(12) MP_WASM_ELF_PLT_STUB(13) MP_WASM_ELF_PLT_STUB(14) MP_WASM_ELF_PLT_STUB(15)
+MP_WASM_ELF_PLT_STUB(16) MP_WASM_ELF_PLT_STUB(17) MP_WASM_ELF_PLT_STUB(18) MP_WASM_ELF_PLT_STUB(19)
+MP_WASM_ELF_PLT_STUB(20) MP_WASM_ELF_PLT_STUB(21) MP_WASM_ELF_PLT_STUB(22) MP_WASM_ELF_PLT_STUB(23)
+MP_WASM_ELF_PLT_STUB(24) MP_WASM_ELF_PLT_STUB(25) MP_WASM_ELF_PLT_STUB(26) MP_WASM_ELF_PLT_STUB(27)
+MP_WASM_ELF_PLT_STUB(28) MP_WASM_ELF_PLT_STUB(29) MP_WASM_ELF_PLT_STUB(30) MP_WASM_ELF_PLT_STUB(31)
+
+#undef MP_WASM_ELF_PLT_STUB
+
+typedef int32_t (*mp_wasm_elf_plt_fn_t)(int32_t, int32_t, int32_t, int32_t,
+    int32_t, int32_t, int32_t, int32_t);
+
+static mp_wasm_elf_plt_fn_t elf_plt_fns[MP_WASM_ELF_PLT_SLOTS] = {
+    elf_plt_stub_0,  elf_plt_stub_1,  elf_plt_stub_2,  elf_plt_stub_3,
+    elf_plt_stub_4,  elf_plt_stub_5,  elf_plt_stub_6,  elf_plt_stub_7,
+    elf_plt_stub_8,  elf_plt_stub_9,  elf_plt_stub_10, elf_plt_stub_11,
+    elf_plt_stub_12, elf_plt_stub_13, elf_plt_stub_14, elf_plt_stub_15,
+    elf_plt_stub_16, elf_plt_stub_17, elf_plt_stub_18, elf_plt_stub_19,
+    elf_plt_stub_20, elf_plt_stub_21, elf_plt_stub_22, elf_plt_stub_23,
+    elf_plt_stub_24, elf_plt_stub_25, elf_plt_stub_26, elf_plt_stub_27,
+    elf_plt_stub_28, elf_plt_stub_29, elf_plt_stub_30, elf_plt_stub_31,
+};
+
+void mp_wasm_elf_plt_invalidate(mp_wasm_module_t *mod) {
+    if (mod == NULL) {
+        return;
+    }
+    for (unsigned i = 0; i < MP_WASM_ELF_PLT_SLOTS; ++i) {
+        if (elf_plt_slots[i].used && elf_plt_slots[i].mod == mod) {
+            elf_plt_slots[i].used = false;
+            elf_plt_slots[i].mod = NULL;
+            elf_plt_slots[i].func[0] = '\0';
+            elf_plt_slots[i].nargs = 0;
+        }
+    }
+}
+
+static void *elf_plt_alloc(mp_wasm_module_t *peer, const char *func, uint32_t nargs) {
+    for (unsigned i = 0; i < MP_WASM_ELF_PLT_SLOTS; ++i) {
+        if (elf_plt_slots[i].used
+            && elf_plt_slots[i].mod == peer
+            && strcmp(elf_plt_slots[i].func, func) == 0) {
+            return (void *)elf_plt_fns[i];
+        }
+    }
+    for (unsigned i = 0; i < MP_WASM_ELF_PLT_SLOTS; ++i) {
+        if (!elf_plt_slots[i].used) {
+            elf_plt_slots[i].used = true;
+            elf_plt_slots[i].mod = peer;
+            size_t n = strlen(func);
+            if (n > MP_WASM_NAME_MAX) {
+                n = MP_WASM_NAME_MAX;
+            }
+            memcpy(elf_plt_slots[i].func, func, n);
+            elf_plt_slots[i].func[n] = '\0';
+            elf_plt_slots[i].nargs = nargs > 8 ? 8 : nargs;
+            return (void *)elf_plt_fns[i];
+        }
+    }
+    return NULL;
+}
+
+static bool elf_is_host_module(const char *module) {
+    return strncmp(module, "micropython.", 12) == 0
+        || strcmp(module, MP_WASM_HOST_MODULE) == 0
+        || strcmp(module, MP_WASM_MODULE) == 0;
+}
+
+static void *elf_resolve_import(const char *name, void *ctx) {
+    mp_wasm_module_t *importer = (mp_wasm_module_t *)ctx;
+    if (importer == NULL || name == NULL || name[0] == '\0') {
+        return NULL;
+    }
+    const uint8_t *payload = NULL;
+    uint32_t payload_len = 0;
+    if (!mp_wasm_imports_find_section(importer->meta, importer->meta_len, &payload, &payload_len)) {
+        return NULL;
+    }
+    mp_wasm_imports_info_t info;
+    memset(&info, 0, sizeof(info));
+    if (!mp_wasm_imports_parse(payload, payload_len, &info)) {
+        return NULL;
+    }
+    void *addr = NULL;
+    size_t name_len = strlen(name);
+    for (uint32_t i = 0; i < info.n_imports; ++i) {
+        const mp_wasm_import_t *im = &info.imports[i];
+        if ((size_t)im->func_len != name_len || memcmp(im->func, name, name_len) != 0) {
+            continue;
+        }
+        char module[MP_WASM_NAME_MAX + 1];
+        size_t ml = im->module_len > MP_WASM_NAME_MAX ? MP_WASM_NAME_MAX : im->module_len;
+        memcpy(module, im->module, ml);
+        module[ml] = '\0';
+        if (elf_is_host_module(module)) {
+            break; // host natives not wired for ELF yet
+        }
+        mp_wasm_module_t *peer = mp_wasm_registry_find(module);
+        if (peer == NULL) {
+            break;
+        }
+        if (peer->elf != NULL) {
+            addr = mp_wasm_elf_lookup(peer->elf, name);
+            break;
+        }
+        if (peer->inst != NULL) {
+            uint32_t np = 0, nr = 1;
+            elf_pack_sig_arity(peer, name, &np, &nr);
+            (void)nr;
+            // Prefer Wasm type arity when available.
+            uint32_t wnp = 0, wnr = 0;
+            wasm_valkind_t *wp = NULL, *wr = NULL;
+            if (mp_wasm_module_func_types(peer, name, &wnp, &wp, &wnr, &wr)) {
+                np = wnp;
+                MICROPY_WASM_FREE(wp);
+                MICROPY_WASM_FREE(wr);
+            }
+            addr = elf_plt_alloc(peer, name, np);
+            break;
+        }
+        break;
+    }
+    mp_wasm_imports_info_free(&info);
+    return addr;
 }
 
 static bool elf_func_types(mp_wasm_module_t *mod, const char *func,

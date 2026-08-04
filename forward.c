@@ -28,6 +28,10 @@
 #define MICROPY_PY_WASM (0)
 #endif
 
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
 #if MICROPY_PY_WASM
 
 #include <stdio.h>
@@ -87,6 +91,9 @@ void mp_wasm_registry_add(mp_wasm_module_t *mod) {
         if (e->mod != NULL && strcmp(mp_wasm_module_name(e->mod), mp_wasm_module_name(mod)) == 0) {
             if (e->mod != mod) {
                 fwd_invalidate_mod(e->mod);
+#if MICROPY_PY_WASM_ELF
+                mp_wasm_elf_plt_invalidate(e->mod);
+#endif
             }
             e->mod = mod;
             return;
@@ -103,6 +110,9 @@ void mp_wasm_registry_add(mp_wasm_module_t *mod) {
 
 void mp_wasm_registry_remove(mp_wasm_module_t *mod) {
     fwd_invalidate_mod(mod);
+#if MICROPY_PY_WASM_ELF
+    mp_wasm_elf_plt_invalidate(mod);
+#endif
     mp_wasm_reg_entry_t **pp = &registry;
     while (*pp) {
         if ((*pp)->mod == mod) {

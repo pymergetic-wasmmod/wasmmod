@@ -381,8 +381,12 @@ ELF packs are interchangeable containers beside `.wasm` / `.aot`:
 - Kind: **ELF64 ET_REL** under the hood; wasmmod maps, relocates, and calls
 - Metadata: `SHT_PROGBITS` sections `.wasmmod.pack` / `.imports` / `.deps` / `.sig` / `.source`
 - Register / connect / MPWI: **same** as Wasm — only the execute engine differs
+- Undef symbols: resolved at load via MPWI `func` name → registry peer
+  (`ELF→ELF` direct pointer; `ELF→Wasm` via i32 PLT stubs). Host modules
+  (`wasmmod` / `wasmmod.host` / `micropython.*`) are not wired yet.
 - Build: `gcc -c -ffreestanding -fno-pic … -o hello.o` then `wasmmod.py pack-elf`
 - Enable: `MICROPY_PY_WASM_ELF=1`; preference via `MICROPY_WASM_CONTAINERS`
+- Browser: wasm-only (no ELF execute)
 
 ## AOT (in addition to interpreter Wasm)
 

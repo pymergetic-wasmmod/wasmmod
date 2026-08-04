@@ -199,8 +199,9 @@ void mp_wasm_elf_image_free(mp_wasm_elf_image_t *img) {
     MICROPY_WASM_FREE(img);
 }
 
-bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_t **out,
-    char *errbuf, size_t errbuf_len) {
+bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
+    mp_wasm_elf_sym_resolve_t resolve, void *resolve_ctx,
+    mp_wasm_elf_image_t **out, char *errbuf, size_t errbuf_len) {
     if (out == NULL) {
         return false;
     }
@@ -237,6 +238,73 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
     if (image_size == 0) {
         image_size = 4096;
     }
+
+    // Find symtab early (needed for GOT sizing + resolve).
+    int symtab_i = -1;
+    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
+        Elf64_Shdr sh;
+        get_shdr(elf, len, &eh, i, &sh);
+        if (sh.sh_type == SHT_SYMTAB) {
+            symtab_i = (int)i;
+            break;
+        }
+    }
+    if (symtab_i < 0) {
+        MICROPY_WASM_FREE(sec_addr);
+        set_err(errbuf, errbuf_len, "no symtab");
+        return false;
+    }
+    Elf64_Shdr symsh, strsh;
+    get_shdr(elf, len, &eh, (uint16_t)symtab_i, &symsh);
+    if (!get_shdr(elf, len, &eh, (uint16_t)symsh.sh_link, &strsh)
+        || strsh.sh_type != SHT_STRTAB
+        || symsh.sh_offset + symsh.sh_size > len
+        || strsh.sh_offset + strsh.sh_size > len
+        || symsh.sh_entsize < sizeof(Elf64_Sym)) {
+        MICROPY_WASM_FREE(sec_addr);
+        set_err(errbuf, errbuf_len, "bad symtab");
+        return false;
+    }
+    uint32_t nsym = (uint32_t)(symsh.sh_size / symsh.sh_entsize);
+    const Elf64_Sym *syms = (const Elf64_Sym *)(elf + symsh.sh_offset);
+    const char *strtab = (const char *)(elf + strsh.sh_offset);
+
+    // GOT slots for GOTPCREL* (compilers emit these even with -fno-pic).
+    uint32_t *got_off = MICROPY_WASM_MALLOC((size_t)nsym * sizeof(uint32_t));
+    if (got_off == NULL) {
+        MICROPY_WASM_FREE(sec_addr);
+        set_err(errbuf, errbuf_len, "oom");
+        return false;
+    }
+    memset(got_off, 0xff, (size_t)nsym * sizeof(uint32_t)); // ~0u = no slot
+    uint32_t n_got = 0;
+    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
+        Elf64_Shdr sh;
+        get_shdr(elf, len, &eh, i, &sh);
+        if (sh.sh_type != SHT_RELA || sh.sh_entsize < sizeof(Elf64_Rela)
+            || sh.sh_offset + sh.sh_size > len) {
+            continue;
+        }
+        uint32_t nrel = (uint32_t)(sh.sh_size / sh.sh_entsize);
+        for (uint32_t r = 0; r < nrel; ++r) {
+            const Elf64_Rela *rela = (const Elf64_Rela *)(elf + sh.sh_offset + (size_t)r * sh.sh_entsize);
+            uint32_t typ = (uint32_t)ELF64_R_TYPE(rela->r_info);
+            uint32_t sym_i = (uint32_t)ELF64_R_SYM(rela->r_info);
+            if (sym_i >= nsym) {
+                continue;
+            }
+            if (typ == R_X86_64_GOTPCREL || typ == R_X86_64_GOTPCRELX
+                || typ == R_X86_64_REX_GOTPCRELX || typ == R_X86_64_GOT32) {
+                if (got_off[sym_i] == ~0u) {
+                    got_off[sym_i] = n_got++;
+                }
+            }
+        }
+    }
+    size_t got_base = align_up(image_size, 8);
+    size_t got_bytes = (size_t)n_got * 8;
+    image_size = got_base + got_bytes;
+
     // Page-align mapping.
     size_t page = (size_t)sysconf(_SC_PAGESIZE);
     size_t map_size = align_up(image_size, page);
@@ -245,6 +313,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (map == MAP_FAILED) {
         MICROPY_WASM_FREE(sec_addr);
+        MICROPY_WASM_FREE(got_off);
         set_err(errbuf, errbuf_len, "mmap failed");
         return false;
     }
@@ -263,49 +332,19 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
         if (sh.sh_offset + sh.sh_size > len) {
             munmap(map, map_size);
             MICROPY_WASM_FREE(sec_addr);
+            MICROPY_WASM_FREE(got_off);
             set_err(errbuf, errbuf_len, "section data OOB");
             return false;
         }
         memcpy(base + sec_addr[i], elf + sh.sh_offset, (size_t)sh.sh_size);
     }
 
-    // Find symtab
-    int symtab_i = -1;
-    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
-        Elf64_Shdr sh;
-        get_shdr(elf, len, &eh, i, &sh);
-        if (sh.sh_type == SHT_SYMTAB) {
-            symtab_i = (int)i;
-            break;
-        }
-    }
-    if (symtab_i < 0) {
-        munmap(map, map_size);
-        MICROPY_WASM_FREE(sec_addr);
-        set_err(errbuf, errbuf_len, "no symtab");
-        return false;
-    }
-    Elf64_Shdr symsh, strsh;
-    get_shdr(elf, len, &eh, (uint16_t)symtab_i, &symsh);
-    if (!get_shdr(elf, len, &eh, (uint16_t)symsh.sh_link, &strsh)
-        || strsh.sh_type != SHT_STRTAB
-        || symsh.sh_offset + symsh.sh_size > len
-        || strsh.sh_offset + strsh.sh_size > len
-        || symsh.sh_entsize < sizeof(Elf64_Sym)) {
-        munmap(map, map_size);
-        MICROPY_WASM_FREE(sec_addr);
-        set_err(errbuf, errbuf_len, "bad symtab");
-        return false;
-    }
-    uint32_t nsym = (uint32_t)(symsh.sh_size / symsh.sh_entsize);
-    const Elf64_Sym *syms = (const Elf64_Sym *)(elf + symsh.sh_offset);
-    const char *strtab = (const char *)(elf + strsh.sh_offset);
-
-    // Resolve symbol address: defined → image; undef → fail for now (no host imports yet).
+    // Resolve symbol address: defined → image; undef → optional resolve callback.
     uintptr_t *sym_addr = MICROPY_WASM_MALLOC((size_t)nsym * sizeof(uintptr_t));
     if (sym_addr == NULL) {
         munmap(map, map_size);
         MICROPY_WASM_FREE(sec_addr);
+        MICROPY_WASM_FREE(got_off);
         set_err(errbuf, errbuf_len, "oom");
         return false;
     }
@@ -313,6 +352,19 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
     for (uint32_t i = 0; i < nsym; ++i) {
         const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)i * symsh.sh_entsize);
         if (s->st_shndx == SHN_UNDEF) {
+            if (s->st_name != 0 && s->st_name < strsh.sh_size) {
+                const char *nm = strtab + s->st_name;
+                if (strcmp(nm, "_GLOBAL_OFFSET_TABLE_") == 0) {
+                    sym_addr[i] = (uintptr_t)(base + got_base);
+                    continue;
+                }
+                if (resolve != NULL && nm[0] != '\0') {
+                    void *p = resolve(nm, resolve_ctx);
+                    if (p != NULL) {
+                        sym_addr[i] = (uintptr_t)p;
+                    }
+                }
+            }
             continue;
         }
         if (s->st_shndx == SHN_ABS) {
@@ -323,6 +375,14 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
             continue;
         }
         sym_addr[i] = (uintptr_t)(base + sec_addr[s->st_shndx] + s->st_value);
+    }
+
+    // Fill GOT entries with resolved symbol addresses.
+    for (uint32_t i = 0; i < nsym; ++i) {
+        if (got_off[i] == ~0u) {
+            continue;
+        }
+        *(uint64_t *)(base + got_base + (size_t)got_off[i] * 8) = (uint64_t)sym_addr[i];
     }
 
     // Apply RELA
@@ -336,6 +396,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
             || sh.sh_offset + sh.sh_size > len) {
             munmap(map, map_size);
             MICROPY_WASM_FREE(sec_addr);
+            MICROPY_WASM_FREE(got_off);
             MICROPY_WASM_FREE(sym_addr);
             set_err(errbuf, errbuf_len, "bad rela");
             return false;
@@ -349,6 +410,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
             if (sym_i >= nsym) {
                 munmap(map, map_size);
                 MICROPY_WASM_FREE(sec_addr);
+                MICROPY_WASM_FREE(got_off);
                 MICROPY_WASM_FREE(sym_addr);
                 set_err(errbuf, errbuf_len, "rela sym OOB");
                 return false;
@@ -361,6 +423,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
                 snprintf(msg, sizeof(msg), "unresolved symbol: %s", nm);
                 munmap(map, map_size);
                 MICROPY_WASM_FREE(sec_addr);
+                MICROPY_WASM_FREE(got_off);
                 MICROPY_WASM_FREE(sym_addr);
                 set_err(errbuf, errbuf_len, msg);
                 return false;
@@ -374,13 +437,23 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
                     *(uint64_t *)P = (uint64_t)(S + (uintptr_t)A);
                     break;
                 case R_X86_64_PC32:
-                case R_X86_64_PLT32:
+                case R_X86_64_PLT32: {
+                    int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
+                    *(int32_t *)P = (int32_t)v;
+                    break;
+                }
                 case R_X86_64_GOTPCREL:
                 case R_X86_64_GOTPCRELX:
                 case R_X86_64_REX_GOTPCRELX: {
-                    // For freestanding -fPIC without GOT, treat GOTPCREL as PC32 to S.
-                    int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
+                    // G = address of GOT entry for S; reloc is G + A - P.
+                    uintptr_t G = (uintptr_t)(base + got_base + (size_t)got_off[sym_i] * 8);
+                    int64_t v = (int64_t)G + A - (int64_t)(uintptr_t)P;
                     *(int32_t *)P = (int32_t)v;
+                    break;
+                }
+                case R_X86_64_GOT32: {
+                    // Offset of GOT entry from GOT base (+ addend).
+                    *(int32_t *)P = (int32_t)((int64_t)got_off[sym_i] * 8 + A);
                     break;
                 }
                 case R_X86_64_32:
@@ -397,6 +470,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
                     snprintf(msg, sizeof(msg), "unsupported reloc %u", (unsigned)typ);
                     munmap(map, map_size);
                     MICROPY_WASM_FREE(sec_addr);
+                    MICROPY_WASM_FREE(got_off);
                     MICROPY_WASM_FREE(sym_addr);
                     set_err(errbuf, errbuf_len, msg);
                     return false;
@@ -430,6 +504,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
     if (img == NULL) {
         munmap(map, map_size);
         MICROPY_WASM_FREE(sec_addr);
+        MICROPY_WASM_FREE(got_off);
         MICROPY_WASM_FREE(sym_addr);
         set_err(errbuf, errbuf_len, "oom");
         return false;
@@ -441,6 +516,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
     if (img->file_copy == NULL) {
         mp_wasm_elf_image_free(img);
         MICROPY_WASM_FREE(sec_addr);
+        MICROPY_WASM_FREE(got_off);
         MICROPY_WASM_FREE(sym_addr);
         set_err(errbuf, errbuf_len, "oom");
         return false;
@@ -453,6 +529,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
         if (img->syms == NULL) {
             mp_wasm_elf_image_free(img);
             MICROPY_WASM_FREE(sec_addr);
+            MICROPY_WASM_FREE(got_off);
             MICROPY_WASM_FREE(sym_addr);
             set_err(errbuf, errbuf_len, "oom");
             return false;
@@ -484,6 +561,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len, mp_wasm_elf_image_
     }
 
     MICROPY_WASM_FREE(sec_addr);
+    MICROPY_WASM_FREE(got_off);
     MICROPY_WASM_FREE(sym_addr);
     *out = img;
     return true;

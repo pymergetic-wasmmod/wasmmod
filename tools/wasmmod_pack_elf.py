@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Embed wasmmod.pack into an ELF64 ET_REL object (→ .elf pack artifact)."""
+"""Embed wasmmod.pack (+ imports/deps) into an ELF64 ET_REL object (→ .elf pack)."""
 
 from __future__ import annotations
 
@@ -33,13 +33,32 @@ def main(argv: list[str] | None = None) -> int:
         sig_s = item.get("sig") if isinstance(item.get("sig"), str) else None
         exports.append((module, func, export_name, pack.sig_tag(sig_s)))
 
+    imports: list[tuple[str, str]] = []
+    for item in data.get("imports") or []:
+        if not isinstance(item, dict):
+            continue
+        mod = item.get("module") or ""
+        func = item.get("func") or ""
+        if mod and func:
+            imports.append((mod, func))
+
+    deps = pack.parse_manifest_deps(data)
+
     compress = bool((data.get("pack") or {}).get("compress", False))
     payload = pack.build_pack_payload(name, [], exports, compress=compress)
     raw = args.obj.read_bytes()
     out = elf.append_section(raw, "wasmmod.pack", payload)
+    if imports:
+        out = elf.append_section(out, pack.IMPORTS_SECTION, pack.build_imports_payload(imports))
+    if deps:
+        out = elf.append_section(out, pack.DEPS_SECTION, pack.build_deps_payload(deps))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(out)
-    print(f"wrote {args.output} pack={name} exports={len(exports)}", file=sys.stderr)
+    print(
+        f"wrote {args.output} pack={name} exports={len(exports)} "
+        f"imports={len(imports)} deps={len(deps)}",
+        file=sys.stderr,
+    )
     return 0
 
 

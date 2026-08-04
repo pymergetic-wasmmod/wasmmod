@@ -97,6 +97,11 @@ const uint8_t *mp_wasm_module_meta_bytes(const mp_wasm_module_t *mod, uint32_t *
 typedef void (*mp_wasm_numeric_export_cb)(const char *name, uint32_t nparams, uint32_t nresults, void *ctx);
 void mp_wasm_module_foreach_numeric_export(mp_wasm_module_t *mod, mp_wasm_numeric_export_cb cb, void *ctx);
 
+#if MICROPY_PY_WASM_ELF
+// Drop ELF→Wasm PLT slots that target this module (on unload / replace).
+void mp_wasm_elf_plt_invalidate(mp_wasm_module_t *mod);
+#endif
+
 // True if export exists and is numeric; optionally returns arity.
 bool mp_wasm_module_numeric_export_arity(mp_wasm_module_t *mod, const char *name,
     uint32_t *nparams_out, uint32_t *nresults_out);
