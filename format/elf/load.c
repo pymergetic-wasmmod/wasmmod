@@ -5,7 +5,7 @@
  *
  * Copyright (c) 2026 Rouven Raudzus <raudzus@pymergetic.com>
  *
- * In-tree ELF64 ET_REL loader (x86_64). No dlopen / ld.so.
+ * In-tree ELF64 ET_REL loader (x86_64 / aarch64). No dlopen / ld.so.
  */
 
 #ifndef MICROPY_PY_WASM
@@ -30,6 +30,7 @@
 #define EI_NIDENT 16
 #define ET_REL 1
 #define EM_X86_64 62
+#define EM_AARCH64 183
 #define ELFCLASS64 2
 #define ELFDATA2LSB 1
 #define SHT_NULL 0
@@ -67,6 +68,34 @@
 #define R_X86_64_GOTPCREL 9
 #define R_X86_64_REX_GOTPCRELX 42
 #define R_X86_64_GOTPCRELX 41
+
+#define R_AARCH64_NONE 0
+#define R_AARCH64_ABS64 257
+#define R_AARCH64_ABS32 258
+#define R_AARCH64_PREL64 261
+#define R_AARCH64_PREL32 262
+#define R_AARCH64_ADR_PREL_PG_HI21 275
+#define R_AARCH64_ADR_PREL_PG_HI21_NC 276
+#define R_AARCH64_ADD_ABS_LO12_NC 277
+#define R_AARCH64_LDST8_ABS_LO12_NC 278
+#define R_AARCH64_JUMP26 282
+#define R_AARCH64_CALL26 283
+#define R_AARCH64_LDST16_ABS_LO12_NC 284
+#define R_AARCH64_LDST32_ABS_LO12_NC 285
+#define R_AARCH64_LDST64_ABS_LO12_NC 286
+#define R_AARCH64_LDST128_ABS_LO12_NC 299
+#define R_AARCH64_ADR_GOT_PAGE 311
+#define R_AARCH64_LD64_GOT_LO12_NC 312
+
+#if defined(__aarch64__)
+#define MP_WASM_ELF_HOST_EM EM_AARCH64
+#elif defined(__x86_64__)
+#define MP_WASM_ELF_HOST_EM EM_X86_64
+#else
+#define MP_WASM_ELF_HOST_EM 0
+#endif
+
+#define MP_WASM_ELF_PAGE(addr) ((uint64_t)(addr) & ~0xfffull)
 
 #pragma pack(push, 1)
 typedef struct {
@@ -130,6 +159,50 @@ static void set_err(char *errbuf, size_t errbuf_len, const char *msg) {
     errbuf[n] = '\0';
 }
 
+static bool reloc_needs_got(uint16_t em, uint32_t typ) {
+    if (em == EM_X86_64) {
+        return typ == R_X86_64_GOTPCREL || typ == R_X86_64_GOTPCRELX
+            || typ == R_X86_64_REX_GOTPCRELX || typ == R_X86_64_GOT32;
+    }
+    if (em == EM_AARCH64) {
+        return typ == R_AARCH64_ADR_GOT_PAGE || typ == R_AARCH64_LD64_GOT_LO12_NC;
+    }
+    return false;
+}
+
+static void aarch64_patch_adrp(uint32_t *ins, int64_t page_imm) {
+    // page_imm is signed page count (delta >> 12).
+    uint32_t immlo = (uint32_t)(page_imm & 3);
+    uint32_t immhi = (uint32_t)((page_imm >> 2) & 0x1fffff);
+    uint32_t i = *ins;
+    i &= ~((3u << 29) | (0x1fffffu << 5));
+    i |= (immlo << 29) | (immhi << 5);
+    *ins = i;
+}
+
+static void aarch64_patch_imm12(uint32_t *ins, uint32_t imm12) {
+    uint32_t i = *ins;
+    i &= ~(0xfffu << 10);
+    i |= (imm12 & 0xfff) << 10;
+    *ins = i;
+}
+
+static bool aarch64_patch_branch26(uint32_t *ins, int64_t byte_off, char *errbuf, size_t errbuf_len) {
+    if ((byte_off & 3) != 0) {
+        set_err(errbuf, errbuf_len, "aarch64 branch misaligned");
+        return false;
+    }
+    int64_t imm = byte_off >> 2;
+    if (imm < -(1 << 25) || imm >= (1 << 25)) {
+        set_err(errbuf, errbuf_len, "aarch64 branch out of range");
+        return false;
+    }
+    uint32_t i = *ins;
+    i = (i & ~0x03ffffffu) | ((uint32_t)imm & 0x03ffffffu);
+    *ins = i;
+    return true;
+}
+
 static bool parse_ehdr(const uint8_t *buf, uint32_t len, Elf64_Ehdr *eh, char *errbuf, size_t errbuf_len) {
     if (buf == NULL || len < sizeof(Elf64_Ehdr)) {
         set_err(errbuf, errbuf_len, "elf truncated");
@@ -148,8 +221,12 @@ static bool parse_ehdr(const uint8_t *buf, uint32_t len, Elf64_Ehdr *eh, char *e
         set_err(errbuf, errbuf_len, "need ET_REL");
         return false;
     }
-    if (eh->e_machine != EM_X86_64) {
-        set_err(errbuf, errbuf_len, "need EM_X86_64");
+    if (MP_WASM_ELF_HOST_EM == 0) {
+        set_err(errbuf, errbuf_len, "ELF host arch unsupported");
+        return false;
+    }
+    if (eh->e_machine != MP_WASM_ELF_HOST_EM) {
+        set_err(errbuf, errbuf_len, "ELF e_machine != host arch");
         return false;
     }
     if (eh->e_shnum == 0 || eh->e_shentsize < sizeof(Elf64_Shdr)) {
@@ -293,8 +370,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             if (sym_i >= nsym) {
                 continue;
             }
-            if (typ == R_X86_64_GOTPCREL || typ == R_X86_64_GOTPCRELX
-                || typ == R_X86_64_REX_GOTPCRELX || typ == R_X86_64_GOT32) {
+            if (reloc_needs_got(eh.e_machine, typ)) {
                 if (got_off[sym_i] == ~0u) {
                     got_off[sym_i] = n_got++;
                 }
@@ -431,9 +507,10 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             uint8_t *P = target_base + rela->r_offset;
             int64_t A = rela->r_addend;
             switch (typ) {
-                case R_X86_64_NONE:
+                case R_X86_64_NONE: // also R_AARCH64_NONE
                     break;
                 case R_X86_64_64:
+                case R_AARCH64_ABS64:
                     *(uint64_t *)P = (uint64_t)(S + (uintptr_t)A);
                     break;
                 case R_X86_64_PC32:
@@ -445,24 +522,75 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
                 case R_X86_64_GOTPCREL:
                 case R_X86_64_GOTPCRELX:
                 case R_X86_64_REX_GOTPCRELX: {
-                    // G = address of GOT entry for S; reloc is G + A - P.
                     uintptr_t G = (uintptr_t)(base + got_base + (size_t)got_off[sym_i] * 8);
                     int64_t v = (int64_t)G + A - (int64_t)(uintptr_t)P;
                     *(int32_t *)P = (int32_t)v;
                     break;
                 }
                 case R_X86_64_GOT32: {
-                    // Offset of GOT entry from GOT base (+ addend).
                     *(int32_t *)P = (int32_t)((int64_t)got_off[sym_i] * 8 + A);
                     break;
                 }
                 case R_X86_64_32:
                 case R_X86_64_32S:
+                case R_AARCH64_ABS32:
                     *(uint32_t *)P = (uint32_t)(S + (uintptr_t)A);
                     break;
-                case R_X86_64_PC64: {
+                case R_X86_64_PC64:
+                case R_AARCH64_PREL64: {
                     int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
                     *(int64_t *)P = v;
+                    break;
+                }
+                case R_AARCH64_PREL32: {
+                    int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
+                    *(int32_t *)P = (int32_t)v;
+                    break;
+                }
+                case R_AARCH64_ADR_PREL_PG_HI21:
+                case R_AARCH64_ADR_PREL_PG_HI21_NC: {
+                    uint64_t dest = (uint64_t)(S + (uintptr_t)A);
+                    int64_t page_imm = (int64_t)((MP_WASM_ELF_PAGE(dest) - MP_WASM_ELF_PAGE((uint64_t)(uintptr_t)P)) >> 12);
+                    aarch64_patch_adrp((uint32_t *)P, page_imm);
+                    break;
+                }
+                case R_AARCH64_ADD_ABS_LO12_NC:
+                case R_AARCH64_LDST8_ABS_LO12_NC:
+                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)((S + (uintptr_t)A) & 0xfff));
+                    break;
+                case R_AARCH64_LDST16_ABS_LO12_NC:
+                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 1));
+                    break;
+                case R_AARCH64_LDST32_ABS_LO12_NC:
+                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 2));
+                    break;
+                case R_AARCH64_LDST64_ABS_LO12_NC:
+                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 3));
+                    break;
+                case R_AARCH64_LDST128_ABS_LO12_NC:
+                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 4));
+                    break;
+                case R_AARCH64_JUMP26:
+                case R_AARCH64_CALL26: {
+                    int64_t off = (int64_t)S + A - (int64_t)(uintptr_t)P;
+                    if (!aarch64_patch_branch26((uint32_t *)P, off, errbuf, errbuf_len)) {
+                        munmap(map, map_size);
+                        MICROPY_WASM_FREE(sec_addr);
+                        MICROPY_WASM_FREE(got_off);
+                        MICROPY_WASM_FREE(sym_addr);
+                        return false;
+                    }
+                    break;
+                }
+                case R_AARCH64_ADR_GOT_PAGE: {
+                    uintptr_t G = (uintptr_t)(base + got_base + (size_t)got_off[sym_i] * 8);
+                    int64_t page_imm = (int64_t)((MP_WASM_ELF_PAGE(G) - MP_WASM_ELF_PAGE((uint64_t)(uintptr_t)P)) >> 12);
+                    aarch64_patch_adrp((uint32_t *)P, page_imm);
+                    break;
+                }
+                case R_AARCH64_LD64_GOT_LO12_NC: {
+                    uintptr_t G = (uintptr_t)(base + got_base + (size_t)got_off[sym_i] * 8);
+                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)((G & 0xfff) >> 3));
                     break;
                 }
                 default: {

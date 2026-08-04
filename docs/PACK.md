@@ -379,6 +379,7 @@ ELF packs are interchangeable containers beside `.wasm` / `.aot`:
 
 - Filename: `name.elf` or `name.<arch>.elf` (+ optional `.zlib`)
 - Kind: **ELF64 ET_REL** under the hood; wasmmod maps, relocates, and calls
+  on the **host arch only** (`EM_X86_64` or `EM_AARCH64` matching the process)
 - Metadata: `SHT_PROGBITS` sections `.wasmmod.pack` / `.imports` / `.deps` / `.sig` / `.source`
 - Register / connect / MPWI: **same** as Wasm — only the execute engine differs
 - Undef symbols: resolved at load via MPWI `func` name → registry peer
@@ -387,7 +388,9 @@ ELF packs are interchangeable containers beside `.wasm` / `.aot`:
   cookies, `mode`/`verify`/`trust_count`). Linear-memory APIs (`call_buf`,
   `call_py`, `mem_copy_*`, loader `version`/`call_i32`) stay Wasm-only.
   `micropython.*` not wired for ELF yet.
-- Build: `gcc -c -ffreestanding -fno-pic … -o hello.o` then `wasmmod.py pack-elf`
+- Relocs: x86_64 GOT/PC subset; aarch64 `CALL26`/`JUMP26`, ADRP/LO12, GOT page
+- Build: `gcc -c -ffreestanding -fno-pic …` then `wasmmod.py pack-elf`
+  (optional `make -C examples/hello_elf aarch64` for a CDN twin)
 - Enable: `MICROPY_PY_WASM_ELF=1`; preference via `MICROPY_WASM_CONTAINERS`
 - Browser: wasm-only (no ELF execute)
 

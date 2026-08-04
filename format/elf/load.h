@@ -31,8 +31,8 @@ typedef struct mp_wasm_elf_image_t {
 // Return NULL to leave it unresolved (load fails if a reloc needs it).
 typedef void *(*mp_wasm_elf_sym_resolve_t)(const char *name, void *ctx);
 
-// Load ELF64 ET_REL (x86_64) into an executable image. No dlopen.
-// resolve may be NULL when the object has no external undefs.
+// Load ELF64 ET_REL (host arch: x86_64 or aarch64) into an executable image.
+// No dlopen. resolve may be NULL when the object has no external undefs.
 bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     mp_wasm_elf_sym_resolve_t resolve, void *resolve_ctx,
     mp_wasm_elf_image_t **out, char *errbuf, size_t errbuf_len);
