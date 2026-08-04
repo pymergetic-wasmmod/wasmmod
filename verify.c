@@ -504,7 +504,11 @@ bool mp_wasm_verify_sig(const uint8_t *bytes, uint32_t len, char *errbuf, size_t
     if (!mp_wasm_sig_find(bytes, len, &sec_payload, &sec_payload_len)) {
         #if MICROPY_WASM_VERIFY == 1
         if (errbuf && errbuf_len) {
-            snprintf(errbuf, errbuf_len, "verify: signature required");
+            snprintf(errbuf, errbuf_len,
+                "verify: signature required (len=%u magic=%02x%02x%02x%02x)",
+                (unsigned)len,
+                len > 0 ? bytes[0] : 0, len > 1 ? bytes[1] : 0,
+                len > 2 ? bytes[2] : 0, len > 3 ? bytes[3] : 0);
         }
         return false;
         #else

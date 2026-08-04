@@ -63,13 +63,27 @@ EM_ASYNC_JS(int, mp_wasm_js_http_get, (const char *uri, const char *auth, const 
         if (sid) {
             headers["X-Shell-Session-Id"] = sid;
         }
-        const resp = await fetch(url, {headers : headers, credentials : "same-origin"});
+        const resp = await fetch(url, {
+            headers : headers,
+            credentials : "same-origin",
+            // Pin artifacts are Cache-Control: immutable — a pre-sign publish can
+            // stick in the browser for a day and fail VERIFY. Always bypass.
+            cache : "no-store",
+        });
         if (!resp.ok) {
+            console.warn("[wasmmod fetch]", resp.status, url);
             return -1;
         }
         const ab = await resp.arrayBuffer();
         const u8 = new Uint8Array(ab);
         const n = u8.length;
+        const mag = n >= 4
+            ? (("00" + u8[0].toString(16)).slice(-2) +
+               ("00" + u8[1].toString(16)).slice(-2) +
+               ("00" + u8[2].toString(16)).slice(-2) +
+               ("00" + u8[3].toString(16)).slice(-2))
+            : "";
+        console.log("[wasmmod fetch]", resp.status, "len=" + n, "magic=" + mag, url);
         const ptr = _malloc(n > 0 ? n : 1);
         if (!ptr) {
             return -1;
@@ -96,14 +110,24 @@ EM_ASYNC_JS(int, mp_wasm_js_http_probe, (const char *uri, const char *auth, cons
         if (sid) {
             headers["X-Shell-Session-Id"] = sid;
         }
-        const opts = {method : "HEAD", headers : headers, credentials : "same-origin"};
+        const opts = {
+            method : "HEAD",
+            headers : headers,
+            credentials : "same-origin",
+            cache : "no-store",
+        };
         let resp = await fetch(url, opts);
         if (resp.ok) {
             return 0;
         }
         // Some CDNs reject HEAD — try a cheap GET.
         if (resp.status === 405 || resp.status === 501 || resp.status === 403) {
-            resp = await fetch(url, {method : "GET", headers : headers, credentials : "same-origin"});
+            resp = await fetch(url, {
+                method : "GET",
+                headers : headers,
+                credentials : "same-origin",
+                cache : "no-store",
+            });
             return resp.ok ? 0 : -1;
         }
         return -1;

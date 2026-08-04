@@ -136,22 +136,43 @@ static bool try_fetch_uri(const char *uri, uint8_t **out_bytes, uint32_t *out_le
         vstr_clear(&tmp);
         *out_bytes = unwrapped;
         *out_len = plen;
-        return true;
-    }
-    uint8_t *buf = MICROPY_WASM_MALLOC(tmp.len ? tmp.len : 1);
-    if (buf == NULL) {
-        vstr_clear(&tmp);
-        if (errbuf && errbuf_len) {
-            snprintf(errbuf, errbuf_len, "cdn: oom");
+    } else {
+        uint8_t *buf = MICROPY_WASM_MALLOC(tmp.len ? tmp.len : 1);
+        if (buf == NULL) {
+            vstr_clear(&tmp);
+            if (errbuf && errbuf_len) {
+                snprintf(errbuf, errbuf_len, "cdn: oom");
+            }
+            return false;
         }
-        return false;
+        if (tmp.len) {
+            memcpy(buf, tmp.buf, tmp.len);
+        }
+        *out_bytes = buf;
+        *out_len = (uint32_t)tmp.len;
+        vstr_clear(&tmp);
     }
-    if (tmp.len) {
-        memcpy(buf, tmp.buf, tmp.len);
+    // Reject non-artifact HTTP 200s (HTML/JSON SPA fallbacks) before verify.
+    {
+        const uint8_t *b = *out_bytes;
+        uint32_t n = *out_len;
+        bool ok_magic = n >= 4
+            && ((b[0] == 0x00 && b[1] == 'a' && b[2] == 's' && b[3] == 'm')
+                || (b[0] == 0x00 && b[1] == 'a' && b[2] == 'o' && b[3] == 't'));
+        if (!ok_magic) {
+            if (errbuf && errbuf_len) {
+                snprintf(errbuf, errbuf_len,
+                    "cdn: not a wasm/aot artifact (len=%u magic=%02x%02x%02x%02x)",
+                    (unsigned)n,
+                    n > 0 ? b[0] : 0, n > 1 ? b[1] : 0,
+                    n > 2 ? b[2] : 0, n > 3 ? b[3] : 0);
+            }
+            MICROPY_WASM_FREE(*out_bytes);
+            *out_bytes = NULL;
+            *out_len = 0;
+            return false;
+        }
     }
-    *out_bytes = buf;
-    *out_len = (uint32_t)tmp.len;
-    vstr_clear(&tmp);
     return true;
 }
 
