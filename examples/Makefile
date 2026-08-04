@@ -185,11 +185,12 @@ test-elf: packs host
 	$(MPY_INTERP) -c "import wasm; \
 wasm.path.append('.'); \
 h=wasm.import_wasm('hello'); assert h.hello()==42 and h.add(2,3)==5; \
+import hello.util as u; assert u.ping_code()==7; \
 c=wasm.import_wasm('client'); assert c.use_hello()==42; \
 wasm.host_set(0, lambda: 99); \
 hc=wasm.import_wasm('hostcall'); assert hc.via_host0()==99; \
 wasm.host_set(0, lambda x: x*3); assert hc.via_host(7)==21; \
-print('OK elf hello/client/hostcall')"
+print('OK elf hello(+py)/client/hostcall')"
 
 # Dotted module tree: sibling flat packs + nested monorepo (pack-tree).
 test-tree: tree-packs host

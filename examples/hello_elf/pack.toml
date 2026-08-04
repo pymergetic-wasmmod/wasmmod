@@ -1,4 +1,5 @@
 # Pack manifest for ELF container demo (see ../../docs/PACK.md).
+# Python tree is shared with examples/hello (same package name).
 
 type = "package"
 name = "hello"
@@ -19,8 +20,9 @@ func = "add"
 sig = "i32_i32_i32"
 
 [python]
-keep_source = false
+mount = "../hello/src"
+keep_source = true
 freeze = false
 
 [pack]
-compress = false
+compress = true

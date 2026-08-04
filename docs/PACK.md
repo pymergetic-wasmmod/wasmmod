@@ -390,7 +390,8 @@ ELF packs are interchangeable containers beside `.wasm` / `.aot`:
   `micropython.*` not wired for ELF yet.
 - Relocs: x86_64 GOT/PC subset; aarch64 `CALL26`/`JUMP26`, ADRP/LO12, GOT page
 - Build: `gcc -c -ffreestanding -fno-pic …` then `wasmmod.py pack-elf`
-  (optional `make -C examples/hello_elf aarch64` for a CDN twin)
+  (optional `make -C examples/hello_elf aarch64` for a CDN twin).
+  `pack-elf` embeds the same `[python]` mount tree as Wasm packs.
 - Enable: `MICROPY_PY_WASM_ELF=1`; preference via `MICROPY_WASM_CONTAINERS`
 - Browser: wasm-only (no ELF execute)
 

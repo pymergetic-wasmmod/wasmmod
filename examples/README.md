@@ -150,7 +150,7 @@ Same register/connect/sign path as Wasm; execute is in-tree ET_REL:
 
 | Example | Artifact | Notes |
 |---------|----------|--------|
-| `hello_elf/` | `packs/hello.elf` | freestanding exports |
+| `hello_elf/` | `packs/hello.elf` | freestanding exports + shared `hello` Python tree |
 | `client_elf/` | `packs/client.elf` | peer `hello` via MPWI + GOT |
 | `host_elf/` | `packs/hostcall.elf` | `wasmmod.host` slots → Python |
 
