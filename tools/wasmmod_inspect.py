@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """Host-side pack inspect: symbols, addr2line/locations, disasm, mpy-dis.
 
-Shared by CDN client, CLI, and (later) thin C/Rust peers. No MicroPython.
+Also: ``tools/wasmmod.py inspect PATH`` — pack/source/sig summary (rich via CDN
+client, else ``_offline_inspect``). Shared with CDN client; no MicroPython.
 """
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import json
 import re
 import struct
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 TOOLS = Path(__file__).resolve().parent
+TOOLS_DIR = TOOLS
+PROG = "wasmmod inspect"
 sys.path.insert(0, str(TOOLS))
 
 import wasmmod_elf as elf  # noqa: E402
@@ -470,7 +476,138 @@ def mpy_disasm(mpy: bytes, limit: int = 80) -> list[DisasmLine]:
     return out
 
 
-def main(argv: list[str] | None = None) -> int:
+def _load(stem: str):
+    path = TOOLS_DIR / f"{stem}.py"
+    spec = importlib.util.spec_from_file_location(stem, path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"{PROG}: cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _cli():
+    return _load("wasmmod_cliutil")
+
+
+def _offline_inspect(path: Path) -> dict[str, Any]:
+    """Compose a basic summary without the PyPI client (MPZL-aware)."""
+    out: dict[str, Any] = {"path": str(path), "offline": True}
+    source = _load("wasmmod_source")
+    data = path.read_bytes()
+    try:
+        if data[:4] == b"MPZL":
+            zmod = _load("wasmmod_zlib")
+            data = zmod.unwrap_bytes(data)
+        payload = source.extract_custom_section(data, "wasmmod.source")
+        if payload:
+            meta = source.parse_source_payload(payload)
+            out["source_name"] = meta.get("name")
+            out["source_version"] = meta.get("pkg_version")
+            out["source_files"] = [
+                e.get("path") for e in (meta.get("files") or []) if isinstance(e, dict)
+            ]
+        else:
+            out["source_files"] = []
+    except Exception as exc:  # noqa: BLE001 — offline best-effort
+        out["source_error"] = str(exc)
+
+    try:
+        pack = _load("wasmmod_pack")
+        deps_sec = None
+        if hasattr(pack, "extract_custom_section"):
+            deps_sec = pack.extract_custom_section(data, pack.DEPS_SECTION)
+        else:
+            deps_sec = source.extract_custom_section(data, "wasmmod.deps")
+        if deps_sec:
+            out["deps"] = [
+                {"name": n, "version": v} for n, v in pack.parse_deps_payload(deps_sec)
+            ]
+        else:
+            out["deps"] = []
+    except Exception as exc:  # noqa: BLE001
+        out["deps_error"] = str(exc)
+
+    try:
+        out["has_dwarf"] = has_dwarf(data)
+        out["symbols"] = [
+            {"name": s.name, "kind": s.kind, "offset": s.offset, "size": s.size}
+            for s in list_symbols(data)[:32]
+        ]
+    except Exception as exc:  # noqa: BLE001
+        out["symbols_error"] = str(exc)
+
+    sign_py = TOOLS_DIR / "wasmmod_sign.py"
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(sign_py), "info", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        out["sign_info"] = (proc.stdout or proc.stderr or "").strip()
+        if proc.returncode != 0 and not out["sign_info"]:
+            out["sign_error"] = f"exit {proc.returncode}"
+    except OSError as exc:
+        out["sign_error"] = str(exc)
+    return out
+
+
+def _print_rich(contents: Any) -> None:
+    dump = contents.model_dump() if hasattr(contents, "model_dump") else contents
+    if not isinstance(dump, dict):
+        print(dump)
+        return
+    print(f"kind={dump.get('kind')} encoding={dump.get('encoding')} signed={dump.get('signed')}")
+    if dump.get("has_dwarf") is not None:
+        print(f"has_dwarf={dump.get('has_dwarf')}")
+    if dump.get("error"):
+        print(f"error: {dump['error']}")
+    pack = dump.get("pack")
+    if isinstance(pack, dict):
+        print(f"pack: {pack.get('name')} v{pack.get('version')}")
+        for f in pack.get("files") or []:
+            if isinstance(f, dict):
+                print(f"  pack/{f.get('path')}  {f.get('kind')}  {f.get('raw_len')}B")
+    source = dump.get("source")
+    if isinstance(source, dict):
+        print(f"source: {source.get('name')} {source.get('pkg_version') or ''}".rstrip())
+        for f in source.get("files") or []:
+            if isinstance(f, dict):
+                print(f"  src/{f.get('path')}  {f.get('raw_len')}B")
+    sig = dump.get("sig")
+    if isinstance(sig, dict):
+        print(
+            f"sig: format={sig.get('format')} flags={sig.get('flags')} "
+            f"sig_len={sig.get('sig_len')} chain_len={sig.get('chain_len')}"
+        )
+    elif dump.get("sig_error"):
+        print(f"sig error: {dump['sig_error']}")
+    deps = dump.get("deps")
+    if isinstance(deps, list) and deps:
+        print("deps:")
+        for d in deps:
+            if isinstance(d, dict):
+                print(f"  {d.get('name')}@{d.get('version')}")
+            else:
+                print(f"  {d}")
+    elif dump.get("deps_error"):
+        print(f"deps error: {dump['deps_error']}")
+    syms = dump.get("symbols")
+    if isinstance(syms, list) and syms:
+        print(f"symbols ({len(syms)}):")
+        for s in syms[:24]:
+            if isinstance(s, dict):
+                print(
+                    f"  {s.get('kind', '?'):6} +0x{int(s.get('offset') or 0):04x} "
+                    f"{s.get('name')}"
+                )
+
+
+_OPS = frozenset({"symbols", "addr2line", "locations", "disasm", "mpy", "has-dwarf"})
+
+
+def _main_ops(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -499,6 +636,11 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     data = args.path.read_bytes()
+    if data[:4] == b"MPZL":
+        try:
+            data = _load("wasmmod_zlib").unwrap_bytes(data)
+        except Exception:
+            pass
 
     if args.cmd == "symbols":
         for s in list_symbols(data):
@@ -529,5 +671,118 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _main_artifact(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("path", type=Path, help="Local .wasm / .aot / .elf / .zlib")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--verify", action="store_true", help="Verify MPWS against --trust roots")
+    ap.add_argument(
+        "--trust",
+        type=Path,
+        action="append",
+        default=[],
+        help="Root CA PEM/DER (repeatable); used with --verify",
+    )
+    args = ap.parse_args(argv)
+    cli = _cli()
+    path: Path = args.path
+    if not path.is_file():
+        cli.die(PROG, f"not a file: {path}")
+
+    data = path.read_bytes()
+    rich = None
+    try:
+        from pymergetic.metal.cdn_client.contents import inspect_artifact
+
+        rich = inspect_artifact(data, filename=path.name)
+    except ImportError:
+        rich = None
+
+    if args.verify:
+        roots = [p.read_bytes() for p in args.trust]
+        if not roots:
+            cli.die(PROG, "--verify requires at least one --trust root")
+        try:
+            from pymergetic.metal.cdn_client.verify import verify_artifact
+
+            result = verify_artifact(data, trust_roots=roots, filename=path.name)
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "ok": result.ok,
+                            "error": result.error,
+                            "signed": result.signed,
+                            "format": result.format,
+                            "leaf_sha256": result.leaf_sha256,
+                        },
+                        indent=2,
+                    )
+                )
+            else:
+                if result.ok:
+                    print(f"verify: ok ({result.format})")
+                else:
+                    print(f"verify: FAIL — {result.error}", file=sys.stderr)
+                    return 1
+            if rich is None:
+                return 0 if result.ok else 1
+        except ImportError:
+            sign_py = TOOLS_DIR / "wasmmod_sign.py"
+            cmd = [sys.executable, str(sign_py), "verify", str(path)]
+            for root in args.trust:
+                cmd.extend(["--trust", str(root)])
+            proc = subprocess.run(cmd, check=False)
+            if proc.returncode != 0:
+                return proc.returncode
+
+    if rich is not None:
+        if args.json:
+            dump = rich.model_dump() if hasattr(rich, "model_dump") else rich
+            print(json.dumps(dump, indent=2, default=str))
+        else:
+            _print_rich(rich)
+        return 0
+
+    summary = _offline_inspect(path)
+    if args.json:
+        print(json.dumps(summary, indent=2, default=str))
+        return 0
+    print(f"path: {path} (offline inspect — install client for full dump)")
+    if summary.get("has_dwarf") is not None:
+        print(f"has_dwarf={summary.get('has_dwarf')}")
+    if summary.get("source_files"):
+        print("source files:")
+        for p in summary["source_files"]:
+            print(f"  {p}")
+    if summary.get("source_error"):
+        print(f"source: {summary['source_error']}")
+    deps = summary.get("deps")
+    if isinstance(deps, list) and deps:
+        print("deps:")
+        for d in deps:
+            if isinstance(d, dict):
+                print(f"  {d.get('name')}@{d.get('version')}")
+    elif summary.get("deps_error"):
+        print(f"deps: {summary['deps_error']}")
+    syms = summary.get("symbols")
+    if isinstance(syms, list) and syms:
+        print(f"symbols ({len(syms)}):")
+        for s in syms:
+            print(f"  {s.get('kind', '?'):6} +0x{int(s.get('offset') or 0):04x} {s.get('name')}")
+    if summary.get("sign_info"):
+        print(summary["sign_info"])
+    if summary.get("sign_error"):
+        print(f"sign: {summary['sign_error']}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] in _OPS:
+        return _main_ops(args)
+    return _main_artifact(args)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_cli().invoke(main, prog=PROG))
