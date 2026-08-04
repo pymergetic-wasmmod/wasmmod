@@ -18,7 +18,7 @@ import sys
 from typing import Any, Callable, NoReturn
 
 # Bump when wasmmod starts requiring a newer client symbol/contract.
-CLIENT_MIN_VERSION = "0.1.0a2"
+CLIENT_MIN_VERSION = "0.1.0a3"
 
 
 def _cdn_errors():
