@@ -29,7 +29,12 @@ typedef struct mp_wasm_elf_image_t {
 
 // Resolve an undefined ELF symbol (SHN_UNDEF) to a callable address.
 // Return NULL to leave it unresolved (load fails if a reloc needs it).
+// Optional: mp_wasm_elf_resolve_set_err() to replace the generic
+// "unresolved symbol: X" message when a reloc needs that symbol.
 typedef void *(*mp_wasm_elf_sym_resolve_t)(const char *name, void *ctx);
+
+void mp_wasm_elf_resolve_set_err(const char *msg);
+void mp_wasm_elf_resolve_clear_err(void);
 
 // Load ELF64 ET_REL (host arch: x86_64 or aarch64) into an executable image.
 // No dlopen. resolve may be NULL when the object has no external undefs.

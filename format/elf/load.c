@@ -260,6 +260,25 @@ static uintptr_t align_up(uintptr_t v, uintptr_t a) {
     return (v + a - 1) & ~(a - 1);
 }
 
+static char elf_resolve_err[160];
+
+void mp_wasm_elf_resolve_clear_err(void) {
+    elf_resolve_err[0] = '\0';
+}
+
+void mp_wasm_elf_resolve_set_err(const char *msg) {
+    if (msg == NULL || msg[0] == '\0') {
+        elf_resolve_err[0] = '\0';
+        return;
+    }
+    size_t n = strlen(msg);
+    if (n >= sizeof(elf_resolve_err)) {
+        n = sizeof(elf_resolve_err) - 1;
+    }
+    memcpy(elf_resolve_err, msg, n);
+    elf_resolve_err[n] = '\0';
+}
+
 void mp_wasm_elf_image_free(mp_wasm_elf_image_t *img) {
     if (img == NULL) {
         return;
@@ -279,6 +298,7 @@ void mp_wasm_elf_image_free(mp_wasm_elf_image_t *img) {
 bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     mp_wasm_elf_sym_resolve_t resolve, void *resolve_ctx,
     mp_wasm_elf_image_t **out, char *errbuf, size_t errbuf_len) {
+    mp_wasm_elf_resolve_clear_err();
     if (out == NULL) {
         return false;
     }
@@ -508,7 +528,12 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
                 const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)sym_i * symsh.sh_entsize);
                 const char *nm = (s->st_name < strsh.sh_size) ? (strtab + s->st_name) : "?";
                 char msg[160];
-                snprintf(msg, sizeof(msg), "unresolved symbol: %s", nm);
+                if (elf_resolve_err[0] != '\0') {
+                    snprintf(msg, sizeof(msg), "%s", elf_resolve_err);
+                    mp_wasm_elf_resolve_clear_err();
+                } else {
+                    snprintf(msg, sizeof(msg), "unresolved symbol: %s", nm);
+                }
                 munmap(map, map_size);
                 MICROPY_WASM_FREE(sec_addr);
                 MICROPY_WASM_FREE(got_off);

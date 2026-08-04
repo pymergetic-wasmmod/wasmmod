@@ -34,6 +34,7 @@
 
 #if MICROPY_PY_WASM
 
+#include <stdio.h>
 #include <string.h>
 
 #include "extmod/wasmmod/forward.h"
@@ -529,7 +530,18 @@ static void *elf_resolve_native(const char *module, const char *func) {
     if (strcmp(module, MP_WASM_MODULE) == 0) {
         return mp_wasm_loader_elf_lookup(func);
     }
-    return NULL; // micropython.* not wired for ELF
+    if (strncmp(module, "micropython.", 12) == 0) {
+        char msg[160];
+        // Cap printed names so -Werror=format-truncation stays quiet.
+        char mshort[48];
+        char fshort[48];
+        snprintf(mshort, sizeof(mshort), "%.47s", module);
+        snprintf(fshort, sizeof(fshort), "%.47s", func);
+        snprintf(msg, sizeof(msg), "micropython.* not supported: %s.%s", mshort, fshort);
+        mp_wasm_elf_resolve_set_err(msg);
+        return NULL;
+    }
+    return NULL;
 }
 
 static void *elf_resolve_import(const char *name, void *ctx) {

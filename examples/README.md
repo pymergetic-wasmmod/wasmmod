@@ -37,7 +37,7 @@ make -C extmod/wasmmod/examples test
 # equivalent if symlink exists:
 # make -C examples/wasmmod test
 
-# ELF container smoke (hello / client peer / hostcall → Python slots)
+# ELF container smoke (hello / client peer / hostcall → slots+buf+mem+py+version)
 make -C extmod/wasmmod/examples test-elf
 
 # Interp + AOT + Fast JIT (+ LLVM JIT if a complete LLVM is available)
@@ -150,14 +150,15 @@ Same register/connect/sign path as Wasm; execute is in-tree ET_REL:
 
 | Example | Artifact | Notes |
 |---------|----------|--------|
-| `hello_elf/` | `packs/hello.elf` | freestanding exports + shared `hello` Python tree |
+| `hello_elf/` | `packs/hello.elf` | freestanding exports + shared `hello` Python tree (`-fPIC`) |
 | `client_elf/` | `packs/client.elf` | peer `hello` via MPWI + GOT |
-| `host_elf/` | `packs/hostcall.elf` | `wasmmod.host` slots → Python |
+| `host_elf/` | `packs/hostcall.elf` | `wasmmod.host` slots + `via_buf` / `via_mem` / `via_py` + loader `version` |
 
 ```sh
 make -C extmod/wasmmod/examples/hello_elf
 make -C extmod/wasmmod/examples/hello_elf aarch64   # CDN twin (not runnable on x86)
 make -C extmod/wasmmod/examples test-elf
+# Guest C: -ffreestanding -fPIC -fno-plt (prefer -fPIC; -fno-pic needs MAP_32BIT)
 # pack-elf CLI: python3 tools/wasmmod.py pack-elf --obj foo.o --manifest pack.toml -o foo.elf
 ```
 
