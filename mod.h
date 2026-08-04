@@ -79,6 +79,9 @@ mp_obj_t wasm_module_close(mp_obj_t self_in);
 
 mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override);
 
+// Load pack from already-fetched artifact bytes (CDN / in-memory).
+mp_obj_t mp_wasm_load_pack_bytes(const uint8_t *code, uint32_t code_len, const char *name_override);
+
 extern int mp_wasm_import_hook_depth;
 
 // Python API fun objs (module globals)
@@ -88,6 +91,7 @@ MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_unload_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_import_wasm_obj);
 MP_DECLARE_CONST_FUN_OBJ_KW(mod_wasm_install_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_uninstall_hook_obj);
+MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_cdn_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_verify_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_sig_info_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_verify_sig_obj);

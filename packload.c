@@ -40,6 +40,9 @@
 
 #include "extmod/wasmmod/fetch.h"
 #include "extmod/wasmmod/finder.h"
+#include "extmod/wasmmod/forward.h"
+#include "extmod/wasmmod/cdn.h"
+#include "extmod/wasmmod/resolve.h"
 #include "extmod/wasmmod/mod.h"
 #include "extmod/wasmmod/pack.h"
 #include "extmod/wasmmod/zlibutil.h"
@@ -356,7 +359,7 @@ static void ensure_parent_packages(const char *full_name) {
         }
         qstr parent = qstr_from_strn(full_name, i);
         mp_obj_t pmod = mp_obj_new_module(parent);
-        // Packages need __path__ so `import parent.child` works.
+        // MicroPython packages use a str __path__ (not a list like CPython).
         mp_map_elem_t *el = mp_map_lookup(&mp_obj_module_get_globals(pmod)->map,
             MP_OBJ_NEW_QSTR(MP_QSTR___path__), MP_MAP_LOOKUP);
         if (el == NULL) {
@@ -489,6 +492,151 @@ static void bind_pack_exports(mp_obj_t root, mp_wasm_module_t *wmod, const char 
     mp_wasm_module_foreach_numeric_export(wmod, bind_export_cb, &bctx);
 }
 
+// Bind Python package + call mp_pack_load for an already-instantiated module.
+static mp_obj_t finish_pack_after_load(mp_wasm_module_t *wmod, const uint8_t *meta, uint32_t meta_len,
+    const char *pack_name) {
+    int32_t lc = 0;
+    (void)mp_wasm_module_call0(wmod, "mp_pack_load", &lc, NULL, 0);
+
+    qstr qpack = qstr_from_str(pack_name);
+    mp_obj_t root = mp_obj_new_module(qpack);
+    mp_obj_t wasm_obj = mp_wasm_wrap_loaded(wmod);
+    ((mp_obj_wasm_module_t *)MP_OBJ_TO_PTR(wasm_obj))->pack_name = qpack;
+
+    mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(root)),
+        MP_OBJ_NEW_QSTR(MP_QSTR___wasm__), wasm_obj);
+    mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(root)),
+        MP_OBJ_NEW_QSTR(MP_QSTR___path__),
+        mp_obj_new_str(pack_name, strlen(pack_name)));
+
+    mp_wasm_pack_info_t info;
+    memset(&info, 0, sizeof(info));
+    bool have_pack = false;
+    {
+        const uint8_t *payload = NULL;
+        uint32_t payload_len = 0;
+        have_pack = mp_wasm_pack_find_section(meta, meta_len, &payload, &payload_len)
+            && mp_wasm_pack_parse(payload, payload_len, &info);
+    }
+    bind_pack_exports(root, wmod, pack_name, have_pack ? &info : NULL);
+
+    if (have_pack) {
+        uint32_t *best_idx = m_new(uint32_t, info.n_files ? info.n_files : 1);
+        int *best_score = m_new(int, info.n_files ? info.n_files : 1);
+        uint32_t n_best = 0;
+        for (uint32_t i = 0; i < info.n_files; ++i) {
+            const mp_wasm_pack_file_t *f = &info.files[i];
+            if (f->kind != MP_WASM_PACK_KIND_PY && f->kind != MP_WASM_PACK_KIND_MPY
+                && f->kind != MP_WASM_PACK_KIND_PYC) {
+                continue;
+            }
+            int score = score_pack_file_for_upy_host(f);
+            if (score < 0) {
+                continue;
+            }
+            uint32_t slot = n_best;
+            bool found = false;
+            for (uint32_t j = 0; j < n_best; ++j) {
+                if (pack_logical_eq(f->path, f->path_len, info.files[best_idx[j]].path,
+                        info.files[best_idx[j]].path_len)) {
+                    slot = j;
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                if (score > best_score[slot]) {
+                    best_idx[slot] = i;
+                    best_score[slot] = score;
+                }
+            } else {
+                best_idx[n_best] = i;
+                best_score[n_best] = score;
+                n_best++;
+            }
+        }
+        for (uint32_t j = 0; j < n_best; ++j) {
+            const mp_wasm_pack_file_t *f = &info.files[best_idx[j]];
+            vstr_t dotted;
+            vstr_init(&dotted, f->path_len + 16);
+            path_to_dotted(pack_name, strlen(pack_name), f->path, f->path_len, &dotted);
+            const char *dotted_name = vstr_null_terminated_str(&dotted);
+            ensure_parent_packages(dotted_name);
+            qstr qmod = qstr_from_str(dotted_name);
+            mp_obj_t mod = mp_obj_new_module(qmod);
+            mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(mod)),
+                MP_OBJ_NEW_QSTR(MP_QSTR___wasm__), wasm_obj);
+            if (path_is_package_init(f->path, f->path_len)) {
+                mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(mod)),
+                    MP_OBJ_NEW_QSTR(MP_QSTR___path__),
+                    mp_obj_new_str(dotted_name, dotted.len));
+            }
+            vstr_t src_name;
+            vstr_init(&src_name, f->path_len + 16);
+            vstr_add_str(&src_name, pack_name);
+            vstr_add_char(&src_name, ':');
+            vstr_add_strn(&src_name, f->path, f->path_len);
+            exec_pack_file_into_module(mod, vstr_null_terminated_str(&src_name), f);
+            link_module_to_parent(dotted_name);
+            vstr_clear(&src_name);
+            vstr_clear(&dotted);
+        }
+        m_del(uint32_t, best_idx, info.n_files ? info.n_files : 1);
+        m_del(int, best_score, info.n_files ? info.n_files : 1);
+    }
+    mp_wasm_pack_info_free(&info);
+    return root;
+}
+
+static mp_obj_t load_closure_from_root(const char *root_name, const char *root_version,
+    const uint8_t *root_bytes, uint32_t root_len) {
+    mp_wasm_closure_t cl;
+    char err[160];
+    if (!mp_wasm_resolve_closure(root_name, root_version, root_bytes, root_len, &cl, err, sizeof(err))) {
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm resolve: %s"), err);
+    }
+
+    mp_wasm_module_t *mods[MP_WASM_CLOSURE_MAX];
+    memset(mods, 0, sizeof(mods));
+
+    // Phase: instantiate + registry_add (inside module_load_ex) for every node.
+    for (uint32_t i = 0; i < cl.n_nodes; ++i) {
+        uint32_t blen = 0;
+        const uint8_t *bytes = mp_wasm_closure_cached(cl.nodes[i].name, cl.nodes[i].version, &blen);
+        if (bytes == NULL) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm resolve: missing cache entry"));
+        }
+        mods[i] = mp_wasm_module_load_ex(bytes, blen, NULL, 0, cl.nodes[i].name, NULL, err, sizeof(err));
+        if (mods[i] == NULL) {
+            mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm load: %s"), err);
+        }
+        mp_wasm_module_set_name(mods[i], cl.nodes[i].name);
+    }
+
+    // Phase: connect — every guest import target must be registered.
+    for (uint32_t i = 0; i < cl.n_nodes; ++i) {
+        uint32_t blen = 0;
+        const uint8_t *bytes = mp_wasm_closure_cached(cl.nodes[i].name, cl.nodes[i].version, &blen);
+        if (!mp_wasm_connect_imports(bytes, blen, err, sizeof(err))) {
+            if (mp_wasm_cdn_require_explicit_deps()) {
+                mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm connect: %s"), err);
+            }
+        }
+    }
+
+    // Phase: run lifecycle + Python bind (deps-first order from resolve).
+    mp_obj_t root_obj = mp_const_none;
+    for (uint32_t i = 0; i < cl.n_nodes; ++i) {
+        uint32_t blen = 0;
+        const uint8_t *bytes = mp_wasm_closure_cached(cl.nodes[i].name, cl.nodes[i].version, &blen);
+        mp_obj_t obj = finish_pack_after_load(mods[i], bytes, blen, cl.nodes[i].name);
+        if (strcmp(cl.nodes[i].name, root_name) == 0 || root_obj == mp_const_none) {
+            root_obj = obj;
+        }
+    }
+    return root_obj;
+}
+
 static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
     const uint8_t *meta, uint32_t meta_len, const char *path_hint, const char *name_override) {
     uint8_t *code_owned = NULL;
@@ -532,6 +680,19 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
         pack_name = "wasm_pack";
     }
 
+    // Closure load when MPWD present or metal-cdn driver active.
+    {
+        const uint8_t *dp = NULL;
+        uint32_t dl = 0;
+        bool has_deps = mp_wasm_deps_find_section(meta, meta_len, &dp, &dl);
+        if (has_deps || mp_wasm_cdn_require_explicit_deps()) {
+            mp_obj_t root = load_closure_from_root(pack_name, "", code, code_len);
+            MICROPY_WASM_FREE(code_owned);
+            MICROPY_WASM_FREE(meta_owned);
+            return root;
+        }
+    }
+
     char err[128];
     mp_wasm_module_t *wmod = mp_wasm_module_load_ex(code, code_len, meta, meta_len,
         pack_name, path_hint, err, sizeof(err));
@@ -542,101 +703,47 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
     }
     mp_wasm_module_set_name(wmod, pack_name);
 
-    mp_wasm_pack_info_t info;
-    memset(&info, 0, sizeof(info));
-    bool have_pack = false;
     {
         uint32_t blen = 0;
         const uint8_t *bytes = mp_wasm_module_meta_bytes(wmod, &blen);
-        const uint8_t *payload = NULL;
-        uint32_t payload_len = 0;
-        have_pack = mp_wasm_pack_find_section(bytes, blen, &payload, &payload_len)
-            && mp_wasm_pack_parse(payload, payload_len, &info);
-    }
-
-    int32_t lc = 0;
-    (void)mp_wasm_module_call0(wmod, "mp_pack_load", &lc, NULL, 0);
-
-    qstr qpack = qstr_from_str(pack_name);
-    mp_obj_t root = mp_obj_new_module(qpack);
-    mp_obj_t wasm_obj = mp_wasm_wrap_loaded(wmod);
-    ((mp_obj_wasm_module_t *)MP_OBJ_TO_PTR(wasm_obj))->pack_name = qpack;
-
-    mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(root)),
-        MP_OBJ_NEW_QSTR(MP_QSTR___wasm__), wasm_obj);
-    // Root is always a package when loaded via load_pack.
-    mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(root)),
-        MP_OBJ_NEW_QSTR(MP_QSTR___path__),
-        mp_obj_new_str(pack_name, strlen(pack_name)));
-
-    bind_pack_exports(root, wmod, pack_name, have_pack ? &info : NULL);
-
-    if (have_pack) {
-        // Pick one file per logical module: best upy .mpy, else .py (ignore .pyc).
-        uint32_t *best_idx = m_new(uint32_t, info.n_files ? info.n_files : 1);
-        int *best_score = m_new(int, info.n_files ? info.n_files : 1);
-        uint32_t n_best = 0;
-        for (uint32_t i = 0; i < info.n_files; ++i) {
-            const mp_wasm_pack_file_t *f = &info.files[i];
-            if (f->kind != MP_WASM_PACK_KIND_PY
-                && f->kind != MP_WASM_PACK_KIND_MPY
-                && f->kind != MP_WASM_PACK_KIND_PYC) {
-                continue;
-            }
-            int score = score_pack_file_for_upy_host(f);
-            if (score < 0) {
-                continue;
-            }
-            uint32_t slot = n_best;
-            bool found = false;
-            for (uint32_t j = 0; j < n_best; ++j) {
-                const mp_wasm_pack_file_t *g = &info.files[best_idx[j]];
-                if (pack_logical_eq(f->path, f->path_len, g->path, g->path_len)) {
-                    slot = j;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                best_idx[n_best] = i;
-                best_score[n_best] = score;
-                n_best++;
-            } else if (score > best_score[slot]) {
-                best_idx[slot] = i;
-                best_score[slot] = score;
+        char cerr[128];
+        if (!mp_wasm_connect_imports(bytes, blen, cerr, sizeof(cerr))) {
+            if (mp_wasm_cdn_require_explicit_deps()) {
+                MICROPY_WASM_FREE(code_owned);
+                MICROPY_WASM_FREE(meta_owned);
+                mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm connect: %s"), cerr);
             }
         }
-        for (uint32_t j = 0; j < n_best; ++j) {
-            const mp_wasm_pack_file_t *f = &info.files[best_idx[j]];
-            vstr_t dotted;
-            path_to_dotted(pack_name, strlen(pack_name), f->path, f->path_len, &dotted);
-            const char *dotted_name = vstr_null_terminated_str(&dotted);
-            qstr qmod = qstr_from_strn(dotted.buf, dotted.len);
-            ensure_parent_packages(dotted_name);
-            mp_obj_t mod = mp_obj_new_module(qmod);
-            mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(mod)),
-                MP_OBJ_NEW_QSTR(MP_QSTR___wasm__), wasm_obj);
-            if (path_is_package_init(f->path, f->path_len)) {
-                mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(mod)),
-                    MP_OBJ_NEW_QSTR(MP_QSTR___path__),
-                    mp_obj_new_str(dotted_name, dotted.len));
-            }
-            vstr_t src_name;
-            vstr_init(&src_name, f->path_len + 16);
-            vstr_add_str(&src_name, pack_name);
-            vstr_add_char(&src_name, ':');
-            vstr_add_strn(&src_name, f->path, f->path_len);
-            exec_pack_file_into_module(mod, vstr_null_terminated_str(&src_name), f);
-            link_module_to_parent(dotted_name);
-            vstr_clear(&src_name);
-            vstr_clear(&dotted);
-        }
+        mp_obj_t root = finish_pack_after_load(wmod, bytes, blen, pack_name);
+        MICROPY_WASM_FREE(code_owned);
+        MICROPY_WASM_FREE(meta_owned);
+        return root;
     }
+}
 
-    mp_wasm_pack_info_free(&info);
-    MICROPY_WASM_FREE(code_owned);
-    MICROPY_WASM_FREE(meta_owned);
-    return root;
+
+static void wasm_path_append_unique(const char *root);
+
+// Flat-mirror deps: load_pack("packs/bridge.wasm") must resolve hello.wasm next to it.
+// Append the containing directory to wasm.path (idempotent) before closure fetch.
+static void wasm_path_add_local_pack_dir(const char *path) {
+    if (path == NULL || path[0] == '\0' || mp_wasm_uri_is_http(path)) {
+        return;
+    }
+    const char *slash = strrchr(path, '/');
+    if (slash == NULL) {
+        wasm_path_append_unique(".");
+        return;
+    }
+    if (slash == path) {
+        wasm_path_append_unique("/");
+        return;
+    }
+    vstr_t dir;
+    vstr_init(&dir, (size_t)(slash - path) + 1);
+    vstr_add_strn(&dir, path, (size_t)(slash - path));
+    wasm_path_append_unique(vstr_null_terminated_str(&dir));
+    vstr_clear(&dir);
 }
 
 mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override) {
@@ -650,6 +757,9 @@ mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override) {
     vstr_t logical_storage;
     const char *logical = logical_artifact_path(path, &logical_storage);
     bool logical_owned = (logical != path);
+
+    // Before MPWD closure fetch: sibling packs live beside this artifact.
+    wasm_path_add_local_pack_dir(logical);
 
     #if MICROPY_PY_WASM_AOT
     // Finder may hand us .aotN; otherwise prefer sibling .aotN next to .wasm.
@@ -746,6 +856,13 @@ mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override) {
         vstr_clear(&logical_storage);
     }
     return root;
+}
+
+mp_obj_t mp_wasm_load_pack_bytes(const uint8_t *code, uint32_t code_len, const char *name_override) {
+    if (code == NULL || code_len == 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("empty wasm pack bytes"));
+    }
+    return load_pack_from_parts(code, code_len, NULL, 0, NULL, name_override);
 }
 
 static mp_obj_t mod_wasm_load_pack(size_t n_args, const mp_obj_t *args) {
@@ -960,7 +1077,9 @@ static void wasm_path_add_http_root(const char *url, bool prepend) {
 static void wasm_path_add_http_roots(mp_obj_t url_obj) {
     // One URL, or an ordered list/tuple (index 0 = highest priority).
     if (mp_obj_is_str(url_obj)) {
-        wasm_path_add_http_root(mp_obj_str_get_str(url_obj), true);
+        const char *url = mp_obj_str_get_str(url_obj);
+        mp_wasm_cdn_configure(url, NULL);
+        wasm_path_add_http_root(url, true);
         return;
     }
     size_t n = 0;
@@ -974,7 +1093,12 @@ static void wasm_path_add_http_roots(mp_obj_t url_obj) {
         if (!mp_obj_is_str(items[i - 1])) {
             mp_raise_TypeError(MP_ERROR_TEXT("install_hook: url entries must be str"));
         }
-        wasm_path_add_http_root(mp_obj_str_get_str(items[i - 1]), true);
+        const char *url = mp_obj_str_get_str(items[i - 1]);
+        // First list entry (highest priority) selects the driver.
+        if (i == 1) {
+            mp_wasm_cdn_configure(url, NULL);
+        }
+        wasm_path_add_http_root(url, true);
     }
 }
 
@@ -1007,6 +1131,34 @@ static mp_obj_t mod_wasm_install_hook(size_t n_args, const mp_obj_t *pos_args, m
 }
 MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_install_hook_obj, 0, mod_wasm_install_hook);
 
+// wasm.cdn(url, token=None) → driver name string
+static mp_obj_t mod_wasm_cdn(size_t n_args, const mp_obj_t *args) {
+    if (n_args < 1 || !mp_obj_is_str(args[0])) {
+        mp_raise_TypeError(MP_ERROR_TEXT("cdn(url, token=None)"));
+    }
+    const char *url = mp_obj_str_get_str(args[0]);
+    if (!mp_wasm_uri_is_http(url)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("cdn: url must be http(s)"));
+    }
+    const char *token = NULL;
+    if (n_args >= 2 && args[1] != mp_const_none) {
+        if (!mp_obj_is_str(args[1])) {
+            mp_raise_TypeError(MP_ERROR_TEXT("cdn: token must be str"));
+        }
+        token = mp_obj_str_get_str(args[1]);
+    }
+    mp_wasm_cdn_configure(url, token);
+    // Path driver: flat HTTP pack root on wasm.path. Metal driver uses
+    // /artifacts/lead|pin only — do not add the CDN base as a path root
+    // (avoids HEAD storms on /cdn/foo/bar.wasm before artifacts/).
+    if (mp_wasm_cdn_driver() == MP_WASM_CDN_DRIVER_PATH) {
+        wasm_path_add_http_root(url, true);
+    }
+    const char *name = mp_wasm_cdn_driver_name();
+    return mp_obj_new_str(name, strlen(name));
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_cdn_obj, 1, 2, mod_wasm_cdn);
+
 static mp_obj_t mod_wasm_uninstall_hook(void) {
     #if !MICROPY_CAN_OVERRIDE_BUILTINS
     return mp_const_none;
@@ -1017,6 +1169,8 @@ static mp_obj_t mod_wasm_uninstall_hook(void) {
     mp_store_attr(MP_OBJ_FROM_PTR(&mp_module_builtins), MP_QSTR___import__, MP_STATE_VM(mp_wasm_prev_import));
     MP_STATE_VM(mp_wasm_prev_import) = MP_OBJ_NULL;
     mp_wasm_import_hook_depth = 0;
+    mp_wasm_cdn_reset();
+    mp_wasm_closure_cache_clear();
     return mp_const_none;
     #endif
 }

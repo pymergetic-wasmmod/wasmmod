@@ -105,13 +105,22 @@ type = "package"              # wasm pack kind
 name = "mypkg"                # import root / sys.modules key
 version = "0.1.0"
 
-# Optional blurb (tooling/docs only; not required in the wasm)
+# Optional blurb (tooling/docs; also used by `wasmmod publish` as description)
 comment = "Mixed native + Python demo pack"
+description = "Longer summary for the CDN package page"
+license = "MIT"
+homepage = "https://example.com/mypkg"
+author = "dev@example.com"   # → CDN maintainer_email / author page
 
 # Languages present under src/ (mixed allowed).
 # Tools use this to pick compilers; empty = discover by file extension.
 # "cpp" / "rs" are impl languages only — exported surface is still C ABI.
 impl = ["c", "rs"]            # subset of: "c" | "cpp" | "rs"
+
+# CDN / install closure (→ wasmmod.deps). Exact versions.
+# Distinct from [[imports]] (guest→guest call graph; no versions).
+[deps]
+greeter = "0.1.0"
 
 [python]
 # mount = "src"               # default; tree → wasmmod.pack (strip prefix)
@@ -146,6 +155,15 @@ export = "sub_ping"           # optional: when Wasm export ≠ func
 module = "greeter"            # other pack's `name`
 func = "hello"
 ```
+
+`[deps]` vs `[[imports]]`:
+
+| Field | Section | Purpose |
+|-------|---------|---------|
+| `[deps]` | `wasmmod.deps` (MPWD) | Install/CDN closure: package **name → exact version** |
+| `[[imports]]` | `wasmmod.imports` (MPWI) | Runtime forwarders: **(module, func)** call graph |
+
+Nested child packs still need their parent via normal Python imports; `[deps]` is for **peer packages** the CDN resolver / device install order must fetch.
 
 ### Minimal manifest
 
@@ -319,6 +337,15 @@ from sensor import util # py child inside the pack — already natural
 
 wasm.uninstall_hook()   # restore previous __import__
 ```
+
+For **metal-cdn** (index + pin artifacts), prefer:
+
+```python
+wasm.cdn("http://127.0.0.1:8000/cdn", token)  # selects MetalCdnDriver
+```
+
+`install_hook("…/cdn")` also selects that driver when the URL looks like a CDN
+base; flat pack mirrors keep `PathDriver`. See [Circular deps and phased load](#circular-deps-and-phased-load).
 
 `wasm.verify()` returns the current flag; `wasm.VERIFY` is the compile-time
 `MICROPY_WASM_VERIFY` mode (0/1/2). Runtime `verify(False)` skips checks even
@@ -680,8 +707,82 @@ UB.
 ├──────────────────────────────────────────────┤
 │ custom "wasmmod.imports"  (optional)     │
 │   [{module, func}, ...] guest→guest needs    │
+├──────────────────────────────────────────────┤
+│ custom "wasmmod.deps"  (optional)        │
+│   [{name, version}, ...] install/CDN deps    │
 └──────────────────────────────────────────────┘
 ```
+
+## Custom section: `wasmmod.deps`
+
+CDN / device install dependencies (exact versions). Emitted from pack.toml
+`[deps]` by `wasmmod pack`. Magic **`MPWD`**, little-endian:
+
+```text
+magic       4  b"MPWD"
+version     2  1
+n_deps      4
+n_deps ×:
+  name_len  2
+  name      N   package name
+  ver_len   2
+  ver       V   exact version string
+```
+
+On `metal-cdn` publish, if `PublishRequest.deps` is empty, the server fills
+`PackageEntry.deps` from this section (via `inspect_upload`).
+
+### Readers (C / Rust / Python)
+
+| Lang | API |
+|------|-----|
+| C | `mp_wasm_deps_find_section` / `mp_wasm_deps_parse` ([`pack.h`](../pack.h) / `pack.c`) |
+| Rust | `deps_find_section` / `deps_parse` (`extmod_rs/wasmmod/pack.rs`, rewrite/shim later) |
+| Python | `parse_deps_payload` (`tools/wasmmod_pack.py`); metal-cdn `contents.parse_deps_payload` |
+
+### Circular deps and phased load
+
+`[deps]` may be **cyclic** (A needs B and B needs A). Guest→guest calls still
+use `[[imports]]` / MPWI forwarders. The loader does **not** instantiate one
+pack at a time when MPWD is present; it runs a closure:
+
+1. **Resolve** — walk MPWD; cycles become one SCC (Tarjan).
+2. **Fetch** — `PathDriver` (wasm.path / flat URL root) or `MetalCdnDriver`
+   (`…/cdn` → `/artifacts/pin/{ver}/…`).
+3. **Register** — MPWI forwarders + Wasm instantiate for every node; then
+   `registry_add` for all names.
+4. **Connect** — every MPWI guest target must be registered.
+5. **Run** — `mp_pack_load` + embed Python for each node (deps-first; within an
+   SCC, all are registered before any run).
+
+Configure CDN from MicroPython:
+
+```python
+import wasm
+wasm.cdn("http://127.0.0.1:8000/cdn", token)   # metal-cdn driver + optional Bearer
+wasm.install_hook()
+# Dotted names (Python package style); metal-cdn UI tree splits on '.'.
+# Source may be sibling flat dirs or a nested monorepo (`wasmmod pack-tree`).
+#   test_a / test_a.test_b.test_c / test_a.test_d
+#   test_a2 / test_a2.test_b2.test_c2 / test_a2.test_d2
+from test_a.test_b import test_c   # MPWD pulls peer test_a.test_d
+from test_a2.test_b2 import test_c2
+# or flat pack mirror:
+# wasm.install_hook("https://example.org/packs/")
+```
+
+See also `examples/tree/` (sibling + `nested/`) and
+`make -C extmod/wasmmod/examples test-tree{,-cdn}`.
+
+**C runtime** (device loader): `mp_wasm_deps_*` in `pack.c`, `cdn.c` /
+`resolve.c`, phased load in `packload.c`, `mp_wasm_connect_imports` in
+`forward.c`, Python export `wasm.cdn`.
+
+Under `MetalCdnDriver`, an MPWI peer missing from the closure is an error
+(deps are authoritative). Path driver may still soft-connect for local peers.
+
+Do not cross-call peer packs from module top-level until the Run phase for
+that SCC has finished (safe window: after `mp_pack_load` for all peers).
 
 ## Custom section: `wasmmod.pack`
 

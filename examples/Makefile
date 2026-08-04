@@ -31,7 +31,21 @@ PACK_WASMS = \
 	packs/hello.wasm \
 	packs/client.wasm \
 	packs/mixed.wasm \
-	packs/bridge.wasm
+	packs/bridge.wasm \
+	packs/test_a.wasm \
+	packs/test_a.test_d.wasm \
+	packs/test_a.test_b.test_c.wasm \
+	packs/test_a2.wasm \
+	packs/test_a2.test_d2.wasm \
+	packs/test_a2.test_b2.test_c2.wasm
+
+TREE_WASMS = \
+	packs/test_a.wasm \
+	packs/test_a.test_d.wasm \
+	packs/test_a.test_b.test_c.wasm \
+	packs/test_a2.wasm \
+	packs/test_a2.test_d2.wasm \
+	packs/test_a2.test_b2.test_c2.wasm
 
 # Prefer wamrc from this tree's WAMR (version-matched). Override with WAMRC=...
 WAMRC_BUILD ?= $(UNIX)/build-wamrc
@@ -42,7 +56,7 @@ AOT_EXT := .aot$(AOT_VER)
 LLVM_CMAKE_DIR ?= $(shell llvm-config-18 --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null)
 
 .PHONY: all clean test test-aot test-fast-jit test-jit test-engines test-http test-http-verify \
-	test-verify test-signed packs aot-packs sign-packs sign-key wamrc \
+	test-verify test-signed test-tree test-tree-cdn test-tree-cdn-versions packs tree-packs aot-packs sign-packs sign-key wamrc \
 	host host-aot host-fast-jit host-jit host-verify demo repl
 
 packs:
@@ -50,6 +64,10 @@ packs:
 	$(MAKE) -C client
 	$(MAKE) -C mixed
 	$(MAKE) -C bridge
+	$(MAKE) -C tree
+
+tree-packs:
+	$(MAKE) -C tree
 
 all: packs
 
@@ -141,6 +159,104 @@ repl: packs host
 # Default smoke: interpreter (no AOT/JIT).
 test: packs host
 	$(MPY_INTERP) $(CURDIR)/run_matrix.py
+
+# Dotted module tree: sibling flat packs + nested monorepo (pack-tree).
+test-tree: tree-packs host
+	$(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both
+
+# Same as test-tree after publishing tree packs to a local metal-cdn.
+# Default URL http://127.0.0.1:8000/cdn. Token optional when CDN allow-open publish.
+test-tree-cdn: tree-packs host
+	@set -e; \
+	cdn_url="$${METAL_CDN_URL:-http://127.0.0.1:8000/cdn}"; \
+	token="$${METAL_CDN_TOKEN:-}"; \
+	PACKS="$(CURDIR)/packs"; \
+	pub() { \
+	  name="$$1"; file="$$2"; ver="$$3"; deps="$$4"; force="$${5:-false}"; \
+	  echo "PUBLISH $$name@$$ver → $$cdn_url (force=$$force)"; \
+	  auth=(); \
+	  if [ -n "$$token" ]; then auth=(-H "Authorization: Bearer $$token"); fi; \
+	  code=$$(curl -sS -o /tmp/wasmmod-tree-pub.json -w '%{http_code}' -X POST "$$cdn_url/publish" \
+	    "$${auth[@]}" \
+	    -F "meta={\"package\":\"$$name\",\"version\":\"$$ver\",\"lead\":true,\"pin\":true,\"force\":$$force,\"deps\":$$deps}" \
+	    -F "files=@$$file;type=application/octet-stream"); \
+	  echo "HTTP $$code"; \
+	  test "$$code" = "201" -o "$$code" = "200"; \
+	}; \
+	pub test_a "$$PACKS/test_a.wasm" 0.1.0 '{}' true; \
+	pub test_a.test_d "$$PACKS/test_a.test_d.wasm" 0.1.0 '{}' true; \
+	pub test_a.test_b.test_c "$$PACKS/test_a.test_b.test_c.wasm" 0.1.0 '{"test_a.test_d":"0.1.0"}' true; \
+	pub test_a2 "$$PACKS/test_a2.wasm" 0.1.0 '{}' true; \
+	pub test_a2.test_d2 "$$PACKS/test_a2.test_d2.wasm" 0.1.0 '{}' true; \
+	pub test_a2.test_b2.test_c2 "$$PACKS/test_a2.test_b2.test_c2.wasm" 0.1.0 '{"test_a2.test_d2":"0.1.0"}' true; \
+	if [ -n "$$token" ]; then \
+	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url --token=$$token; \
+	else \
+	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url; \
+	fi
+
+# Publish 0.1.0 → import → bump lead to 0.2.0 → import again; assert both pins remain.
+test-tree-cdn-versions: tree-packs host
+	@set -e; \
+	cdn_url="$${METAL_CDN_URL:-http://127.0.0.1:8000/cdn}"; \
+	token="$${METAL_CDN_TOKEN:-}"; \
+	PACKS="$(CURDIR)/packs"; \
+	auth=(); \
+	if [ -n "$$token" ]; then auth=(-H "Authorization: Bearer $$token"); fi; \
+	pub() { \
+	  name="$$1"; file="$$2"; ver="$$3"; deps="$$4"; force="$${5:-false}"; \
+	  echo "PUBLISH $$name@$$ver → $$cdn_url (force=$$force)"; \
+	  code=$$(curl -sS -o /tmp/wasmmod-tree-pub.json -w '%{http_code}' -X POST "$$cdn_url/publish" \
+	    "$${auth[@]}" \
+	    -F "meta={\"package\":\"$$name\",\"version\":\"$$ver\",\"lead\":true,\"pin\":true,\"force\":$$force,\"deps\":$$deps}" \
+	    -F "files=@$$file;type=application/octet-stream"); \
+	  echo "HTTP $$code"; \
+	  test "$$code" = "201" -o "$$code" = "200"; \
+	}; \
+	have() { \
+	  stem="$$1"; ver="$$2"; \
+	  for ext in .wasm.zlib .wasm; do \
+	    code=$$(curl -sS -o /dev/null -w '%{http_code}' "$$cdn_url/artifacts/pin/$$ver/$$stem$$ext"); \
+	    if [ "$$code" = "200" ]; then echo "OK pin $$stem@$$ver$$ext"; return 0; fi; \
+	  done; \
+	  echo "FAIL: missing pin $$stem@$$ver"; return 1; \
+	}; \
+	echo "=== publish 0.1.0 ==="; \
+	pub test_a "$$PACKS/test_a.wasm" 0.1.0 '{}' true; \
+	pub test_a.test_d "$$PACKS/test_a.test_d.wasm" 0.1.0 '{}' true; \
+	pub test_a.test_b.test_c "$$PACKS/test_a.test_b.test_c.wasm" 0.1.0 '{"test_a.test_d":"0.1.0"}' true; \
+	pub test_a2 "$$PACKS/test_a2.wasm" 0.1.0 '{}' true; \
+	pub test_a2.test_d2 "$$PACKS/test_a2.test_d2.wasm" 0.1.0 '{}' true; \
+	pub test_a2.test_b2.test_c2 "$$PACKS/test_a2.test_b2.test_c2.wasm" 0.1.0 '{"test_a2.test_d2":"0.1.0"}' true; \
+	echo "=== import lead @0.1.0 ==="; \
+	if [ -n "$$token" ]; then \
+	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url --token=$$token; \
+	else \
+	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url; \
+	fi; \
+	echo "=== publish 0.2.0 (new pins, promote lead) ==="; \
+	pub test_a "$$PACKS/test_a.wasm" 0.2.0 '{}' true; \
+	pub test_a.test_d "$$PACKS/test_a.test_d.wasm" 0.2.0 '{}' true; \
+	pub test_a.test_b.test_c "$$PACKS/test_a.test_b.test_c.wasm" 0.2.0 '{"test_a.test_d":"0.2.0"}' true; \
+	pub test_a2 "$$PACKS/test_a2.wasm" 0.2.0 '{}' true; \
+	pub test_a2.test_d2 "$$PACKS/test_a2.test_d2.wasm" 0.2.0 '{}' true; \
+	pub test_a2.test_b2.test_c2 "$$PACKS/test_a2.test_b2.test_c2.wasm" 0.2.0 '{"test_a2.test_d2":"0.2.0"}' true; \
+	echo "=== assert pins ==="; \
+	have test_a 0.1.0; have test_a 0.2.0; \
+	have test_a.test_d 0.1.0; have test_a.test_d 0.2.0; \
+	have test_a2 0.1.0; have test_a2 0.2.0; \
+	echo "=== import lead @0.2.0 ==="; \
+	if [ -n "$$token" ]; then \
+	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url --token=$$token; \
+	else \
+	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url; \
+	fi; \
+	echo "=== history page has both versions ==="; \
+	html=$$(curl -sS "$$cdn_url/channels/lead/packs/test_a"); \
+	echo "$$html" | grep -q 'id="history"'; \
+	echo "$$html" | grep -q '0.1.0'; \
+	echo "$$html" | grep -q '0.2.0'; \
+	echo "OK version bump e2e"
 
 # Require ECDSA signatures (detached .sig+.crt) + baked root CA in the host.
 test-verify: sign-packs host-verify

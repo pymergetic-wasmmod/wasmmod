@@ -41,4 +41,7 @@ mp_wasm_module_t *mp_wasm_registry_find(const char *name);
 // Must run after wasm_runtime_load and before instantiate. Idempotent per (module,func).
 bool mp_wasm_register_forwarders(const uint8_t *wasm, uint32_t len, char *errbuf, size_t errbuf_len);
 
+// After peers are registry_add'd, ensure every guest MPWI target is present.
+bool mp_wasm_connect_imports(const uint8_t *wasm, uint32_t len, char *errbuf, size_t errbuf_len);
+
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_FORWARD_H

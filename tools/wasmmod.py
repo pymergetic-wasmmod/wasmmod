@@ -30,12 +30,16 @@ Unified wasmmod host tooling.
 
 Commands:
   pack             Build freestanding Wasm + optional pack section
+  pack-tree        Walk nested pack.toml markers → one .wasm per package
   sign             PKI / ECDSA sign .wasm / .aot
   embed-ca         Bake zlib-compressed root CA DER(s) into C
   httpd            Static HTTP server for pack smoke tests
   source           Inspect / extract wasmmod.source section (Python)
   read             Host reader for source/sig (Rust wasmmod-read)
   zlib             Wrap / unwrap whole-artifact MPZL (.wasm.zlib / .aot.zlib)
+  publish          One-shot pack → AOT → sign → zlib → metal-cdn upload
+  cdn              Remote index / search / show / get (pip-style)
+  inspect          Local pack/source/sig summary (+ optional verify)
 
   read needs: cargo build --release -p wasmmod-read
               (or WASMMOD_READ=/path/to/wasmmod-read)
@@ -55,12 +59,16 @@ TOOLS_DIR = Path(__file__).resolve().parent
 # subcommand → module file stem (without .py)
 COMMANDS: dict[str, str] = {
     "pack": "wasmmod_pack",
+    "pack-tree": "wasmmod_pack_tree",
     "sign": "wasmmod_sign",
     "embed-ca": "wasmmod_embed_ca",
     "httpd": "wasmmod_httpd",
     "source": "wasmmod_source",
     "read": "wasmmod_read",
     "zlib": "wasmmod_zlib",
+    "publish": "wasmmod_publish",
+    "cdn": "wasmmod_cdn",
+    "inspect": "wasmmod_inspect",
 }
 
 
@@ -77,7 +85,7 @@ def _load(stem: str):
 
 
 def _usage() -> None:
-    print(__doc__.strip(), file=sys.stderr)
+    print((__doc__ or "").strip(), file=sys.stderr)
     print(file=sys.stderr)
     print("Try: python3 tools/wasmmod.py <command> -h", file=sys.stderr)
 
@@ -98,7 +106,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"wasmmod: {stem}.py has no main()")
     # Subtool argparse sees prog as "wasmmod <cmd>" and its own flags only.
     sys.argv = [f"wasmmod {cmd}", *args[1:]]
-    return int(mod.main())
+    cli = _load("wasmmod_cliutil")
+    return cli.invoke(mod.main, prog=f"wasmmod {cmd}")
 
 
 if __name__ == "__main__":

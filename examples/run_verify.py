@@ -30,12 +30,16 @@ assert h.add(2, 3) == 5
 assert h.greet() == "hello from pack py"
 
 # Without trust, required verify must reject.
-print("trust_clear(); load_pack('packs/client.wasm')  # expect fail")
+print("trust_clear(); load_pack('packs/client.wasm')  # expect verify fail")
 wasm.trust_clear()
 try:
     wasm.load_pack("packs/client.wasm")
     raise SystemExit("FAIL: load succeeded without trust")
 except Exception as e:
     print("  rejected:", type(e).__name__, e)
+    msg = str(e).lower()
+    # Must be signature/trust rejection — not a false green from missing deps.
+    if "verify" not in msg and "signature" not in msg and "trust" not in msg:
+        raise SystemExit("FAIL: expected verify/signature error, got: %r" % (e,))
 
 print("test-verify OK")

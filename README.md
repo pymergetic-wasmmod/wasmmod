@@ -149,7 +149,27 @@ wasmmod/
 Pack sections are named `wasmmod.pack` / `wasmmod.imports` / `wasmmod.host` / `wasmmod.sig` — see [docs/PACK.md](docs/PACK.md). Host I/O replaceability (Metal async): [ports/PORT.md](ports/PORT.md).
 
 CDN / channel publish (lead + `@version` pins, index schema): separate repo
-[metal-cdn](https://github.com/pymergetic/metal-cdn) (scaffold).
+[metal-cdn](https://github.com/pymergetic/metal-cdn).
+
+One-shot release (pack → AOT → sign → zlib → upload):
+
+```sh
+pip install -r requirements-publish.txt
+python3 tools/wasmmod.py publish examples/hello --version 0.1.0 \
+  --key .keys/sign/leaf.key.pem --chain .keys/sign/chain.der \
+  --cdn-url https://cdn.example/cdn --token "$METAL_CDN_TOKEN" --claim
+```
+
+Remote index / lookup / download (pip-style):
+
+```sh
+python3 tools/wasmmod.py cdn list
+python3 tools/wasmmod.py cdn search hello
+python3 tools/wasmmod.py cdn show hello
+python3 tools/wasmmod.py cdn get hello -o ./packs --unwrap
+```
+
+CI: [`.github/workflows/publish-pack.yml`](.github/workflows/publish-pack.yml).
 
 ```mermaid
 flowchart LR

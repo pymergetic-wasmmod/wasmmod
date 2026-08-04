@@ -4,6 +4,8 @@ name = "bridge"
 version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Py-callable bridge covering C/RS/host/peer + i64/f32/f64/mem/handles."
+description = "Bridge pack exercising host/peer/typed call paths."
+license = "MIT"
 
 # Defaults: native.dir = "src", python.mount = "src".
 [python]
@@ -21,6 +23,10 @@ targets = [
 [lifecycle]
 load = "mp_pack_load"
 unload = "mp_pack_unload"
+
+[deps]
+hello = "0.1.0"
+mixed = "0.1.0"
 
 # --- Rust exports ---
 [[exports]]

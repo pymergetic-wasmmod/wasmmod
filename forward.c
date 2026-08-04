@@ -610,4 +610,41 @@ bool mp_wasm_register_forwarders(const uint8_t *wasm, uint32_t len, char *errbuf
     return ok;
 }
 
+bool mp_wasm_connect_imports(const uint8_t *wasm, uint32_t len, char *errbuf, size_t errbuf_len) {
+    const uint8_t *payload = NULL;
+    uint32_t payload_len = 0;
+    if (!mp_wasm_imports_find_section(wasm, len, &payload, &payload_len)) {
+        return true;
+    }
+    mp_wasm_imports_info_t info;
+    if (!mp_wasm_imports_parse(payload, payload_len, &info)) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "bad wasmmod.imports");
+        }
+        return false;
+    }
+    bool ok = true;
+    for (uint32_t i = 0; i < info.n_imports; ++i) {
+        const mp_wasm_import_t *im = &info.imports[i];
+        char module[MP_WASM_NAME_MAX + 1];
+        size_t ml = im->module_len > MP_WASM_NAME_MAX ? MP_WASM_NAME_MAX : im->module_len;
+        memcpy(module, im->module, ml);
+        module[ml] = '\0';
+        if (strncmp(module, "micropython.", 12) == 0
+            || strcmp(module, MP_WASM_HOST_MODULE) == 0
+            || strcmp(module, MP_WASM_MODULE) == 0) {
+            continue;
+        }
+        if (mp_wasm_registry_find(module) == NULL) {
+            if (errbuf && errbuf_len) {
+                snprintf(errbuf, errbuf_len, "connect: pack '%s' not registered", module);
+            }
+            ok = false;
+            break;
+        }
+    }
+    mp_wasm_imports_info_free(&info);
+    return ok;
+}
+
 #endif // MICROPY_PY_WASM

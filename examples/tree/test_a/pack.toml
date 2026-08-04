@@ -1,0 +1,22 @@
+# Root package for dotted-tree e2e (C + Rust + Python).
+type = "package"
+name = "test_a"
+version = "0.1.0"
+impl = ["c", "rs"]
+comment = "Dotted-tree root pack."
+description = "Parent package test_a for module-tree e2e."
+license = "MIT"
+
+[python]
+keep_source = true
+freeze = false
+
+[lifecycle]
+load = "mp_pack_load"
+unload = "mp_pack_unload"
+
+[[exports]]
+func = "a_ping"
+
+[[exports]]
+func = "a_rs_ping"

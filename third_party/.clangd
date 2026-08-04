@@ -1,0 +1,6 @@
+# Vendored WAMR — not project code. Directory-local config (no PathMatch)
+# so clangd always applies regardless of workspace root / absolute paths.
+Index:
+  Background: Skip
+Diagnostics:
+  Suppress: '*'

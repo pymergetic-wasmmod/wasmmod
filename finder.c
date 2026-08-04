@@ -40,6 +40,8 @@
 #include "extmod/wasmmod/fetch.h"
 #include "extmod/wasmmod/finder.h"
 #include "extmod/wasmmod/runtime.h"
+#include "extmod/wasmmod/cdn.h"
+#include "extmod/wasmmod/alloc.h"
 
 #if MICROPY_VFS
 #include "extmod/vfs.h"
@@ -377,7 +379,8 @@ static mp_obj_t ensure_namespace(const char *dotted_name) {
     }
     qstr q = qstr_from_str(dotted_name);
     mod = mp_obj_new_module(q);
-    mp_store_attr(mod, MP_QSTR___path__, mp_obj_new_list(0, NULL));
+    // MicroPython uses str __path__ (not a CPython-style list).
+    mp_store_attr(mod, MP_QSTR___path__, mp_obj_new_str(dotted_name, strlen(dotted_name)));
     link_on_parent(dotted_name, mod);
     return mod;
 }
@@ -606,8 +609,13 @@ static void collect_children(const char *prefix, mp_obj_t out_list) {
 #endif // MICROPY_VFS
 
 bool mp_wasm_has_descendants(const char *prefix) {
-    if (prefix == NULL) {
+    if (prefix == NULL || prefix[0] == '\0') {
         return false;
+    }
+    // Metal CDN has no local directory listing; allow intermediate namespaces so
+    // `from test_a.test_b import test_c` can resolve the leaf via CDN fetch.
+    if (mp_wasm_cdn_driver() == MP_WASM_CDN_DRIVER_METAL) {
+        return true;
     }
     #if MICROPY_VFS
     mp_obj_t kids = mp_obj_new_list(0, NULL);
@@ -683,6 +691,43 @@ mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *known_path)
         return existing;
     }
 
+    // Metal CDN first: /artifacts/lead|pin (prefer .zlib). Skip flat wasm.path
+    // probes that HEADs /cdn/<slash-or-dot> paths when the CDN base was on path.
+    if (known_path == NULL && mp_wasm_cdn_driver() == MP_WASM_CDN_DRIVER_METAL) {
+        uint8_t *bytes = NULL;
+        uint32_t blen = 0;
+        char err[160];
+        if (mp_wasm_cdn_fetch_pack(dotted_name, NULL, &bytes, &blen, err, sizeof(err))) {
+            const char *dot = strrchr(dotted_name, '.');
+            if (dot != NULL) {
+                size_t plen = (size_t)(dot - dotted_name);
+                vstr_t parent;
+                vstr_init(&parent, plen + 1);
+                vstr_add_strn(&parent, dotted_name, plen);
+                const char *pname = vstr_null_terminated_str(&parent);
+                if (lookup_loaded(pname) == MP_OBJ_NULL) {
+                    nlr_buf_t nlr;
+                    if (nlr_push(&nlr) == 0) {
+                        (void)mp_wasm_import_wasm(pname);
+                        nlr_pop();
+                    } else {
+                        ensure_namespace(pname);
+                    }
+                }
+                vstr_clear(&parent);
+            }
+            mp_obj_t mod = mp_wasm_load_pack_bytes(bytes, blen, dotted_name);
+            MICROPY_WASM_FREE(bytes);
+            existing = lookup_loaded(dotted_name);
+            if (existing != MP_OBJ_NULL) {
+                mod = existing;
+            }
+            link_on_parent(dotted_name, mod);
+            return mod;
+        }
+        // Miss: fall through to path/sys.path and namespace discovery.
+    }
+
     // Leaf pack at any depth — parents become namespaces if needed.
     vstr_t path;
     bool have_path = false;
@@ -707,6 +752,8 @@ mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *known_path)
                 vstr_t ppath;
                 if (mp_wasm_find_pack(pname, &ppath)) {
                     vstr_clear(&ppath);
+                    (void)mp_wasm_import_wasm(pname);
+                } else if (mp_wasm_cdn_driver() == MP_WASM_CDN_DRIVER_METAL) {
                     (void)mp_wasm_import_wasm(pname);
                 } else {
                     ensure_namespace(pname);

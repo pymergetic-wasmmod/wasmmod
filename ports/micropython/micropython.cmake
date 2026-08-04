@@ -49,6 +49,8 @@ list(APPEND MICROPY_SOURCE_EXTMOD
     ${MICROPY_WASMMOD_DIR}/host.c
     ${MICROPY_WASMMOD_DIR}/loader.c
     ${MICROPY_WASMMOD_DIR}/pack.c
+    ${MICROPY_WASMMOD_DIR}/cdn.c
+    ${MICROPY_WASMMOD_DIR}/resolve.c
     ${MICROPY_WASMMOD_DIR}/runtime.c
     ${MICROPY_WASMMOD_DIR}/source.c
     ${MICROPY_WASMMOD_DIR}/verify.c

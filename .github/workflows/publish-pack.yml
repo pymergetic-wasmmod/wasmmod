@@ -1,0 +1,104 @@
+# Build a wasmmod pack and publish to metal-cdn (one-shot CLI).
+name: publish-pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      pack:
+        description: Pack directory (relative to wasmmod root)
+        required: true
+        default: examples/hello
+      version:
+        description: Package version
+        required: true
+      package:
+        description: Override package name (default pack.toml)
+        required: false
+        default: ""
+      aot:
+        description: Run wamrc AOT
+        required: false
+        type: boolean
+        default: false
+      cdn_url:
+        description: metal-cdn base URL
+        required: true
+  push:
+    tags:
+      - "pack-*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install publish deps
+        run: |
+          pip install -r requirements-publish.txt
+          sudo apt-get update
+          sudo apt-get install -y openssl
+
+      - name: Resolve version / pack
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "pack=${{ inputs.pack }}" >> "$GITHUB_OUTPUT"
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "package=${{ inputs.package }}" >> "$GITHUB_OUTPUT"
+            echo "aot=${{ inputs.aot }}" >> "$GITHUB_OUTPUT"
+            echo "cdn_url=${{ inputs.cdn_url }}" >> "$GITHUB_OUTPUT"
+          else
+            # tag pack-<name>-<version> e.g. pack-hello-0.1.0
+            ref="${GITHUB_REF_NAME#pack-}"
+            name="${ref%-*}"
+            ver="${ref##*-}"
+            echo "pack=examples/${name}" >> "$GITHUB_OUTPUT"
+            echo "version=${ver}" >> "$GITHUB_OUTPUT"
+            echo "package=${name}" >> "$GITHUB_OUTPUT"
+            echo "aot=false" >> "$GITHUB_OUTPUT"
+            echo "cdn_url=${{ vars.METAL_CDN_URL }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write signing material
+        env:
+          WASMMOD_SIGN_KEY: ${{ secrets.WASMMOD_SIGN_KEY }}
+          WASMMOD_SIGN_CHAIN: ${{ secrets.WASMMOD_SIGN_CHAIN }}
+        run: |
+          mkdir -p .keys/sign
+          printf '%s\n' "$WASMMOD_SIGN_KEY" > .keys/sign/leaf.key.pem
+          printf '%s\n' "$WASMMOD_SIGN_CHAIN" | base64 -d > .keys/sign/chain.der
+          chmod 600 .keys/sign/leaf.key.pem
+
+      - name: Publish
+        env:
+          METAL_CDN_URL: ${{ steps.meta.outputs.cdn_url }}
+          METAL_CDN_TOKEN: ${{ secrets.METAL_CDN_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=(
+            tools/wasmmod.py publish "${{ steps.meta.outputs.pack }}"
+            --version "${{ steps.meta.outputs.version }}"
+            --key .keys/sign/leaf.key.pem
+            --chain .keys/sign/chain.der
+            --cdn-url "$METAL_CDN_URL"
+            --token "$METAL_CDN_TOKEN"
+            --claim
+            -o packs
+          )
+          if [ -n "${{ steps.meta.outputs.package }}" ]; then
+            args+=(--package "${{ steps.meta.outputs.package }}")
+          fi
+          if [ "${{ steps.meta.outputs.aot }}" = "true" ]; then
+            args+=(--aot)
+          fi
+          python3 "${args[@]}"

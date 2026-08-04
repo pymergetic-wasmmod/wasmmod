@@ -1,11 +1,17 @@
 # Depends on the hello pack at runtime (guest→guest via wasmmod.imports).
+# CDN/install closure uses [deps] → wasmmod.deps (MPWD), not [[imports]].
 type = "package"
 name = "client"
 version = "0.1.0"
 impl = ["c"]
 comment = "Calls hello.hello through a Wasm import forwarder."
+description = "Example client that imports hello over Wasm forwarders."
+license = "MIT"
 
 # Defaults: native.dir = "src" (src/client.c).
+
+[deps]
+hello = "0.1.0"
 
 [lifecycle]
 load = "mp_pack_load"

@@ -33,11 +33,13 @@
 /* Project-scoped custom section / import-module names (host-agnostic). */
 #define MP_WASM_PACK_SECTION "wasmmod.pack"
 #define MP_WASM_IMPORTS_SECTION "wasmmod.imports"
+#define MP_WASM_DEPS_SECTION "wasmmod.deps"
 #define MP_WASM_MODULE "wasmmod"           /* guest loader API (version, call_i32, …) */
 #define MP_WASM_HOST_MODULE "wasmmod.host" /* guest→host slots / mem / call_py */
 #define MP_WASM_SIG_SECTION "wasmmod.sig"
 #define MP_WASM_PACK_MAGIC "MPWP"
 #define MP_WASM_IMPORTS_MAGIC "MPWI"
+#define MP_WASM_DEPS_MAGIC "MPWD"
 #define MP_WASM_PACK_KIND_PY 1
 #define MP_WASM_PACK_KIND_MPY 2
 #define MP_WASM_PACK_KIND_RAW 3
@@ -95,6 +97,19 @@ typedef struct mp_wasm_imports_info_t {
     uint32_t n_imports;
 } mp_wasm_imports_info_t;
 
+typedef struct mp_wasm_dep_t {
+    const char *name;
+    uint16_t name_len;
+    const char *version;
+    uint16_t version_len;
+} mp_wasm_dep_t;
+
+typedef struct mp_wasm_deps_info_t {
+    uint16_t version;
+    const mp_wasm_dep_t *deps;
+    uint32_t n_deps;
+} mp_wasm_deps_info_t;
+
 // Low-level Wasm helpers (used by pack + forwarder).
 bool mp_wasm_read_uleb(const uint8_t **p, const uint8_t *end, uint32_t *out);
 bool mp_wasm_find_section_id(const uint8_t *wasm, uint32_t len, uint8_t id, const uint8_t **payload, uint32_t *payload_len);
@@ -110,5 +125,9 @@ bool mp_wasm_pack_file_bytes(const mp_wasm_pack_file_t *f, const uint8_t **out, 
 bool mp_wasm_imports_find_section(const uint8_t *wasm, uint32_t len, const uint8_t **payload, uint32_t *payload_len);
 bool mp_wasm_imports_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_imports_info_t *out);
 void mp_wasm_imports_info_free(mp_wasm_imports_info_t *info);
+
+bool mp_wasm_deps_find_section(const uint8_t *wasm, uint32_t len, const uint8_t **payload, uint32_t *payload_len);
+bool mp_wasm_deps_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_deps_info_t *out);
+void mp_wasm_deps_info_free(mp_wasm_deps_info_t *info);
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_PACK_H

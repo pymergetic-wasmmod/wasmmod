@@ -23,6 +23,8 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/host.c \
 	$(WASMMOD_DIR)/loader.c \
 	$(WASMMOD_DIR)/pack.c \
+	$(WASMMOD_DIR)/cdn.c \
+	$(WASMMOD_DIR)/resolve.c \
 	$(WASMMOD_DIR)/runtime.c \
 	$(WASMMOD_DIR)/source.c \
 	$(WASMMOD_DIR)/verify.c \
@@ -116,6 +118,7 @@ $(BUILD)/$(WASMMOD_DIR)/modapi.o $(BUILD)/$(WASMMOD_DIR)/packload.o \
 $(BUILD)/$(WASMMOD_DIR)/runtime.o \
 $(BUILD)/$(WASMMOD_DIR)/pack.o $(BUILD)/$(WASMMOD_DIR)/finder.o \
 $(BUILD)/$(WASMMOD_DIR)/forward.o $(BUILD)/$(WASMMOD_DIR)/fetch.o \
+$(BUILD)/$(WASMMOD_DIR)/cdn.o $(BUILD)/$(WASMMOD_DIR)/resolve.o \
 $(BUILD)/$(WASMMOD_DIR)/verify.o $(BUILD)/$(WASMMOD_DIR)/host.o \
 $(BUILD)/$(WASMMOD_DIR)/source.o $(BUILD)/$(WASMMOD_DIR)/zlibutil.o: $(WAMR_BUILD)/libiwasm.a
 

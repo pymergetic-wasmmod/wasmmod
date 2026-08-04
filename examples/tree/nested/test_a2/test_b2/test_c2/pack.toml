@@ -1,0 +1,29 @@
+# Nested leaf under test_a2/test_b2/ (test_b2 is namespace-only, no pack.toml).
+type = "package"
+name = "test_a2.test_b2.test_c2"
+version = "0.1.0"
+impl = ["c", "rs"]
+comment = "Nested leaf; [deps] sibling test_a2.test_d2."
+description = "Package test_a2.test_b2.test_c2 from nested source tree."
+license = "MIT"
+
+[python]
+keep_source = true
+freeze = false
+
+[lifecycle]
+load = "mp_pack_load"
+unload = "mp_pack_unload"
+
+[deps]
+"test_a2.test_d2" = "0.1.0"
+
+[[exports]]
+func = "c2_answer"
+
+[[exports]]
+func = "c2_rs_tag"
+
+[[imports]]
+module = "test_a2.test_d2"
+func = "d2_value"

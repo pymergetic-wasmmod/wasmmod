@@ -1,9 +1,12 @@
 {
   "include": ["."],
-  "exclude": ["**/.*", "**/*.wasm"],
+  "exclude": ["**/.*", "**/*.wasm", "**/packs/**", "**/tree/**/target/**"],
   "stubPath": "typings",
   "extraPaths": ["typings"],
   "reportMissingImports": "warning",
   "reportMissingModuleSource": "none",
-  "pythonVersion": "3.11"
+  "reportUnusedImport": "none",
+  "reportUnusedVariable": "none",
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic"
 }

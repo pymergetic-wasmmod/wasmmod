@@ -49,12 +49,15 @@ from pathlib import Path
 
 SECTION_NAME = "wasmmod.pack"
 IMPORTS_SECTION = "wasmmod.imports"
+DEPS_SECTION = "wasmmod.deps"
 MAGIC = b"MPWP"
 IMPORTS_MAGIC = b"MPWI"
+DEPS_MAGIC = b"MPWD"
 PACK_VERSION_V1 = 1
 PACK_VERSION_V2 = 2
 PACK_VERSION_V3 = 3
 IMPORTS_VERSION = 1
+DEPS_VERSION = 1
 
 KIND_PY = 1
 KIND_MPY = 2
@@ -607,6 +610,75 @@ def build_imports_payload(imports: list[tuple[str, str]]) -> bytes:
     return bytes(out)
 
 
+def build_deps_payload(deps: list[tuple[str, str]]) -> bytes:
+    """CDN / install deps (exact name → version). Distinct from ``[[imports]]``."""
+    out = bytearray()
+    out += DEPS_MAGIC
+    out += struct.pack("<H", DEPS_VERSION)
+    out += struct.pack("<I", len(deps))
+    for name, version in deps:
+        for label, s in (("name", name), ("version", version)):
+            b = s.encode("utf-8")
+            if len(b) > 0xFFFF:
+                raise SystemExit(f"wasm_pack: deps {label} too long: {s}")
+            out += struct.pack("<H", len(b))
+            out += b
+    return bytes(out)
+
+
+def parse_deps_payload(payload: bytes) -> list[tuple[str, str]]:
+    """Parse MPWD ``wasmmod.deps`` payload → ``[(name, version), …]``."""
+    if len(payload) < 10 or payload[:4] != DEPS_MAGIC:
+        raise ValueError("not a wasmmod.deps payload")
+    version = struct.unpack_from("<H", payload, 4)[0]
+    if version != DEPS_VERSION:
+        raise ValueError(f"unsupported wasmmod.deps version: {version}")
+    n = struct.unpack_from("<I", payload, 6)[0]
+    if n > 1024:
+        raise ValueError("wasmmod.deps: too many entries")
+    i = 10
+    out: list[tuple[str, str]] = []
+    for _ in range(n):
+        nl = struct.unpack_from("<H", payload, i)[0]
+        i += 2
+        name = payload[i : i + nl].decode("utf-8")
+        i += nl
+        vl = struct.unpack_from("<H", payload, i)[0]
+        i += 2
+        ver = payload[i : i + vl].decode("utf-8")
+        i += vl
+        out.append((name, ver))
+    return out
+
+
+def parse_manifest_deps(data: dict) -> list[tuple[str, str]]:
+    """Read ``[deps]`` table from pack.toml → ``[(name, version), …]``."""
+    raw = data.get("deps")
+    if raw is None:
+        return []
+    if isinstance(raw, dict):
+        out: list[tuple[str, str]] = []
+        for name, ver in raw.items():
+            if not isinstance(name, str) or not name:
+                raise SystemExit("wasm_pack: deps keys must be non-empty strings")
+            if not isinstance(ver, str) or not ver:
+                raise SystemExit(f"wasm_pack: deps[{name!r}] must be a non-empty version string")
+            out.append((name, ver))
+        return out
+    if isinstance(raw, list):
+        out = []
+        for item in raw:
+            if not isinstance(item, dict):
+                raise SystemExit("wasm_pack: deps list entries must be tables")
+            name = item.get("name")
+            ver = item.get("version")
+            if not isinstance(name, str) or not name or not isinstance(ver, str) or not ver:
+                raise SystemExit("wasm_pack: deps entries need name= and version=")
+            out.append((name, ver))
+        return out
+    raise SystemExit("wasm_pack: deps must be a table or list of tables")
+
+
 def compile_to_obj(src: Path, obj: Path, opt: str) -> None:
     ext = src.suffix
     if ext in C_EXTS:
@@ -956,6 +1028,7 @@ def main() -> int:
     link_exports: list[str] = list(args.export)
     pack_exports: list[tuple[str, str, str, int]] = []
     pack_imports: list[tuple[str, str]] = []
+    pack_deps: list[tuple[str, str]] = []
     mounts: list[Path] = list(args.mount)
     pkg_name: str | None = args.name
     # Default: source-only. Opt in via freeze/targets / --freeze / --python-target.
@@ -993,6 +1066,9 @@ def main() -> int:
                     link_exports.append(e)
             pack_exports.extend(m_pack)
             pack_imports.extend(m_imports)
+            for name_ver in parse_manifest_deps(data):
+                if name_ver not in pack_deps:
+                    pack_deps.append(name_ver)
             for m in m_mounts:
                 if m not in mounts:
                     mounts.append(m)
@@ -1117,6 +1193,13 @@ def main() -> int:
             f"packed section {IMPORTS_SECTION!r}: imports={len(pack_imports)} payload={len(ipayload)}B",
             file=sys.stderr,
         )
+    if pack_deps:
+        dpayload = build_deps_payload(pack_deps)
+        raw = append_custom_section(raw, DEPS_SECTION, dpayload)
+        print(
+            f"packed section {DEPS_SECTION!r}: deps={len(pack_deps)} payload={len(dpayload)}B",
+            file=sys.stderr,
+        )
 
     want_source = args.with_source
     if want_source is None:
@@ -1152,7 +1235,7 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    if want_section or pack_imports or want_source:
+    if want_section or pack_imports or pack_deps or want_source:
         out.write_bytes(raw)
     else:
         raw = out.read_bytes()
@@ -1186,7 +1269,7 @@ def main() -> int:
         # Carry pack metadata into the .aot (same payloads as on the .wasm).
         # Do NOT emit wasmmod.sig here: the signature covers the final artifact
         # bytes (sign after AOT with `sign sign --key … --chain …`).
-        emit = "wasmmod.pack,wasmmod.imports,wasmmod.source"
+        emit = "wasmmod.pack,wasmmod.imports,wasmmod.deps,wasmmod.source"
         cmd = [
             wamrc,
             f"--emit-custom-sections={emit}",

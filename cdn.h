@@ -1,0 +1,38 @@
+/*
+ * This file is part of wasmmod, https://github.com/pymergetic/wasmmod
+ *
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2026 Rouven Raudzus <raudzus@pymergetic.com>
+ *
+ * Host-agnostic CDN resolve API (no MicroPython / CPython types).
+ * Bindings call these from wasmmod.c / future cpy module.
+ */
+#ifndef MICROPY_INCLUDED_EXTMOD_WASMMOD_CDN_H
+#define MICROPY_INCLUDED_EXTMOD_WASMMOD_CDN_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+typedef enum {
+    MP_WASM_CDN_DRIVER_PATH = 0,
+    MP_WASM_CDN_DRIVER_METAL = 1,
+} mp_wasm_cdn_driver_t;
+
+// Configure resolve driver from a base URL (metal-cdn if URL looks like …/cdn).
+// token may be NULL (public lead/pin). Copies strings internally.
+void mp_wasm_cdn_configure(const char *base_url, const char *token);
+void mp_wasm_cdn_reset(void);
+
+mp_wasm_cdn_driver_t mp_wasm_cdn_driver(void);
+bool mp_wasm_cdn_require_explicit_deps(void);
+const char *mp_wasm_cdn_driver_name(void);
+
+// Resolve name@version into artifact bytes (tries pin then lead / path candidates).
+// On success: *out_bytes is MICROPY_WASM_MALLOC'd; caller MICROPY_WASM_FREE(*out_bytes).
+bool mp_wasm_cdn_fetch_pack(const char *name, const char *version,
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *errbuf, size_t errbuf_len);
+
+#endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_CDN_H

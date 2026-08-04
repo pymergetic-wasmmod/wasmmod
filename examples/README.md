@@ -45,9 +45,52 @@ That runs the call matrix and prints **lang×lang tables** (host→guest,
 guest→host, guest→guest, same-pack) with index numbers, then a catalog of
 each call. See [run_matrix.py](run_matrix.py).
 
+### Dotted module tree (CDN + deps)
+
+Two source layouts, same runtime/CDN tree (names split on `.`):
+
+**Sibling / flat** (different-repo style) under `tree/`:
+
+```text
+tree/test_a/                  → packs/test_a.wasm
+tree/test_a_test_d/           → packs/test_a.test_d.wasm
+tree/test_a_test_b_test_c/    → packs/test_a.test_b.test_c.wasm
+```
+
+**Nested monorepo** (`type = "package"` markers; `wasmmod pack-tree` walks them):
+
+```text
+tree/nested/test_a2/                 → test_a2.wasm
+  test_b2/                           (namespace only — no pack.toml)
+    test_c2/                         → test_a2.test_b2.test_c2.wasm
+  test_d2/                           → test_a2.test_d2.wasm
+```
+
+```sh
+make -C extmod/wasmmod/examples test-tree       # offline both suites
+make -C extmod/wasmmod/examples test-tree-cdn   # publish + wasm.cdn
+# or: python3 tools/wasmmod.py pack-tree examples/tree/nested/test_a2 -o examples/packs
+```
+
+Smoke (`run_tree_cdn.py`):
+
+```python
+import wasm
+wasm.path.append("packs")  # or wasm.cdn("http://127.0.0.1:8000/cdn")
+wasm.install_hook()
+import test_a
+from test_a.test_b import test_c
+assert test_c.c_answer() == 42
+import test_a2
+from test_a2.test_b2 import test_c2
+assert test_c2.c2_answer() == 42
+```
+
 | Target | Host `BUILD=` | Needs |
 |--------|---------------|--------|
 | `test` | `build-wasm` | — |
+| `test-tree` | `build-wasm` | tree packs (offline path) |
+| `test-tree-cdn` | `build-wasm` | running metal-cdn (dotted names) |
 | `test-aot` | `build-wasm-aot` | matching `wamrc` from nested `third_party/wamr` |
 | `test-fast-jit` | `build-wasm-fjit` | `-lstdc++` |
 | `test-jit` | `build-wasm-jit` | full LLVM cmake (soft-skips if missing) |

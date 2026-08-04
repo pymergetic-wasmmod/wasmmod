@@ -423,6 +423,20 @@ static bool conn_open(http_conn_t *c, const parsed_url_t *u, char *errbuf, size_
 }
 
 // method = "GET" or "HEAD". If body_out non-NULL and GET, appends response body.
+static char g_auth_bearer[256];
+
+void mp_wasm_fetch_set_auth_bearer(const char *token) {
+    g_auth_bearer[0] = '\0';
+    if (token != NULL && token[0] != '\0') {
+        size_t n = strlen(token);
+        if (n >= sizeof(g_auth_bearer)) {
+            n = sizeof(g_auth_bearer) - 1;
+        }
+        memcpy(g_auth_bearer, token, n);
+        g_auth_bearer[n] = '\0';
+    }
+}
+
 static bool http_exchange(const char *method, const char *uri, vstr_t *body_out,
     int *status_out, char *errbuf, size_t errbuf_len) {
     parsed_url_t u;
@@ -435,14 +449,26 @@ static bool http_exchange(const char *method, const char *uri, vstr_t *body_out,
         return false;
     }
 
-    char req[1536];
-    int nreq = snprintf(req, sizeof(req),
-        "%s %s HTTP/1.0\r\n"
-        "Host: %s\r\n"
-        "Connection: close\r\n"
-        "User-Agent: wasmmod\r\n"
-        "\r\n",
-        method, u.path, u.host);
+    char req[1792];
+    int nreq;
+    if (g_auth_bearer[0] != '\0') {
+        nreq = snprintf(req, sizeof(req),
+            "%s %s HTTP/1.0\r\n"
+            "Host: %s\r\n"
+            "Authorization: Bearer %s\r\n"
+            "Connection: close\r\n"
+            "User-Agent: wasmmod\r\n"
+            "\r\n",
+            method, u.path, u.host, g_auth_bearer);
+    } else {
+        nreq = snprintf(req, sizeof(req),
+            "%s %s HTTP/1.0\r\n"
+            "Host: %s\r\n"
+            "Connection: close\r\n"
+            "User-Agent: wasmmod\r\n"
+            "\r\n",
+            method, u.path, u.host);
+    }
     if (nreq <= 0 || (size_t)nreq >= sizeof(req)
         || conn_write(&conn, req, (size_t)nreq) < 0) {
         if (errbuf && errbuf_len) {
@@ -564,6 +590,10 @@ static bool native_http_probe(const char *uri) {
 }
 
 #else // !MICROPY_WASM_HTTP_NATIVE
+
+void mp_wasm_fetch_set_auth_bearer(const char *token) {
+    (void)token;
+}
 
 static bool native_http_fetch(const char *uri, vstr_t *out, char *errbuf, size_t errbuf_len) {
     (void)uri;

@@ -406,4 +406,67 @@ void mp_wasm_imports_info_free(mp_wasm_imports_info_t *info) {
     info->n_imports = 0;
 }
 
+bool mp_wasm_deps_find_section(const uint8_t *wasm, uint32_t len, const uint8_t **payload, uint32_t *payload_len) {
+    return mp_wasm_find_custom_section(wasm, len, MP_WASM_DEPS_SECTION, payload, payload_len);
+}
+
+bool mp_wasm_deps_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_deps_info_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (payload_len < 10 || memcmp(payload, MP_WASM_DEPS_MAGIC, 4) != 0) {
+        return false;
+    }
+    out->version = read_u16_le(payload + 4);
+    if (out->version != 1) {
+        return false;
+    }
+    uint32_t n = read_u32_le(payload + 6);
+    if (n > 1024) {
+        return false;
+    }
+    const uint8_t *p = payload + 10;
+    mp_wasm_dep_t *deps = NULL;
+    if (n > 0) {
+        deps = MICROPY_WASM_MALLOC(n * sizeof(mp_wasm_dep_t));
+        if (deps == NULL) {
+            return false;
+        }
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        if ((size_t)(p - payload) + 2 > payload_len) {
+            MICROPY_WASM_FREE(deps);
+            return false;
+        }
+        uint16_t name_len = read_u16_le(p);
+        p += 2;
+        if ((size_t)(p - payload) + name_len + 2 > payload_len) {
+            MICROPY_WASM_FREE(deps);
+            return false;
+        }
+        deps[i].name = (const char *)p;
+        deps[i].name_len = name_len;
+        p += name_len;
+        uint16_t ver_len = read_u16_le(p);
+        p += 2;
+        if ((size_t)(p - payload) + ver_len > payload_len) {
+            MICROPY_WASM_FREE(deps);
+            return false;
+        }
+        deps[i].version = (const char *)p;
+        deps[i].version_len = ver_len;
+        p += ver_len;
+    }
+    out->deps = deps;
+    out->n_deps = n;
+    return true;
+}
+
+void mp_wasm_deps_info_free(mp_wasm_deps_info_t *info) {
+    if (info == NULL) {
+        return;
+    }
+    MICROPY_WASM_FREE((void *)info->deps);
+    info->deps = NULL;
+    info->n_deps = 0;
+}
+
 #endif // MICROPY_PY_WASM
