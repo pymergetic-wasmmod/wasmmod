@@ -29,7 +29,7 @@
 
 // Keep in sync with VERSION (make/cmake also -DMICROPY_WASM_VERSION from that file).
 #ifndef MICROPY_WASM_VERSION
-#define MICROPY_WASM_VERSION "0.1.3-alpha"
+#define MICROPY_WASM_VERSION "0.1.4-alpha"
 #endif
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_VERSION_H

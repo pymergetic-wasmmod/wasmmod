@@ -1,6 +1,6 @@
 # WASM guest modules
 
-> **Experimental** (`wasmmod` **v0.1.3-alpha**). These examples and the host
+> **Experimental** (`wasmmod` **v0.1.4-alpha**). These examples and the host
 > `wasm` module are pre-release: flags, pack contracts, and APIs may change.
 > See the [package README](../README.md) status note.
 
