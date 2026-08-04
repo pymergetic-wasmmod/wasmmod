@@ -5,7 +5,9 @@ from pathlib import Path
 
 import wasmmod_inspect as insp
 
-ELF = Path(__file__).resolve().parents[1] / "examples" / "packs" / "hello.elf"
+ROOT = Path(__file__).resolve().parents[1]
+ELF = ROOT / "examples" / "packs" / "hello.elf"
+WASM = ROOT / "examples" / "packs" / "hello.wasm"
 
 
 def test_hello_elf_symbols_and_dwarf() -> None:
@@ -52,3 +54,37 @@ def test_mpy_disasm_header() -> None:
     lines = insp.mpy_disasm(fake, limit=8)
     assert lines[0].text.startswith("mpy_hdr")
     assert len(lines) >= 2
+
+
+def test_hello_wasm_exports() -> None:
+    assert WASM.is_file(), f"missing {WASM}; make -C examples/hello"
+    names = {s.name for s in insp.list_symbols(WASM.read_bytes())}
+    assert "hello" in names
+    assert "add" in names
+
+
+def _uleb(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        out.append(b | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def test_wasm_export_name_leb128() -> None:
+    """Name length ≥128 must be LEB128, not a single byte."""
+    name = b"a" * 130
+    # minimal module: magic/version + export section with one func export
+    body = bytearray()
+    body.append(1)  # nexp
+    body.extend(_uleb(len(name)))
+    body.extend(name)
+    body.append(0)  # func
+    body.append(0)  # index
+    sec = bytes([7]) + _uleb(len(body)) + bytes(body)
+    mod = b"\x00asm\x01\x00\x00\x00" + sec
+    syms = insp.list_symbols(mod)
+    assert len(syms) == 1
+    assert syms[0].name == "a" * 130

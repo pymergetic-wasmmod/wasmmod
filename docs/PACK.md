@@ -1074,7 +1074,7 @@ loader skips `.rela.debug_*` so DWARF does not corrupt the image.
 
 ```python
 wasm.symbols("hello.elf")              # [{name, offset, size, kind, …}]
-wasm.has_dwarf("hello.elf")            # True when .debug_line present
+wasm.has_dwarf("hello.elf")            # True when .debug_line or .debug_info present
 wasm.addr2line("hello.elf", 0x10)      # [{path, line, role}]  # multi-loc OK
 wasm.locations("hello.elf", "hello")
 wasm.disasm("hello.elf", section_index, 0, 64)   # ELF shndx / Wasm code window
@@ -1094,6 +1094,7 @@ tools/wasmmod.py inspect symbols hello.elf
 tools/wasmmod.py inspect addr2line hello.elf 0x10
 wasmmod-read symbols hello.elf
 wasmmod-read has-dwarf hello.elf
+wasmmod-read disasm hello.elf INDEX [OFFSET [LIMIT]]
 # CDN: GET …/artifacts/lead/hello.elf/{symbols,addr2line,locations,disasm}
 ```
 

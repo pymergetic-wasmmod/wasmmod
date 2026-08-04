@@ -31,6 +31,12 @@ Direct binary (same args after the subcommand):
 ./target/release/wasmmod-read meta PATH.wasm
 ./target/release/wasmmod-read sections PATH.elf
 ./target/release/wasmmod-read section PATH.wasm 3 --hex
+./target/release/wasmmod-read symbols PATH.elf
+./target/release/wasmmod-read addr2line PATH.elf 0x10
+./target/release/wasmmod-read locations PATH.elf hello
+./target/release/wasmmod-read disasm PATH.elf INDEX [OFFSET [LIMIT]]
+./target/release/wasmmod-read has-dwarf PATH.elf
+./target/release/wasmmod-read mpy PATH.mpy
 ```
 
 Sign after pack/AOT (embed-only; no detached sidecars):

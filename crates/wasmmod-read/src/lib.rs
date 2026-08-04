@@ -780,13 +780,21 @@ pub fn locations_for_symbol(buf: &[u8], name: &str) -> Result<Vec<Location>> {
         if s.kind == "func" && s.size > 0 {
             out.extend(addr2line(buf, s.offset)?);
         }
-        out.push(Location {
-            path: name.into(),
-            line: None,
-            role: "sym".into(),
+        let have_sym = out.iter().any(|l| {
+            l.role == "sym" && l.line.is_none() && l.path == name
         });
+        if !have_sym {
+            out.push(Location {
+                path: name.into(),
+                line: None,
+                role: "sym".into(),
+            });
+        }
         break;
     }
+    // Dedupe (path, line, role) — matches Python tools/wasmmod_inspect.py.
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|l| seen.insert((l.path.clone(), l.line, l.role.clone())));
     Ok(out)
 }
 
@@ -1339,5 +1347,29 @@ open(r'{signed}', 'wb').write(out)\n",
         let stripped = without_sig_section(&with_sig).expect("strip elf sig");
         assert_eq!(stripped, naked);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wasm_export_name_leb128() {
+        let name = vec![b'a'; 130];
+        let mut body = vec![1u8]; // nexp
+        body.extend(uleb(name.len() as u32));
+        body.extend_from_slice(&name);
+        body.push(0); // func
+        body.push(0); // index
+        let mut sec = vec![7u8];
+        sec.extend(uleb(body.len() as u32));
+        sec.extend(body);
+        let mut wasm = b"\0asm\x01\0\0\0".to_vec();
+        wasm.extend(sec);
+        let syms = list_symbols(&wasm).unwrap();
+        assert_eq!(syms.len(), 1);
+        assert_eq!(syms[0].name, "a".repeat(130));
+    }
+
+    #[test]
+    fn locations_dedupe_sym_role() {
+        // Minimal ET_REL-ish ELF not required: empty locations for missing name.
+        assert!(locations_for_symbol(b"nope", "x").unwrap().is_empty());
     }
 }

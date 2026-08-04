@@ -17,6 +17,7 @@
 
 #include "extmod/wasmmod/format/common/format.h"
 #include "extmod/wasmmod/format/elf/section.h"
+#include "extmod/wasmmod/pack.h"
 
 #define SHT_SYMTAB 2
 #define SHT_STRTAB 3
@@ -66,10 +67,67 @@ bool mp_wasm_inspect_has_dwarf(const uint8_t *buf, uint32_t len) {
     if (mp_wasm_elf_find_section(buf, len, ".debug_line", &p, &plen) && plen > 0) {
         return true;
     }
+    if (mp_wasm_elf_find_section(buf, len, ".debug_info", &p, &plen) && plen > 0) {
+        return true;
+    }
     if (mp_wasm_elf_find_section(buf, len, "debug_line", &p, &plen) && plen > 0) {
         return true;
     }
+    if (mp_wasm_elf_find_section(buf, len, "debug_info", &p, &plen) && plen > 0) {
+        return true;
+    }
     return false;
+}
+
+static bool inspect_symbols_wasm(const uint8_t *buf, uint32_t len,
+    mp_wasm_sym_t *out, size_t cap, size_t *n_out) {
+    const uint8_t *payload = NULL;
+    uint32_t plen = 0;
+    if (!mp_wasm_find_section_id(buf, len, 7, &payload, &plen) || payload == NULL) {
+        return true;
+    }
+    const uint8_t *p = payload;
+    const uint8_t *end = payload + plen;
+    uint32_t nexp = 0;
+    if (!mp_wasm_read_uleb(&p, end, &nexp)) {
+        return true;
+    }
+    size_t n = 0;
+    for (uint32_t i = 0; i < nexp && n < cap; ++i) {
+        uint32_t nlen = 0;
+        if (!mp_wasm_read_uleb(&p, end, &nlen) || p + nlen > end) {
+            break;
+        }
+        char namebuf[sizeof(out[0].name)];
+        size_t copy = nlen;
+        if (copy >= sizeof(namebuf)) {
+            copy = sizeof(namebuf) - 1;
+        }
+        memcpy(namebuf, p, copy);
+        namebuf[copy] = '\0';
+        p += nlen;
+        if (p >= end) {
+            break;
+        }
+        uint8_t kind = *p++;
+        uint32_t idx = 0;
+        if (!mp_wasm_read_uleb(&p, end, &idx)) {
+            break;
+        }
+        mp_wasm_sym_t *o = &out[n++];
+        memset(o, 0, sizeof(*o));
+        copy_name(o->name, sizeof(o->name), namebuf);
+        o->section_index = -1;
+        o->offset = 0;
+        o->size = 0;
+        o->kind = (kind == 0) ? 3 : 0; // 3=export (see inspect.h)
+        o->binding = 3; // export
+        (void)idx;
+    }
+    if (n_out) {
+        *n_out = n;
+    }
+    return true;
 }
 
 bool mp_wasm_inspect_symbols(const uint8_t *buf, uint32_t len,
@@ -80,8 +138,12 @@ bool mp_wasm_inspect_symbols(const uint8_t *buf, uint32_t len,
     if (buf == NULL || out == NULL || cap == 0) {
         return false;
     }
-    if (mp_wasm_artifact_kind(buf, len) != MP_WASM_KIND_ELF) {
-        return true; // empty ok for non-ELF
+    mp_wasm_artifact_kind_t kind = mp_wasm_artifact_kind(buf, len);
+    if (kind == MP_WASM_KIND_WASM) {
+        return inspect_symbols_wasm(buf, len, out, cap, n_out);
+    }
+    if (kind != MP_WASM_KIND_ELF) {
+        return true; // empty ok for AOT / unknown
     }
     // Walk section headers via find — need full shdr walk; use format/elf internals lightly.
     // Minimal: parse ehdr/shdrs inline (same as section.c).
@@ -234,7 +296,15 @@ bool mp_wasm_inspect_locations(const uint8_t *buf, uint32_t len, const char *nam
                 }
             }
         }
-        if (n < cap) {
+        // Append role=sym unless addr2line already returned the same row.
+        bool have_sym = false;
+        for (size_t k = 0; k < n; ++k) {
+            if (out[k].role == 0 && out[k].line < 0 && strcmp(out[k].path, name) == 0) {
+                have_sym = true;
+                break;
+            }
+        }
+        if (!have_sym && n < cap) {
             memset(&out[n], 0, sizeof(out[n]));
             copy_name(out[n].path, sizeof(out[n].path), name);
             out[n].line = -1;

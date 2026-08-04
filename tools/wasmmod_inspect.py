@@ -236,8 +236,18 @@ def _list_symbols_wasm(buf: bytes) -> list[Symbol]:
                 for _ in range(nexp):
                     if j >= end:
                         break
-                    nlen = buf[j]
-                    j += 1
+                    # name length is LEB128 (not a single byte)
+                    nlen = 0
+                    shift = 0
+                    while j < end:
+                        b = buf[j]
+                        j += 1
+                        nlen |= (b & 0x7F) << shift
+                        if (b & 0x80) == 0:
+                            break
+                        shift += 7
+                        if shift > 35:
+                            return out
                     if j + nlen > end:
                         break
                     name = buf[j : j + nlen].decode("utf-8", errors="replace")

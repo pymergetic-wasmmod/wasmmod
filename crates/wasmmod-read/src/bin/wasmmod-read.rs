@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 use wasmmod_read::{
-    addr2line, has_dwarf, list_sections, list_symbols, locations_for_symbol, mpy_disasm,
-    section_payload, without_sig_section, SigView, SourceView,
+    addr2line, disasm_db, has_dwarf, list_sections, list_symbols, locations_for_symbol,
+    mpy_disasm, section_payload, without_sig_section, SigView, SourceView,
 };
 
 fn usage() -> ! {
@@ -27,6 +27,7 @@ Usage:
   wasmmod-read symbols PATH
   wasmmod-read addr2line PATH ADDR
   wasmmod-read locations PATH NAME
+  wasmmod-read disasm PATH INDEX [OFFSET [LIMIT]]
   wasmmod-read mpy PATH [--limit N]
   wasmmod-read has-dwarf PATH
 
@@ -495,6 +496,46 @@ fn main() -> ExitCode {
                             None => String::new(),
                         };
                         println!("{:<6} {}{}", loc.role, loc.path, ln);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("wasmmod-read: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "disasm" => {
+            if args.len() < 2 {
+                usage();
+            }
+            let path = PathBuf::from(&args[0]);
+            let index: u32 = match args[1].parse() {
+                Ok(v) => v,
+                Err(_) => {
+                    eprintln!("wasmmod-read: bad INDEX");
+                    return ExitCode::from(2);
+                }
+            };
+            let offset: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let limit: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(64);
+            match std::fs::read(&path)
+                .map_err(wasmmod_read::Error::from)
+                .and_then(|data| {
+                    let payload = section_payload(&data, index)?;
+                    let end = payload.len().min(offset.saturating_add(limit));
+                    let start = offset.min(payload.len());
+                    Ok(disasm_db(&payload[start..end], start as u64))
+                }) {
+                Ok(lines) => {
+                    for line in lines {
+                        let hx: String = line
+                            .raw
+                            .iter()
+                            .map(|b| format!("{b:02x}"))
+                            .collect::<Vec<_>>()
+                            .join("");
+                        println!("0x{:04x}: {:<16} {}", line.addr, hx, line.text);
                     }
                     ExitCode::SUCCESS
                 }

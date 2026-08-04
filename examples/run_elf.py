@@ -63,4 +63,7 @@ assert wasm.has_dwarf("hello.elf") is True
 hello = next(s for s in syms if s["name"] == "hello")
 locs = wasm.addr2line("hello.elf", hello["offset"])
 assert locs and locs[0]["role"] in ("sym", "dwarf"), locs
+# Wasm export listing (shared with host tools / CDN)
+wnames = {s["name"] for s in wasm.symbols("hello.wasm")}
+assert "hello" in wnames and "add" in wnames, wnames
 print("OK elf hello(+py)/client/hostcall/ticks+badupy+arch+inspect")
