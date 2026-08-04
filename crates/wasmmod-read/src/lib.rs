@@ -179,6 +179,270 @@ pub fn extract_custom_section<'a>(buf: &'a [u8], name: &str) -> Result<Option<&'
     Err(Error::NotModule)
 }
 
+/// Role hint for UI / CLI (code vs wasmmod metadata vs other).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SectionRole {
+    Code,
+    Meta,
+    Other,
+}
+
+impl SectionRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SectionRole::Code => "code",
+            SectionRole::Meta => "meta",
+            SectionRole::Other => "other",
+        }
+    }
+}
+
+/// One container section in a naked `.wasm` / `.aot` / `.elf`.
+#[derive(Debug, Clone)]
+pub struct ContainerSection {
+    pub index: u32,
+    pub name: String,
+    pub type_id: u32,
+    pub offset: u64,
+    pub size: u64,
+    pub role: SectionRole,
+}
+
+fn section_role_meta(name: &str) -> bool {
+    let bare = name.trim_start_matches('.');
+    bare.starts_with("wasmmod.")
+}
+
+fn wasm_section_name(id: u8) -> &'static str {
+    match id {
+        0 => "custom",
+        1 => "type",
+        2 => "import",
+        3 => "function",
+        4 => "table",
+        5 => "memory",
+        6 => "global",
+        7 => "export",
+        8 => "start",
+        9 => "element",
+        10 => "code",
+        11 => "data",
+        12 => "datacount",
+        _ => "section",
+    }
+}
+
+fn aot_section_name(typ: u32) -> &'static str {
+    match typ {
+        0 => "target_info",
+        1 => "init_data",
+        2 => "text",
+        3 => "function",
+        4 => "export",
+        5 => "relocation",
+        6 => "signature",
+        AOT_SECTION_TYPE_CUSTOM => "custom",
+        _ => "section",
+    }
+}
+
+fn list_sections_wasm(wasm: &[u8]) -> Result<Vec<ContainerSection>> {
+    if wasm.len() < 8 {
+        return Err(Error::Truncated);
+    }
+    let mut out = Vec::new();
+    let mut i = 8usize;
+    while i < wasm.len() {
+        let id = wasm[i];
+        i += 1;
+        let size = read_uleb(wasm, &mut i)? as usize;
+        let sec_off = i;
+        let sec_end = i + size;
+        if sec_end > wasm.len() {
+            return Err(Error::Truncated);
+        }
+        let mut name = wasm_section_name(id).to_string();
+        if id == 0 && size > 0 {
+            let mut j = sec_off;
+            if let Ok(nlen) = read_uleb(wasm, &mut j) {
+                let nlen = nlen as usize;
+                if j + nlen <= sec_end {
+                    name = String::from_utf8_lossy(&wasm[j..j + nlen]).into_owned();
+                    if name.is_empty() {
+                        name = "custom".into();
+                    }
+                }
+            }
+        }
+        let role = if id == 10 {
+            SectionRole::Code
+        } else if section_role_meta(&name) {
+            SectionRole::Meta
+        } else {
+            SectionRole::Other
+        };
+        out.push(ContainerSection {
+            index: out.len() as u32,
+            name,
+            type_id: u32::from(id),
+            offset: sec_off as u64,
+            size: size as u64,
+            role,
+        });
+        i = sec_end;
+    }
+    Ok(out)
+}
+
+fn list_sections_aot(aot: &[u8]) -> Result<Vec<ContainerSection>> {
+    if aot.len() < 8 {
+        return Err(Error::Truncated);
+    }
+    let mut out = Vec::new();
+    let mut p = 8usize;
+    while p + 8 <= aot.len() {
+        let typ = u32::from_le_bytes(aot[p..p + 4].try_into().unwrap());
+        let size = u32::from_le_bytes(aot[p + 4..p + 8].try_into().unwrap()) as usize;
+        let content = p + 8;
+        let end = content + size;
+        if end > aot.len() || size > 0x1000_0000 {
+            return Err(Error::Truncated);
+        }
+        let mut name = aot_section_name(typ).to_string();
+        if typ == AOT_SECTION_TYPE_CUSTOM && size >= 6 {
+            let sub = u32::from_le_bytes(aot[content..content + 4].try_into().unwrap());
+            if sub == AOT_CUSTOM_SECTION_RAW {
+                let slen =
+                    u16::from_le_bytes(aot[content + 4..content + 6].try_into().unwrap()) as usize;
+                let name_off = content + 6;
+                if name_off + slen <= end {
+                    let mut name_bytes = &aot[name_off..name_off + slen];
+                    if name_bytes.ends_with(&[0]) {
+                        name_bytes = &name_bytes[..name_bytes.len() - 1];
+                    }
+                    if !name_bytes.is_empty() {
+                        name = String::from_utf8_lossy(name_bytes).into_owned();
+                    }
+                }
+            }
+        }
+        let role = if typ == 2 {
+            SectionRole::Code
+        } else if section_role_meta(&name) {
+            SectionRole::Meta
+        } else {
+            SectionRole::Other
+        };
+        out.push(ContainerSection {
+            index: out.len() as u32,
+            name,
+            type_id: typ,
+            offset: content as u64,
+            size: size as u64,
+            role,
+        });
+        let aligned = (end + 3) & !3;
+        p = if aligned <= aot.len() { aligned } else { end };
+    }
+    Ok(out)
+}
+
+fn list_sections_elf(elf: &[u8]) -> Result<Vec<ContainerSection>> {
+    if elf.len() < 64 || elf[4] != 2 || elf[5] != 1 {
+        return Err(Error::Truncated);
+    }
+    let shoff = u64::from_le_bytes(elf[40..48].try_into().unwrap()) as usize;
+    let shentsize = u16::from_le_bytes(elf[58..60].try_into().unwrap()) as usize;
+    let shnum = u16::from_le_bytes(elf[60..62].try_into().unwrap()) as usize;
+    let shstrndx = u16::from_le_bytes(elf[62..64].try_into().unwrap()) as usize;
+    if shentsize < 64 || shnum == 0 || shstrndx >= shnum {
+        return Err(Error::Truncated);
+    }
+    if shoff + shnum * shentsize > elf.len() {
+        return Err(Error::Truncated);
+    }
+    let shstr = &elf[shoff + shstrndx * shentsize..];
+    let str_off = u64::from_le_bytes(shstr[24..32].try_into().unwrap()) as usize;
+    let str_sz = u64::from_le_bytes(shstr[32..40].try_into().unwrap()) as usize;
+    if str_off + str_sz > elf.len() {
+        return Err(Error::Truncated);
+    }
+    let strtab = &elf[str_off..str_off + str_sz];
+    let mut out = Vec::new();
+    for i in 0..shnum {
+        let sh = &elf[shoff + i * shentsize..];
+        let name_off = u32::from_le_bytes(sh[0..4].try_into().unwrap()) as usize;
+        let typ = u32::from_le_bytes(sh[4..8].try_into().unwrap());
+        let off = u64::from_le_bytes(sh[24..32].try_into().unwrap()) as usize;
+        let sz = u64::from_le_bytes(sh[32..40].try_into().unwrap()) as usize;
+        if sz == 0 {
+            continue;
+        }
+        if off + sz > elf.len() {
+            continue;
+        }
+        let name = if name_off >= strtab.len() {
+            format!("shdr_{i}")
+        } else {
+            let end = strtab[name_off..]
+                .iter()
+                .position(|&b| b == 0)
+                .map(|p| name_off + p)
+                .unwrap_or(strtab.len());
+            let s = String::from_utf8_lossy(&strtab[name_off..end]).into_owned();
+            if s.is_empty() {
+                format!("shdr_{i}")
+            } else {
+                s
+            }
+        };
+        let role = if name == ".text" || name.starts_with(".text.") {
+            SectionRole::Code
+        } else if section_role_meta(&name) {
+            SectionRole::Meta
+        } else {
+            SectionRole::Other
+        };
+        out.push(ContainerSection {
+            index: out.len() as u32,
+            name,
+            type_id: typ,
+            offset: off as u64,
+            size: sz as u64,
+            role,
+        });
+    }
+    Ok(out)
+}
+
+/// List all container sections (Wasm / AOT / ELF).
+pub fn list_sections(buf: &[u8]) -> Result<Vec<ContainerSection>> {
+    if buf.len() >= 4 && &buf[0..4] == b"\0asm" {
+        return list_sections_wasm(buf);
+    }
+    if buf.len() >= 4 && &buf[0..4] == b"\0aot" {
+        return list_sections_aot(buf);
+    }
+    if buf.len() >= 4 && &buf[0..4] == b"\x7fELF" {
+        return list_sections_elf(buf);
+    }
+    Err(Error::NotModule)
+}
+
+/// Payload bytes for section ``index`` from [`list_sections`].
+pub fn section_payload(buf: &[u8], index: u32) -> Result<&[u8]> {
+    let sections = list_sections(buf)?;
+    let Some(sec) = sections.iter().find(|s| s.index == index) else {
+        return Err(Error::PathNotFound(format!("section index {index}")));
+    };
+    let start = sec.offset as usize;
+    let end = start + sec.size as usize;
+    if end > buf.len() {
+        return Err(Error::Truncated);
+    }
+    Ok(&buf[start..end])
+}
+
 fn extract_elf_section<'a>(elf: &'a [u8], name: &str) -> Result<Option<&'a [u8]>> {
     if elf.len() < 64 || elf[4] != 2 || elf[5] != 1 {
         return Err(Error::Truncated);
@@ -510,9 +774,9 @@ fn read_wpse_cookie(buf: &[u8]) -> Option<(u64, u64, u16, u16)> {
 
 fn without_sig_section_elf(buf: &[u8]) -> Result<Vec<u8>> {
     // No sig → drop trailing cookie only (clean naked digest).
-    let has_sig = matches!(extract_elf_section(buf, SIG_SECTION)?, Some(_));
+    let has_sig = extract_elf_section(buf, SIG_SECTION)?.is_some();
     if !has_sig {
-        if let Some(_) = read_wpse_cookie(buf) {
+        if read_wpse_cookie(buf).is_some() {
             return Ok(buf[..buf.len() - WPSE_SIZE].to_vec());
         }
         return Ok(buf.to_vec());
@@ -586,10 +850,57 @@ mod tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn uleb(mut n: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let mut b = (n & 0x7f) as u8;
+            n >>= 7;
+            if n != 0 {
+                b |= 0x80;
+            }
+            out.push(b);
+            if n == 0 {
+                break;
+            }
+        }
+        out
+    }
+
     #[test]
     fn rejects_non_module() {
         assert!(matches!(SourceView::open_bytes(b"nope"), Err(Error::NotModule)));
         assert!(matches!(without_sig_section(b"nope"), Err(Error::NotModule)));
+        assert!(matches!(list_sections(b"nope"), Err(Error::NotModule)));
+    }
+
+    #[test]
+    fn lists_wasm_code_section() {
+        let name = b"wasmmod.pack";
+        let payload = b"PACK";
+        let mut custom_body = uleb(name.len() as u32);
+        custom_body.extend_from_slice(name);
+        custom_body.extend_from_slice(payload);
+        let mut custom = vec![0u8];
+        custom.extend(uleb(custom_body.len() as u32));
+        custom.extend(custom_body);
+
+        let code_body = b"\x01\x04\x00\x41\x2a\x0b";
+        let mut code = vec![10u8];
+        code.extend(uleb(code_body.len() as u32));
+        code.extend_from_slice(code_body);
+
+        let mut wasm = b"\0asm\x01\0\0\0".to_vec();
+        wasm.extend(custom);
+        wasm.extend(code);
+
+        let secs = list_sections(&wasm).unwrap();
+        let code_sec = secs.iter().find(|s| s.name == "code").expect("code");
+        assert_eq!(code_sec.role, SectionRole::Code);
+        assert_eq!(code_sec.type_id, 10);
+        assert_eq!(section_payload(&wasm, code_sec.index).unwrap(), code_body);
+
+        let pack = secs.iter().find(|s| s.name == "wasmmod.pack").expect("pack");
+        assert_eq!(pack.role, SectionRole::Meta);
     }
 
     #[test]

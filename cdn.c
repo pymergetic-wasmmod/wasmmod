@@ -24,7 +24,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "py/runtime.h"
+#if MICROPY_PY_WASM_ELF || MICROPY_PY_WASM_AOT
+#include "py/objlist.h" // mp_obj_list_get (wasm.arch probing)
+#endif
 
 #include "extmod/wasmmod/cdn.h"
 #include "extmod/wasmmod/fetch.h"
@@ -183,7 +185,9 @@ static bool try_fetch_uri(const char *uri, uint8_t **out_bytes, uint32_t *out_le
 }
 
 static bool metal_fetch(const char *name, const char *version,
-    uint8_t **out_bytes, uint32_t *out_len, char *errbuf, size_t errbuf_len) {
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *out_origin, size_t origin_len,
+    char *errbuf, size_t errbuf_len) {
     if (g_base[0] == '\0') {
         if (errbuf && errbuf_len) {
             snprintf(errbuf, errbuf_len, "cdn: no base URL");
@@ -327,6 +331,10 @@ static bool metal_fetch(const char *name, const char *version,
         for (const char **e = exts; *e != NULL; ++e) {
             snprintf(uri, sizeof(uri), "%s/artifacts/pin/%s/%s%s", g_base, ver, name, *e);
             if (try_fetch_uri(uri, out_bytes, out_len, errbuf, errbuf_len)) {
+                if (out_origin != NULL && origin_len > 0) {
+                    strncpy(out_origin, uri, origin_len - 1);
+                    out_origin[origin_len - 1] = '\0';
+                }
                 return true;
             }
         }
@@ -334,6 +342,10 @@ static bool metal_fetch(const char *name, const char *version,
     for (const char **e = exts; *e != NULL; ++e) {
         snprintf(uri, sizeof(uri), "%s/artifacts/lead/%s%s", g_base, name, *e);
         if (try_fetch_uri(uri, out_bytes, out_len, errbuf, errbuf_len)) {
+            if (out_origin != NULL && origin_len > 0) {
+                strncpy(out_origin, uri, origin_len - 1);
+                out_origin[origin_len - 1] = '\0';
+            }
             return true;
         }
     }
@@ -344,14 +356,21 @@ static bool metal_fetch(const char *name, const char *version,
 }
 
 static bool path_fetch(const char *name, const char *version,
-    uint8_t **out_bytes, uint32_t *out_len, char *errbuf, size_t errbuf_len) {
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *out_origin, size_t origin_len,
+    char *errbuf, size_t errbuf_len) {
     vstr_t path;
     vstr_init(&path, 64);
     if (version != NULL && version[0] != '\0') {
         char stem[MP_WASM_CDN_BASE_MAX];
         snprintf(stem, sizeof(stem), "%s@%s", name, version);
         if (mp_wasm_find_pack(stem, &path)) {
-            bool ok = try_fetch_uri(vstr_null_terminated_str(&path), out_bytes, out_len, errbuf, errbuf_len);
+            const char *p = vstr_null_terminated_str(&path);
+            bool ok = try_fetch_uri(p, out_bytes, out_len, errbuf, errbuf_len);
+            if (ok && out_origin != NULL && origin_len > 0) {
+                strncpy(out_origin, p, origin_len - 1);
+                out_origin[origin_len - 1] = '\0';
+            }
             vstr_clear(&path);
             if (ok) {
                 return true;
@@ -360,7 +379,12 @@ static bool path_fetch(const char *name, const char *version,
         }
     }
     if (mp_wasm_find_pack(name, &path)) {
-        bool ok = try_fetch_uri(vstr_null_terminated_str(&path), out_bytes, out_len, errbuf, errbuf_len);
+        const char *p = vstr_null_terminated_str(&path);
+        bool ok = try_fetch_uri(p, out_bytes, out_len, errbuf, errbuf_len);
+        if (ok && out_origin != NULL && origin_len > 0) {
+            strncpy(out_origin, p, origin_len - 1);
+            out_origin[origin_len - 1] = '\0';
+        }
         vstr_clear(&path);
         return ok;
     }
@@ -371,14 +395,18 @@ static bool path_fetch(const char *name, const char *version,
     return false;
 }
 
-bool mp_wasm_cdn_fetch_pack(const char *name, const char *version,
+bool mp_wasm_cdn_fetch_pack_ex(const char *name, const char *version,
     uint8_t **out_bytes, uint32_t *out_len,
+    char *out_origin, size_t origin_len,
     char *errbuf, size_t errbuf_len) {
     if (out_bytes == NULL || out_len == NULL) {
         return false;
     }
     *out_bytes = NULL;
     *out_len = 0;
+    if (out_origin != NULL && origin_len > 0) {
+        out_origin[0] = '\0';
+    }
     if (name == NULL || name[0] == '\0') {
         if (errbuf && errbuf_len) {
             snprintf(errbuf, errbuf_len, "cdn: empty name");
@@ -386,9 +414,15 @@ bool mp_wasm_cdn_fetch_pack(const char *name, const char *version,
         return false;
     }
     if (g_driver == MP_WASM_CDN_DRIVER_METAL) {
-        return metal_fetch(name, version, out_bytes, out_len, errbuf, errbuf_len);
+        return metal_fetch(name, version, out_bytes, out_len, out_origin, origin_len, errbuf, errbuf_len);
     }
-    return path_fetch(name, version, out_bytes, out_len, errbuf, errbuf_len);
+    return path_fetch(name, version, out_bytes, out_len, out_origin, origin_len, errbuf, errbuf_len);
+}
+
+bool mp_wasm_cdn_fetch_pack(const char *name, const char *version,
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *errbuf, size_t errbuf_len) {
+    return mp_wasm_cdn_fetch_pack_ex(name, version, out_bytes, out_len, NULL, 0, errbuf, errbuf_len);
 }
 
 void mp_wasm_cdn_set_session_id(const char *session_id) {

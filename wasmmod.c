@@ -172,7 +172,7 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_source_from_file), MP_ROM_PTR(&mod_wasm_source_from_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_source_from_bytes), MP_ROM_PTR(&mod_wasm_source_from_bytes_obj) },
     { MP_ROM_QSTR(MP_QSTR_WasmSource), MP_ROM_PTR(&mp_type_wasm_source) },
-    { MP_ROM_QSTR(MP_QSTR_WasmModule), MP_ROM_PTR(&mp_type_wasm_module) },
+    { MP_ROM_QSTR(MP_QSTR_PackModule), MP_ROM_PTR(&mp_type_pack_module) },
 };
 
 static MP_DEFINE_CONST_DICT(mp_module_wasm_globals, mp_module_wasm_globals_table);

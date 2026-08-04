@@ -46,7 +46,7 @@
 
 typedef struct mp_wasm_reg_entry_t {
     struct mp_wasm_reg_entry_t *next;
-    mp_wasm_module_t *mod;
+    mp_pack_t *mod;
 } mp_wasm_reg_entry_t;
 
 // Fast path: stack argv when arity fits; else one malloc (rare / fat signatures).
@@ -62,16 +62,19 @@ typedef struct mp_wasm_fwd_t {
     uint32_t nresults;
     uint8_t *param_kinds;  // Wasm binary valtypes 0x7f..0x7c
     uint8_t *result_kinds;
+    // True when kinds were the ()->i32 default (no Wasm type section — typical AOT).
+    // Refreshed from the peer export on first call once the peer is registered.
+    bool types_provisional;
     NativeSymbol sym;
     // Hot-path cache (invalidated when target pack is unloaded/replaced).
-    mp_wasm_module_t *cached_mod;
+    mp_pack_t *cached_mod;
     wasm_function_inst_t cached_fn;
 } mp_wasm_fwd_t;
 
 static mp_wasm_reg_entry_t *registry;
 static mp_wasm_fwd_t *forwarders;
 
-static void fwd_invalidate_mod(mp_wasm_module_t *mod) {
+static void fwd_invalidate_mod(mp_pack_t *mod) {
     if (mod == NULL) {
         return;
     }
@@ -83,16 +86,16 @@ static void fwd_invalidate_mod(mp_wasm_module_t *mod) {
     }
 }
 
-void mp_wasm_registry_add(mp_wasm_module_t *mod) {
+void mp_wasm_registry_add(mp_pack_t *mod) {
     if (mod == NULL) {
         return;
     }
     for (mp_wasm_reg_entry_t *e = registry; e != NULL; e = e->next) {
-        if (e->mod != NULL && strcmp(mp_wasm_module_name(e->mod), mp_wasm_module_name(mod)) == 0) {
+        if (e->mod != NULL && strcmp(mp_pack_name(e->mod), mp_pack_name(mod)) == 0) {
             if (e->mod != mod) {
                 fwd_invalidate_mod(e->mod);
 #if MICROPY_PY_WASM_ELF
-                mp_wasm_elf_plt_invalidate(e->mod);
+                mp_pack_elf_plt_invalidate(e->mod);
 #endif
             }
             e->mod = mod;
@@ -108,10 +111,10 @@ void mp_wasm_registry_add(mp_wasm_module_t *mod) {
     registry = e;
 }
 
-void mp_wasm_registry_remove(mp_wasm_module_t *mod) {
+void mp_wasm_registry_remove(mp_pack_t *mod) {
     fwd_invalidate_mod(mod);
 #if MICROPY_PY_WASM_ELF
-    mp_wasm_elf_plt_invalidate(mod);
+    mp_pack_elf_plt_invalidate(mod);
 #endif
     mp_wasm_reg_entry_t **pp = &registry;
     while (*pp) {
@@ -125,12 +128,12 @@ void mp_wasm_registry_remove(mp_wasm_module_t *mod) {
     }
 }
 
-mp_wasm_module_t *mp_wasm_registry_find(const char *name) {
+mp_pack_t *mp_wasm_registry_find(const char *name) {
     if (name == NULL) {
         return NULL;
     }
     for (mp_wasm_reg_entry_t *e = registry; e != NULL; e = e->next) {
-        if (e->mod != NULL && strcmp(mp_wasm_module_name(e->mod), name) == 0) {
+        if (e->mod != NULL && strcmp(mp_pack_name(e->mod), name) == 0) {
             return e->mod;
         }
     }
@@ -157,10 +160,90 @@ static wasm_valkind_t vt_to_kind(uint8_t vt) {
     }
 }
 
+static uint8_t kind_to_vt(wasm_valkind_t k) {
+    switch (k) {
+        case WASM_I32: return 0x7f;
+        case WASM_I64: return 0x7e;
+        case WASM_F32: return 0x7d;
+        case WASM_F64: return 0x7c;
+        default: return 0;
+    }
+}
+
+// Fill fwd kinds from a registered peer export (AOT has no Wasm type section).
+static bool fwd_apply_peer_types(mp_wasm_fwd_t *fwd) {
+    if (fwd == NULL || fwd->module == NULL || fwd->func == NULL) {
+        return false;
+    }
+    mp_pack_t *peer = mp_wasm_registry_find(fwd->module);
+    if (peer == NULL) {
+        return false;
+    }
+    uint32_t np = 0, nr = 0;
+    wasm_valkind_t *pk = NULL, *rk = NULL;
+    if (!mp_pack_func_types(peer, fwd->func, &np, &pk, &nr, &rk)) {
+        return false;
+    }
+    if (nr > 1) {
+        MICROPY_WASM_FREE(pk);
+        MICROPY_WASM_FREE(rk);
+        return false;
+    }
+    for (uint32_t i = 0; i < np; ++i) {
+        if (kind_to_vt(pk[i]) == 0) {
+            MICROPY_WASM_FREE(pk);
+            MICROPY_WASM_FREE(rk);
+            return false;
+        }
+    }
+    if (nr == 1 && kind_to_vt(rk[0]) == 0) {
+        MICROPY_WASM_FREE(pk);
+        MICROPY_WASM_FREE(rk);
+        return false;
+    }
+    uint8_t *pbuf = NULL, *rbuf = NULL;
+    if (np > 0) {
+        pbuf = MICROPY_WASM_MALLOC(np);
+        if (pbuf == NULL) {
+            MICROPY_WASM_FREE(pk);
+            MICROPY_WASM_FREE(rk);
+            return false;
+        }
+        for (uint32_t i = 0; i < np; ++i) {
+            pbuf[i] = kind_to_vt(pk[i]);
+        }
+    }
+    if (nr > 0) {
+        rbuf = MICROPY_WASM_MALLOC(nr);
+        if (rbuf == NULL) {
+            MICROPY_WASM_FREE(pbuf);
+            MICROPY_WASM_FREE(pk);
+            MICROPY_WASM_FREE(rk);
+            return false;
+        }
+        for (uint32_t i = 0; i < nr; ++i) {
+            rbuf[i] = kind_to_vt(rk[i]);
+        }
+    }
+    MICROPY_WASM_FREE(pk);
+    MICROPY_WASM_FREE(rk);
+    MICROPY_WASM_FREE(fwd->param_kinds);
+    MICROPY_WASM_FREE(fwd->result_kinds);
+    fwd->nparams = np;
+    fwd->nresults = nr;
+    fwd->param_kinds = pbuf;
+    fwd->result_kinds = rbuf;
+    fwd->types_provisional = false;
+    return true;
+}
+
 static void forward_raw(wasm_exec_env_t exec_env, uint64_t *args) {
     mp_wasm_fwd_t *fwd = wasm_runtime_get_function_attachment(exec_env);
     if (fwd == NULL) {
         return;
+    }
+    if (fwd->types_provisional) {
+        (void)fwd_apply_peer_types(fwd);
     }
 
     wasm_val_t stack_args[MP_WASM_FWD_STACK_ARGS];
@@ -218,12 +301,12 @@ static void forward_raw(wasm_exec_env_t exec_env, uint64_t *args) {
     if (fwd->cached_mod == NULL || fwd->cached_fn == NULL) {
         fwd->cached_mod = mp_wasm_registry_find(fwd->module);
         fwd->cached_fn = fwd->cached_mod
-            ? mp_wasm_module_lookup_fn(fwd->cached_mod, fwd->func)
+            ? mp_pack_lookup_fn(fwd->cached_mod, fwd->func)
             : NULL;
     }
 
     if (fwd->cached_mod != NULL && fwd->cached_fn != NULL) {
-        (void)mp_wasm_module_call_fn(fwd->cached_mod, fwd->cached_fn,
+        (void)mp_pack_call_fn(fwd->cached_mod, fwd->cached_fn,
             fwd->nparams, vargs, fwd->nresults, results, NULL, 0);
     }
 
@@ -280,7 +363,7 @@ static char *xstrdup(const char *s) {
 static bool register_one(const char *module, const char *func,
     uint32_t nparams, const uint8_t *param_kinds,
     uint32_t nresults, const uint8_t *result_kinds,
-    char *errbuf, size_t errbuf_len) {
+    bool types_provisional, char *errbuf, size_t errbuf_len) {
     if (fwd_exists(module, func)) {
         return true;
     }
@@ -327,6 +410,7 @@ static bool register_one(const char *module, const char *func,
     }
     fwd->nparams = nparams;
     fwd->nresults = nresults;
+    fwd->types_provisional = types_provisional;
     if (nparams > 0) {
         fwd->param_kinds = MICROPY_WASM_MALLOC(nparams);
         if (fwd->param_kinds == NULL) {
@@ -596,8 +680,11 @@ bool mp_wasm_register_forwarders(const uint8_t *wasm, uint32_t len, char *errbuf
 
         uint32_t nparams = 0, nresults = 0;
         uint8_t *params = NULL, *results = NULL;
+        bool provisional = false;
         if (!import_func_types(wasm, len, module, func, &nparams, &params, &nresults, &results)) {
-            // Default ()->i32 when type missing / non-numeric.
+            // AOT has no Wasm type section — provisional ()->i32, then refresh
+            // from the peer export on first forward_raw call (see types_provisional).
+            provisional = true;
             nparams = 0;
             nresults = 1;
             results = MICROPY_WASM_MALLOC(1);
@@ -607,7 +694,7 @@ bool mp_wasm_register_forwarders(const uint8_t *wasm, uint32_t len, char *errbuf
             }
             results[0] = 0x7f;
         }
-        if (!register_one(module, func, nparams, params, nresults, results, errbuf, errbuf_len)) {
+        if (!register_one(module, func, nparams, params, nresults, results, provisional, errbuf, errbuf_len)) {
             ok = false;
             MICROPY_WASM_FREE(params);
             MICROPY_WASM_FREE(results);

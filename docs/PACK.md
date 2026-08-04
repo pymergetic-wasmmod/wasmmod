@@ -208,8 +208,15 @@ On successful load of a pack named `mypkg`:
    - `src/sub/mod.py` → `sys.modules["mypkg.sub.mod"]`
 6. Bind `[[exports]]` accessors onto the correct module objects
    (`mypkg.add`, `mypkg.sub.ping`, …).
-7. Set pack metadata on the root (`__file__`, `__wasm__`, `__path__` as
+7. Set pack metadata on the root (`__file__`, `__pack__`, `__path__` as
    needed) so relative imports inside embedded `.py` resolve naturally.
+   `__pack__` is a `wasm.PackModule` handle for the loaded engine (Wasm / AOT /
+   ELF). Read-only attrs: `kind` (`"wasm"`|`"aot"`|`"elf"`), `origin` (path/URL
+   that won the probe), `arch` (filename infix or `""`), `name` (pack registry
+   name). Nested pack modules share the same handle. Note: the C API
+   `mp_pack_load` instantiates the engine; the guest export string
+   `"mp_pack_load"` in `pack.toml` is the lifecycle hook — same spelling,
+   different worlds.
 
 Unload (explicit `wasm.unload` / `close`):
 
@@ -725,7 +732,7 @@ linear offsets: `call_buf(slot, ptr, len)`, `call_py(mod,mod_len,attr,attr_len[,
 offset (`MP_WASM_PTR(p)` in `guest.h`). Durable buffers → **cookies**
 (`mem_alloc` + `mem_copy_*`); opaque Python values → **handles**
 (`wasm.handle_register` / `resolve` / `free`). From Python,
-`WasmModule.memory_read/write/alloc/free` touch linear memory directly;
+`PackModule.memory_read/write/alloc/free` touch linear memory directly;
 `wasm.mem_alloc/get/set/free` manage cookies.
 
 Python installs callables with `wasmmod.host_set` / `host_get` / `host_clear`.
@@ -894,7 +901,7 @@ n_exports ×:
 | `1` | `(i32) -> i32` |
 | `2` | `(i32,i32) -> i32` |
 | `3` | `(i32…) -> i32` up to implementation max |
-| `255` | unbound / call only via low-level `WasmModule.call` |
+| `255` | unbound / call only via low-level `PackModule.call` |
 
 Unknown `sig` → skip binding that export (still callable via low-level API).
 
@@ -1077,7 +1084,7 @@ drivers = wasm.import_wasm("sensor.drivers")
 wasm.unload("sensor")
 ```
 
-Low-level escape remains: `WasmModule.call("export", ...)`.
+Low-level escape remains: `PackModule.call("export", ...)`.
 
 ## Port hooks (host; not in the pack bytes)
 

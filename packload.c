@@ -134,7 +134,7 @@ static bool replace_suffix(const char *path, const char *old_suf, const char *ne
 #endif
 typedef struct {
     mp_obj_t py_mod;
-    mp_wasm_module_t *wasm;
+    mp_pack_t *wasm;
 } bind_ctx_t;
 
 static void bind_export_cb(const char *name, uint32_t nparams, uint32_t nresults, void *ctx_in) {
@@ -206,7 +206,7 @@ static void path_to_dotted(const char *root, size_t root_len, const char *path, 
 
 // Score a pack file for this MicroPython host. <0 → skip.
 // Prefer compatible .mpy (higher sib that still fits), else .py. Ignore .pyc.
-static int score_pack_file_for_upy_host(const mp_wasm_pack_file_t *f) {
+static int score_pack_file_for_upy_host(const mp_pack_manifest_file_t *f) {
     const char *path = f->path;
     size_t path_len = f->path_len;
 
@@ -216,15 +216,15 @@ static int score_pack_file_for_upy_host(const mp_wasm_pack_file_t *f) {
         }
     }
 
-    if (f->kind == MP_WASM_PACK_KIND_PYC) {
+    if (f->kind == MP_PACK_KIND_PYC) {
         return -1;
     }
 
-    if (f->kind == MP_WASM_PACK_KIND_PY) {
+    if (f->kind == MP_PACK_KIND_PY) {
         return 1;
     }
 
-    if (f->kind != MP_WASM_PACK_KIND_MPY) {
+    if (f->kind != MP_PACK_KIND_MPY) {
         return -1;
     }
 
@@ -232,7 +232,7 @@ static int score_pack_file_for_upy_host(const mp_wasm_pack_file_t *f) {
     const uint8_t *data;
     uint32_t data_len;
     uint8_t *to_free = NULL;
-    if (!mp_wasm_pack_file_bytes(f, &data, &data_len, &to_free)) {
+    if (!mp_pack_manifest_file_bytes(f, &data, &data_len, &to_free)) {
         return -1;
     }
     if (data_len < 4 || data[0] != 'M' || data[1] != MPY_VERSION) {
@@ -327,20 +327,20 @@ static void exec_mpy_into_module(mp_obj_t module_obj, const char *src_name, cons
 }
 #endif
 
-static void exec_pack_file_into_module(mp_obj_t module_obj, const char *src_name, const mp_wasm_pack_file_t *f) {
+static void exec_pack_file_into_module(mp_obj_t module_obj, const char *src_name, const mp_pack_manifest_file_t *f) {
     const uint8_t *data;
     uint32_t data_len;
     uint8_t *to_free = NULL;
-    if (!mp_wasm_pack_file_bytes(f, &data, &data_len, &to_free)) {
+    if (!mp_pack_manifest_file_bytes(f, &data, &data_len, &to_free)) {
         mp_raise_ValueError(MP_ERROR_TEXT("wasm pack file inflate failed"));
     }
-    if (f->kind == MP_WASM_PACK_KIND_PY) {
+    if (f->kind == MP_PACK_KIND_PY) {
         exec_py_into_module(module_obj, src_name, data, data_len);
         MICROPY_WASM_FREE(to_free);
         return;
     }
     #if MICROPY_PERSISTENT_CODE_LOAD
-    if (f->kind == MP_WASM_PACK_KIND_MPY) {
+    if (f->kind == MP_PACK_KIND_MPY) {
         exec_mpy_into_module(module_obj, src_name, data, data_len);
         MICROPY_WASM_FREE(to_free);
         return;
@@ -460,10 +460,10 @@ static mp_obj_t module_for_export_suffix(const char *pack_name, const char *suff
     return mod;
 }
 
-static void bind_pack_exports(mp_obj_t root, mp_wasm_module_t *wmod, const char *pack_name, const mp_wasm_pack_info_t *info) {
+static void bind_pack_exports(mp_obj_t root, mp_pack_t *wmod, const char *pack_name, const mp_pack_manifest_t *info) {
     if (info != NULL && info->n_exports > 0) {
         for (uint32_t i = 0; i < info->n_exports; ++i) {
-            const mp_wasm_pack_export_t *ex = &info->exports[i];
+            const mp_pack_manifest_export_t *ex = &info->exports[i];
             if (ex->func_len == 0 || ex->export_len == 0) {
                 continue;
             }
@@ -472,7 +472,7 @@ static void bind_pack_exports(mp_obj_t root, mp_wasm_module_t *wmod, const char 
             vstr_add_strn(&ename, ex->export_name, ex->export_len);
             const char *export_c = vstr_null_terminated_str(&ename);
             // Introspect Wasm types (sig tag is a hint only; numeric i32/i64/f32/f64).
-            if (!mp_wasm_module_numeric_export_arity(wmod, export_c, NULL, NULL)) {
+            if (!mp_pack_numeric_export_arity(wmod, export_c, NULL, NULL)) {
                 vstr_clear(&ename);
                 continue;
             }
@@ -489,34 +489,34 @@ static void bind_pack_exports(mp_obj_t root, mp_wasm_module_t *wmod, const char 
     }
     // No export table: bind all numeric exports on the pack root.
     bind_ctx_t bctx = { .py_mod = root, .wasm = wmod };
-    mp_wasm_module_foreach_numeric_export(wmod, bind_export_cb, &bctx);
+    mp_pack_foreach_numeric_export(wmod, bind_export_cb, &bctx);
 }
 
 // Bind Python package + call mp_pack_load for an already-instantiated module.
-static mp_obj_t finish_pack_after_load(mp_wasm_module_t *wmod, const uint8_t *meta, uint32_t meta_len,
+static mp_obj_t finish_pack_after_load(mp_pack_t *wmod, const uint8_t *meta, uint32_t meta_len,
     const char *pack_name) {
     int32_t lc = 0;
-    (void)mp_wasm_module_call0(wmod, "mp_pack_load", &lc, NULL, 0);
+    (void)mp_pack_call0(wmod, "mp_pack_load", &lc, NULL, 0);
 
     qstr qpack = qstr_from_str(pack_name);
     mp_obj_t root = mp_obj_new_module(qpack);
     mp_obj_t wasm_obj = mp_wasm_wrap_loaded(wmod);
-    ((mp_obj_wasm_module_t *)MP_OBJ_TO_PTR(wasm_obj))->pack_name = qpack;
+    ((mp_obj_pack_module_t *)MP_OBJ_TO_PTR(wasm_obj))->pack_name = qpack;
 
     mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(root)),
-        MP_OBJ_NEW_QSTR(MP_QSTR___wasm__), wasm_obj);
+        MP_OBJ_NEW_QSTR(MP_QSTR___pack__), wasm_obj);
     mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(root)),
         MP_OBJ_NEW_QSTR(MP_QSTR___path__),
         mp_obj_new_str(pack_name, strlen(pack_name)));
 
-    mp_wasm_pack_info_t info;
+    mp_pack_manifest_t info;
     memset(&info, 0, sizeof(info));
     bool have_pack = false;
     {
         const uint8_t *payload = NULL;
         uint32_t payload_len = 0;
-        have_pack = mp_wasm_pack_find_section(meta, meta_len, &payload, &payload_len)
-            && mp_wasm_pack_parse(payload, payload_len, &info);
+        have_pack = mp_pack_manifest_find_section(meta, meta_len, &payload, &payload_len)
+            && mp_pack_manifest_parse(payload, payload_len, &info);
     }
     bind_pack_exports(root, wmod, pack_name, have_pack ? &info : NULL);
 
@@ -525,9 +525,9 @@ static mp_obj_t finish_pack_after_load(mp_wasm_module_t *wmod, const uint8_t *me
         int *best_score = m_new(int, info.n_files ? info.n_files : 1);
         uint32_t n_best = 0;
         for (uint32_t i = 0; i < info.n_files; ++i) {
-            const mp_wasm_pack_file_t *f = &info.files[i];
-            if (f->kind != MP_WASM_PACK_KIND_PY && f->kind != MP_WASM_PACK_KIND_MPY
-                && f->kind != MP_WASM_PACK_KIND_PYC) {
+            const mp_pack_manifest_file_t *f = &info.files[i];
+            if (f->kind != MP_PACK_KIND_PY && f->kind != MP_PACK_KIND_MPY
+                && f->kind != MP_PACK_KIND_PYC) {
                 continue;
             }
             int score = score_pack_file_for_upy_host(f);
@@ -556,7 +556,7 @@ static mp_obj_t finish_pack_after_load(mp_wasm_module_t *wmod, const uint8_t *me
             }
         }
         for (uint32_t j = 0; j < n_best; ++j) {
-            const mp_wasm_pack_file_t *f = &info.files[best_idx[j]];
+            const mp_pack_manifest_file_t *f = &info.files[best_idx[j]];
             vstr_t dotted;
             vstr_init(&dotted, f->path_len + 16);
             path_to_dotted(pack_name, strlen(pack_name), f->path, f->path_len, &dotted);
@@ -565,7 +565,7 @@ static mp_obj_t finish_pack_after_load(mp_wasm_module_t *wmod, const uint8_t *me
             qstr qmod = qstr_from_str(dotted_name);
             mp_obj_t mod = mp_obj_new_module(qmod);
             mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(mod)),
-                MP_OBJ_NEW_QSTR(MP_QSTR___wasm__), wasm_obj);
+                MP_OBJ_NEW_QSTR(MP_QSTR___pack__), wasm_obj);
             if (path_is_package_init(f->path, f->path_len)) {
                 mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(mod)),
                     MP_OBJ_NEW_QSTR(MP_QSTR___path__),
@@ -584,7 +584,7 @@ static mp_obj_t finish_pack_after_load(mp_wasm_module_t *wmod, const uint8_t *me
         m_del(uint32_t, best_idx, info.n_files ? info.n_files : 1);
         m_del(int, best_score, info.n_files ? info.n_files : 1);
     }
-    mp_wasm_pack_info_free(&info);
+    mp_pack_manifest_free(&info);
     return root;
 }
 
@@ -596,7 +596,7 @@ static mp_obj_t load_closure_from_root(const char *root_name, const char *root_v
         mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm resolve: %s"), err);
     }
 
-    mp_wasm_module_t *mods[MP_WASM_CLOSURE_MAX];
+    mp_pack_t *mods[MP_WASM_CLOSURE_MAX];
     memset(mods, 0, sizeof(mods));
 
     // Phase: instantiate + registry_add (inside module_load_ex) for every node.
@@ -606,11 +606,11 @@ static mp_obj_t load_closure_from_root(const char *root_name, const char *root_v
         if (bytes == NULL) {
             mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm resolve: missing cache entry"));
         }
-        mods[i] = mp_wasm_module_load_ex(bytes, blen, NULL, 0, cl.nodes[i].name, NULL, err, sizeof(err));
+        mods[i] = mp_pack_load_ex(bytes, blen, NULL, 0, cl.nodes[i].name, NULL, err, sizeof(err));
         if (mods[i] == NULL) {
             mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm load: %s"), err);
         }
-        mp_wasm_module_set_name(mods[i], cl.nodes[i].name);
+        mp_pack_set_name(mods[i], cl.nodes[i].name);
     }
 
     // Phase: connect — every guest import target must be registered.
@@ -658,19 +658,19 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
     {
         const uint8_t *payload = NULL;
         uint32_t payload_len = 0;
-        mp_wasm_pack_info_t peek;
+        mp_pack_manifest_t peek;
         memset(&peek, 0, sizeof(peek));
         if (pack_name == NULL
-            && mp_wasm_pack_find_section(meta, meta_len, &payload, &payload_len)
-            && mp_wasm_pack_parse(payload, payload_len, &peek)
+            && mp_pack_manifest_find_section(meta, meta_len, &payload, &payload_len)
+            && mp_pack_manifest_parse(payload, payload_len, &peek)
             && peek.name_len > 0) {
             size_t n = peek.name_len < sizeof(name_buf) - 1 ? peek.name_len : sizeof(name_buf) - 1;
             memcpy(name_buf, peek.name, n);
             name_buf[n] = '\0';
             pack_name = name_buf;
-            mp_wasm_pack_info_free(&peek);
+            mp_pack_manifest_free(&peek);
         } else {
-            mp_wasm_pack_info_free(&peek);
+            mp_pack_manifest_free(&peek);
         }
     }
     if (pack_name == NULL && path_hint != NULL) {
@@ -694,18 +694,18 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
     }
 
     char err[128];
-    mp_wasm_module_t *wmod = mp_wasm_module_load_ex(code, code_len, meta, meta_len,
+    mp_pack_t *wmod = mp_pack_load_ex(code, code_len, meta, meta_len,
         pack_name, path_hint, err, sizeof(err));
     if (wmod == NULL) {
         MICROPY_WASM_FREE(code_owned);
         MICROPY_WASM_FREE(meta_owned);
         mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm load: %s"), err);
     }
-    mp_wasm_module_set_name(wmod, pack_name);
+    mp_pack_set_name(wmod, pack_name);
 
     {
         uint32_t blen = 0;
-        const uint8_t *bytes = mp_wasm_module_meta_bytes(wmod, &blen);
+        const uint8_t *bytes = mp_pack_meta_bytes(wmod, &blen);
         char cerr[128];
         if (!mp_wasm_connect_imports(bytes, blen, cerr, sizeof(cerr))) {
             if (mp_wasm_cdn_require_explicit_deps()) {
@@ -746,7 +746,7 @@ static void wasm_path_add_local_pack_dir(const char *path) {
     vstr_clear(&dir);
 }
 
-mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override) {
+mp_obj_t mp_pack_load_path(const char *path, const char *name_override) {
     char err[128];
     vstr_t code;
     vstr_t meta;
@@ -858,11 +858,16 @@ mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override) {
     return root;
 }
 
-mp_obj_t mp_wasm_load_pack_bytes(const uint8_t *code, uint32_t code_len, const char *name_override) {
+mp_obj_t mp_pack_load_bytes(const uint8_t *code, uint32_t code_len, const char *name_override) {
+    return mp_pack_load_bytes_at(code, code_len, name_override, NULL);
+}
+
+mp_obj_t mp_pack_load_bytes_at(const uint8_t *code, uint32_t code_len,
+    const char *name_override, const char *origin) {
     if (code == NULL || code_len == 0) {
         mp_raise_ValueError(MP_ERROR_TEXT("empty wasm pack bytes"));
     }
-    return load_pack_from_parts(code, code_len, NULL, 0, NULL, name_override);
+    return load_pack_from_parts(code, code_len, NULL, 0, origin, name_override);
 }
 
 static mp_obj_t mod_wasm_load_pack(size_t n_args, const mp_obj_t *args) {
@@ -871,7 +876,7 @@ static mp_obj_t mod_wasm_load_pack(size_t n_args, const mp_obj_t *args) {
         name_override = mp_obj_str_get_str(args[1]);
     }
     if (mp_obj_is_str(args[0])) {
-        return mp_wasm_load_pack_path(mp_obj_str_get_str(args[0]), name_override);
+        return mp_pack_load_path(mp_obj_str_get_str(args[0]), name_override);
     }
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(args[0], &bufinfo, MP_BUFFER_READ);
@@ -887,12 +892,12 @@ static mp_obj_t mod_wasm_unload(mp_obj_t name_in) {
     mp_map_elem_t *el = mp_map_lookup(map, MP_OBJ_NEW_QSTR(qstr_from_str(name)), MP_MAP_LOOKUP);
     if (el != NULL && el->value != MP_OBJ_NULL) {
         mp_map_elem_t *w = mp_map_lookup(&mp_obj_module_get_globals(el->value)->map,
-            MP_OBJ_NEW_QSTR(MP_QSTR___wasm__), MP_MAP_LOOKUP);
-        if (w != NULL && mp_obj_is_type(w->value, (mp_obj_type_t *)&mp_type_wasm_module)) {
-            mp_obj_wasm_module_t *wo = MP_OBJ_TO_PTR(w->value);
+            MP_OBJ_NEW_QSTR(MP_QSTR___pack__), MP_MAP_LOOKUP);
+        if (w != NULL && mp_obj_is_type(w->value, (mp_obj_type_t *)&mp_type_pack_module)) {
+            mp_obj_pack_module_t *wo = MP_OBJ_TO_PTR(w->value);
             if (wo->mod) {
                 int32_t lc = 0;
-                (void)mp_wasm_module_call0(wo->mod, "mp_pack_unload", &lc, NULL, 0);
+                (void)mp_pack_call0(wo->mod, "mp_pack_unload", &lc, NULL, 0);
             }
             wasm_module_close(MP_OBJ_FROM_PTR(wo));
         }

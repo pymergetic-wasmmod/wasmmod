@@ -1,0 +1,25 @@
+# Includes use "extmod/wasmmod/...". clangd resolves relative -I against this
+# directory (the TU's parent), so wasmmod/.clangd's -I../.. only reaches the
+# wasmmod root here — not metalpython TOP. Paths below are from format/<backend>/.
+CompileFlags:
+  CompilationDatabase: None
+  Add:
+    - -xc
+    - -std=gnu99
+    - -DUNIX
+    - -DMICROPY_PY_WASM=1
+    - -DMICROPY_PY_WASM_ELF=1
+    - -DMICROPY_PY_WASM_AOT=1
+    # metalpython TOP (format/<backend> → format → wasmmod → extmod → TOP)
+    - -I../../../..
+    # wasmmod root
+    - -I../..
+    - -I../../third_party/wamr/core/iwasm/include
+    - -I../../../../ports/unix
+    - -I../../../../ports/unix/variants/standard
+    - -I../../../../ports/unix/build-wasm
+    - -I../../../../lib/mbedtls/include
+    - -I../../../../shared/readline
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: Strict

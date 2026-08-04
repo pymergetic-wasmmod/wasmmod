@@ -25,6 +25,8 @@ CompileFlags:
   Add:
     - -DUNIX
     - -DMICROPY_PY_WASM=1
+    # Match default host unix build (ports/unix + micropython.mk).
+    - -DMICROPY_PY_WASM_ELF=1
     - -I.
     - -I../..
     - -I../../ports/unix
@@ -115,8 +117,8 @@ Diagnostics:
 # !__EMSCRIPTEN__. Includes are relative (../../../io.h) so metalpython-as-
 # workspace clangd still resolves without relying on -I../...
 # Note: clangd fallback cwd is the source file's directory, so -I../.. from
-# this file is wrong for deep paths (e.g. variant/mbedtls/). That tree has
-# its own .clangd with -I to TOP for extmod/mbedtls/*.h.
+# this file is wrong for deep paths (e.g. variant/mbedtls/, format/*/). Those
+# trees have their own .clangd with -I to TOP for extmod/... includes.
 ---
 If:
   PathMatch: .*/ports/micropython/webassembly/.*

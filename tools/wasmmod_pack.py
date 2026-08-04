@@ -294,7 +294,7 @@ class PythonTarget:
     def tagged_path(self, py_rel: str) -> str:
         stem = py_rel[: -3] if py_rel.endswith(".py") else py_rel
         if self.host == "upy":
-            parts = [f"upy", f"mpy{self.mpy_ver}"]
+            parts = ["upy", f"mpy{self.mpy_ver}"]
             if self.sub is not None:
                 parts.append(f"sub{self.sub}")
             if self.arch:

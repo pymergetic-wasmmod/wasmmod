@@ -58,10 +58,12 @@ void mp_wasm_path_ensure(void);
 mp_obj_t mp_wasm_path_obj(void);
 void mp_wasm_arch_ensure(void);
 mp_obj_t mp_wasm_arch_obj(void);
-mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override);
+mp_obj_t mp_pack_load_path(const char *path, const char *name_override);
 
 // Load pack from already-fetched artifact bytes (CDN / in-memory).
-mp_obj_t mp_wasm_load_pack_bytes(const uint8_t *code, uint32_t code_len, const char *name_override);
+mp_obj_t mp_pack_load_bytes(const uint8_t *code, uint32_t code_len, const char *name_override);
+mp_obj_t mp_pack_load_bytes_at(const uint8_t *code, uint32_t code_len,
+    const char *name_override, const char *origin);
 
 // Host AOT file-format version (WAMR AOT_CURRENT_VERSION), or 0 if unavailable.
 unsigned mp_wasm_aot_format_version(void);

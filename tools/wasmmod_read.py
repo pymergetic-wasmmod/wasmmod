@@ -24,7 +24,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """
-Host reader for wasmmod.source / wasmmod.sig on .wasm, .aot, or .elf.
+Host reader for wasmmod.source / wasmmod.sig / container sections on .wasm, .aot, or .elf.
 
 Thin wrapper around the Rust binary (crates/wasmmod-read):
 
@@ -34,6 +34,8 @@ Thin wrapper around the Rust binary (crates/wasmmod-read):
   python3 tools/wasmmod.py read verify --trust ROOT.crt.der PATH
   python3 tools/wasmmod.py read read PATH RELPATH
   python3 tools/wasmmod.py read extract PATH -o DIR
+  python3 tools/wasmmod.py read sections PATH
+  python3 tools/wasmmod.py read section PATH INDEX [--hex]
 
 Build once:
   cargo build --release -p wasmmod-read

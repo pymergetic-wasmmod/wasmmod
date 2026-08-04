@@ -54,33 +54,36 @@
 #define MICROPY_WASM_MODE_DEFAULT ((mp_int_t)Mode_Interp)
 #endif
 
-typedef struct _mp_obj_wasm_module_t {
+typedef struct _mp_obj_pack_module_t {
     mp_obj_base_t base;
-    mp_wasm_module_t *mod;
+    mp_pack_t *mod;
     qstr pack_name; // 0 if not published as a pack
-} mp_obj_wasm_module_t;
+} mp_obj_pack_module_t;
 
-typedef struct _mp_obj_wasm_func_t {
+typedef struct _mp_obj_pack_func_t {
     mp_obj_base_t base;
-    mp_wasm_module_t *mod;
+    mp_pack_t *mod;
     qstr export_name;
-} mp_obj_wasm_func_t;
+} mp_obj_pack_func_t;
 
-extern const mp_obj_type_t mp_type_wasm_module;
+extern const mp_obj_type_t mp_type_pack_module;
 
 void mp_wasm_path_ensure(void);
 mp_obj_t mp_wasm_path_obj(void);
 void mp_wasm_arch_ensure(void);
 mp_obj_t mp_wasm_arch_obj(void);
 
-mp_obj_t mp_wasm_wrap_loaded(mp_wasm_module_t *mod);
-mp_obj_t mp_wasm_func_new(mp_wasm_module_t *mod, qstr export_name);
+mp_obj_t mp_wasm_wrap_loaded(mp_pack_t *mod);
+mp_obj_t mp_wasm_func_new(mp_pack_t *mod, qstr export_name);
 mp_obj_t wasm_module_close(mp_obj_t self_in);
 
-mp_obj_t mp_wasm_load_pack_path(const char *path, const char *name_override);
+mp_obj_t mp_pack_load_path(const char *path, const char *name_override);
 
 // Load pack from already-fetched artifact bytes (CDN / in-memory).
-mp_obj_t mp_wasm_load_pack_bytes(const uint8_t *code, uint32_t code_len, const char *name_override);
+// origin may be NULL (empty provenance) or the winning path/URL.
+mp_obj_t mp_pack_load_bytes(const uint8_t *code, uint32_t code_len, const char *name_override);
+mp_obj_t mp_pack_load_bytes_at(const uint8_t *code, uint32_t code_len,
+    const char *name_override, const char *origin);
 
 extern int mp_wasm_import_hook_depth;
 

@@ -72,7 +72,7 @@ bool mp_wasm_source_find_section(const uint8_t *wasm, uint32_t len, const uint8_
 bool mp_wasm_source_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_source_info_t *out);
 void mp_wasm_source_info_free(mp_wasm_source_info_t *info);
 
-// Open: buffer borrows wasm; file owns a copy; name resolves via loaded pack (__wasm__).
+// Open: buffer borrows wasm; file owns a copy; name resolves via loaded pack (__pack__).
 mp_wasm_source_view_t *mp_wasm_source_open_buffer(const uint8_t *wasm, uint32_t len);
 // Takes ownership of wasm (freed on close).
 mp_wasm_source_view_t *mp_wasm_source_open_owned(uint8_t *wasm, uint32_t len);

@@ -36,8 +36,13 @@ bool mp_wasm_cdn_url_is_base(const char *url);
 
 // Resolve name@version into artifact bytes (tries pin then lead / path candidates).
 // On success: *out_bytes is MICROPY_WASM_MALLOC'd; caller MICROPY_WASM_FREE(*out_bytes).
+// out_origin may be NULL; when non-NULL, receives the winning URI/path (truncated to origin_len).
 bool mp_wasm_cdn_fetch_pack(const char *name, const char *version,
     uint8_t **out_bytes, uint32_t *out_len,
+    char *errbuf, size_t errbuf_len);
+bool mp_wasm_cdn_fetch_pack_ex(const char *name, const char *version,
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *out_origin, size_t origin_len,
     char *errbuf, size_t errbuf_len);
 
 // GET {base}/index/{channel} raw JSON bytes (metal driver only).

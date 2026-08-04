@@ -4,4 +4,4 @@ from typing import Any
 
 def use_hello() -> int: ...
 
-__wasm__: Any
+__pack__: Any

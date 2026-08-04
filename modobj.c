@@ -37,11 +37,11 @@
 #include "extmod/wasmmod/fetch.h"
 #include "extmod/wasmmod/mod.h"
 
-static const mp_obj_type_t mp_type_wasm_func;
+static const mp_obj_type_t mp_type_pack_func;
 
-static void wasm_module_ensure_open(mp_obj_wasm_module_t *self) {
+static void pack_module_ensure_open(mp_obj_pack_module_t *self) {
     if (self->mod == NULL) {
-        mp_raise_ValueError(MP_ERROR_TEXT("wasm module closed"));
+        mp_raise_ValueError(MP_ERROR_TEXT("pack module closed"));
     }
 }
 
@@ -80,11 +80,11 @@ static mp_obj_t wasm_val_to_py(const wasm_val_t *v) {
     }
 }
 
-static mp_obj_t call_export_py(mp_wasm_module_t *mod, const char *fname, size_t n_args, const mp_obj_t *args) {
+static mp_obj_t call_export_py(mp_pack_t *mod, const char *fname, size_t n_args, const mp_obj_t *args) {
     uint32_t np = 0, nr = 0;
     wasm_valkind_t *pkinds = NULL;
     wasm_valkind_t *rkinds = NULL;
-    if (!mp_wasm_module_func_types(mod, fname, &np, &pkinds, &nr, &rkinds)) {
+    if (!mp_pack_func_types(mod, fname, &np, &pkinds, &nr, &rkinds)) {
         mp_raise_ValueError(MP_ERROR_TEXT("wasm export missing or non-numeric"));
     }
     if (n_args != np) {
@@ -111,7 +111,7 @@ static mp_obj_t call_export_py(mp_wasm_module_t *mod, const char *fname, size_t 
         memset(results, 0, nr * sizeof(*results));
     }
     char err[128];
-    bool ok = mp_wasm_module_call_vals(mod, fname, np, vargs, nr, results, err, sizeof(err));
+    bool ok = mp_pack_call_vals(mod, fname, np, vargs, nr, results, err, sizeof(err));
     MICROPY_WASM_FREE(pkinds);
     MICROPY_WASM_FREE(rkinds);
     if (!ok) {
@@ -133,7 +133,7 @@ static mp_obj_t call_export_py(mp_wasm_module_t *mod, const char *fname, size_t 
 }
 
 static mp_obj_t wasm_func_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
-    mp_obj_wasm_func_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_obj_pack_func_t *self = MP_OBJ_TO_PTR(self_in);
     if (n_kw) {
         mp_raise_TypeError(MP_ERROR_TEXT("unexpected kwargs"));
     }
@@ -144,22 +144,22 @@ static mp_obj_t wasm_func_call(mp_obj_t self_in, size_t n_args, size_t n_kw, con
 }
 
 static MP_DEFINE_CONST_OBJ_TYPE(
-    mp_type_wasm_func,
+    mp_type_pack_func,
     MP_QSTR_WasmFunc,
     MP_TYPE_FLAG_NONE,
     call, wasm_func_call
     );
 
-mp_obj_t mp_wasm_func_new(mp_wasm_module_t *mod, qstr export_name) {
-    mp_obj_wasm_func_t *f = mp_obj_malloc(mp_obj_wasm_func_t, (mp_obj_type_t *)&mp_type_wasm_func);
+mp_obj_t mp_wasm_func_new(mp_pack_t *mod, qstr export_name) {
+    mp_obj_pack_func_t *f = mp_obj_malloc(mp_obj_pack_func_t, (mp_obj_type_t *)&mp_type_pack_func);
     f->mod = mod;
     f->export_name = export_name;
     return MP_OBJ_FROM_PTR(f);
 }
 
 mp_obj_t wasm_module_close(mp_obj_t self_in) {
-    mp_obj_wasm_module_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_wasm_module_close(self->mod);
+    mp_obj_pack_module_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_pack_close(self->mod);
     self->mod = NULL;
     self->pack_name = 0;
     return mp_const_none;
@@ -167,8 +167,8 @@ mp_obj_t wasm_module_close(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(wasm_module_close_obj, wasm_module_close);
 
 static mp_obj_t wasm_module_call(size_t n_args, const mp_obj_t *args) {
-    mp_obj_wasm_module_t *self = MP_OBJ_TO_PTR(args[0]);
-    wasm_module_ensure_open(self);
+    mp_obj_pack_module_t *self = MP_OBJ_TO_PTR(args[0]);
+    pack_module_ensure_open(self);
     const char *fname = mp_obj_str_get_str(args[1]);
     return call_export_py(self->mod, fname, n_args - 2, args + 2);
 }
@@ -182,8 +182,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(wasm_module___del___obj, wasm_module___del__);
 #endif
 
 static mp_obj_t wasm_module_memory_read(mp_obj_t self_in, mp_obj_t off_in, mp_obj_t n_in) {
-    mp_obj_wasm_module_t *self = MP_OBJ_TO_PTR(self_in);
-    wasm_module_ensure_open(self);
+    mp_obj_pack_module_t *self = MP_OBJ_TO_PTR(self_in);
+    pack_module_ensure_open(self);
     uint32_t off = (uint32_t)mp_obj_get_int(off_in);
     mp_int_t n = mp_obj_get_int(n_in);
     if (n < 0) {
@@ -191,7 +191,7 @@ static mp_obj_t wasm_module_memory_read(mp_obj_t self_in, mp_obj_t off_in, mp_ob
     }
     vstr_t vstr;
     vstr_init_len(&vstr, (size_t)n);
-    if (!mp_wasm_module_mem_read(self->mod, off, (uint32_t)n, vstr.buf)) {
+    if (!mp_pack_mem_read(self->mod, off, (uint32_t)n, vstr.buf)) {
         vstr_clear(&vstr);
         mp_raise_ValueError(MP_ERROR_TEXT("memory_read: bad offset/length"));
     }
@@ -200,12 +200,12 @@ static mp_obj_t wasm_module_memory_read(mp_obj_t self_in, mp_obj_t off_in, mp_ob
 static MP_DEFINE_CONST_FUN_OBJ_3(wasm_module_memory_read_obj, wasm_module_memory_read);
 
 static mp_obj_t wasm_module_memory_write(mp_obj_t self_in, mp_obj_t off_in, mp_obj_t data_in) {
-    mp_obj_wasm_module_t *self = MP_OBJ_TO_PTR(self_in);
-    wasm_module_ensure_open(self);
+    mp_obj_pack_module_t *self = MP_OBJ_TO_PTR(self_in);
+    pack_module_ensure_open(self);
     uint32_t off = (uint32_t)mp_obj_get_int(off_in);
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(data_in, &bufinfo, MP_BUFFER_READ);
-    if (!mp_wasm_module_mem_write(self->mod, off, (uint32_t)bufinfo.len, bufinfo.buf)) {
+    if (!mp_pack_mem_write(self->mod, off, (uint32_t)bufinfo.len, bufinfo.buf)) {
         mp_raise_ValueError(MP_ERROR_TEXT("memory_write: bad offset/length"));
     }
     return mp_const_none;
@@ -213,13 +213,13 @@ static mp_obj_t wasm_module_memory_write(mp_obj_t self_in, mp_obj_t off_in, mp_o
 static MP_DEFINE_CONST_FUN_OBJ_3(wasm_module_memory_write_obj, wasm_module_memory_write);
 
 static mp_obj_t wasm_module_memory_alloc(mp_obj_t self_in, mp_obj_t n_in) {
-    mp_obj_wasm_module_t *self = MP_OBJ_TO_PTR(self_in);
-    wasm_module_ensure_open(self);
+    mp_obj_pack_module_t *self = MP_OBJ_TO_PTR(self_in);
+    pack_module_ensure_open(self);
     mp_int_t n = mp_obj_get_int(n_in);
     if (n < 0) {
         mp_raise_ValueError(MP_ERROR_TEXT("memory_alloc: negative size"));
     }
-    uint32_t off = mp_wasm_module_mem_alloc(self->mod, (uint32_t)n, NULL);
+    uint32_t off = mp_pack_mem_alloc(self->mod, (uint32_t)n, NULL);
     if (off == 0 && n != 0) {
         mp_raise_OSError(MP_ENOMEM);
     }
@@ -228,9 +228,9 @@ static mp_obj_t wasm_module_memory_alloc(mp_obj_t self_in, mp_obj_t n_in) {
 static MP_DEFINE_CONST_FUN_OBJ_2(wasm_module_memory_alloc_obj, wasm_module_memory_alloc);
 
 static mp_obj_t wasm_module_memory_free(mp_obj_t self_in, mp_obj_t off_in) {
-    mp_obj_wasm_module_t *self = MP_OBJ_TO_PTR(self_in);
-    wasm_module_ensure_open(self);
-    mp_wasm_module_mem_free(self->mod, (uint32_t)mp_obj_get_int(off_in));
+    mp_obj_pack_module_t *self = MP_OBJ_TO_PTR(self_in);
+    pack_module_ensure_open(self);
+    mp_pack_mem_free(self->mod, (uint32_t)mp_obj_get_int(off_in));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(wasm_module_memory_free_obj, wasm_module_memory_free);
@@ -248,19 +248,44 @@ static const mp_rom_map_elem_t wasm_module_locals_table[] = {
 };
 static MP_DEFINE_CONST_DICT(wasm_module_locals, wasm_module_locals_table);
 
+static void pack_module_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    if (dest[0] != MP_OBJ_NULL) {
+        // read-only attributes
+        return;
+    }
+    mp_obj_pack_module_t *self = MP_OBJ_TO_PTR(self_in);
+    pack_module_ensure_open(self);
+    const char *s = NULL;
+    if (attr == MP_QSTR_kind) {
+        s = mp_pack_kind_str(self->mod);
+    } else if (attr == MP_QSTR_origin) {
+        s = mp_pack_origin(self->mod);
+    } else if (attr == MP_QSTR_arch) {
+        s = mp_pack_arch(self->mod);
+    } else if (attr == MP_QSTR_name) {
+        s = (self->pack_name != 0) ? qstr_str(self->pack_name) : mp_pack_name(self->mod);
+    } else {
+        // Continue to locals_dict (call/close/memory_*).
+        dest[1] = MP_OBJ_SENTINEL;
+        return;
+    }
+    dest[0] = mp_obj_new_str(s, strlen(s));
+}
+
 MP_DEFINE_CONST_OBJ_TYPE(
-    mp_type_wasm_module,
-    MP_QSTR_WasmModule,
+    mp_type_pack_module,
+    MP_QSTR_PackModule,
     MP_TYPE_FLAG_NONE,
+    attr, pack_module_attr,
     locals_dict, &wasm_module_locals
     );
 
 
-mp_obj_t mp_wasm_wrap_loaded(mp_wasm_module_t *mod) {
+mp_obj_t mp_wasm_wrap_loaded(mp_pack_t *mod) {
     #if MICROPY_ENABLE_FINALISER
-    mp_obj_wasm_module_t *o = mp_obj_malloc_with_finaliser(mp_obj_wasm_module_t, (mp_obj_type_t *)&mp_type_wasm_module);
+    mp_obj_pack_module_t *o = mp_obj_malloc_with_finaliser(mp_obj_pack_module_t, (mp_obj_type_t *)&mp_type_pack_module);
     #else
-    mp_obj_wasm_module_t *o = mp_obj_malloc(mp_obj_wasm_module_t, (mp_obj_type_t *)&mp_type_wasm_module);
+    mp_obj_pack_module_t *o = mp_obj_malloc(mp_obj_pack_module_t, (mp_obj_type_t *)&mp_type_pack_module);
     #endif
     o->mod = mod;
     o->pack_name = 0;
@@ -269,7 +294,7 @@ mp_obj_t mp_wasm_wrap_loaded(mp_wasm_module_t *mod) {
 
 static mp_obj_t mod_wasm_load(mp_obj_t data_in) {
     char err[128];
-    mp_wasm_module_t *mod;
+    mp_pack_t *mod;
 
     if (mp_obj_is_str(data_in)) {
         const char *path = mp_obj_str_get_str(data_in);
@@ -277,13 +302,13 @@ static mp_obj_t mod_wasm_load(mp_obj_t data_in) {
         if (!mp_wasm_fetch(path, &code, err, sizeof(err))) {
             mp_raise_OSError_with_filename(MP_ENOENT, path);
         }
-        mod = mp_wasm_module_load_ex((const uint8_t *)code.buf, (uint32_t)code.len,
+        mod = mp_pack_load_ex((const uint8_t *)code.buf, (uint32_t)code.len,
             NULL, 0, path, path, err, sizeof(err));
         vstr_clear(&code);
     } else {
         mp_buffer_info_t bufinfo;
         mp_get_buffer_raise(data_in, &bufinfo, MP_BUFFER_READ);
-        mod = mp_wasm_module_load_ex(bufinfo.buf, (uint32_t)bufinfo.len,
+        mod = mp_pack_load_ex(bufinfo.buf, (uint32_t)bufinfo.len,
             NULL, 0, NULL, NULL, err, sizeof(err));
     }
     if (mod == NULL) {

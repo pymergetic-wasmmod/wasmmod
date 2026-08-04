@@ -33,9 +33,9 @@
 #include "extmod/wasmmod/runtime.h"
 
 // Publish / withdraw a loaded instance for guest→guest resolution.
-void mp_wasm_registry_add(mp_wasm_module_t *mod);
-void mp_wasm_registry_remove(mp_wasm_module_t *mod);
-mp_wasm_module_t *mp_wasm_registry_find(const char *name);
+void mp_wasm_registry_add(mp_pack_t *mod);
+void mp_wasm_registry_remove(mp_pack_t *mod);
+mp_pack_t *mp_wasm_registry_find(const char *name);
 
 // Read wasmmod.imports (+ Wasm import types) and register forwarder natives.
 // Must run after wasm_runtime_load and before instantiate. Idempotent per (module,func).

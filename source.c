@@ -277,18 +277,18 @@ mp_wasm_source_view_t *mp_wasm_source_open_name(const char *pack_name) {
         return NULL;
     }
     mp_map_elem_t *we = mp_map_lookup(&mp_obj_module_get_globals(mod)->map,
-        MP_OBJ_NEW_QSTR(MP_QSTR___wasm__), MP_MAP_LOOKUP);
-    if (we == NULL || !mp_obj_is_type(we->value, &mp_type_wasm_module)) {
+        MP_OBJ_NEW_QSTR(MP_QSTR___pack__), MP_MAP_LOOKUP);
+    if (we == NULL || !mp_obj_is_type(we->value, &mp_type_pack_module)) {
         return NULL;
     }
-    mp_obj_wasm_module_t *wo = MP_OBJ_TO_PTR(we->value);
+    mp_obj_pack_module_t *wo = MP_OBJ_TO_PTR(we->value);
     if (wo->mod == NULL) {
         return NULL;
     }
     uint32_t len = 0;
-    const uint8_t *bytes = mp_wasm_module_meta_bytes(wo->mod, &len);
+    const uint8_t *bytes = mp_pack_meta_bytes(wo->mod, &len);
     if (bytes == NULL || len == 0) {
-        bytes = mp_wasm_module_bytes(wo->mod, &len);
+        bytes = mp_pack_bytes(wo->mod, &len);
     }
     if (bytes == NULL || len == 0) {
         return NULL;

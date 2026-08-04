@@ -319,7 +319,7 @@ case(
     b.ping(),
     "bridge-py",
 )
-_wm = b.__wasm__
+_wm = b.__pack__
 _off = _wm.memory_alloc(4)
 _wm.memory_write(_off, b"ABCD")
 _mem_got = _wm.memory_read(_off, 4)
@@ -328,7 +328,7 @@ case(
     "H",
     "Py",
     "C",
-    "b.__wasm__.memory_alloc/write/read  [host linear memory API]",
+    "b.__pack__.memory_alloc/write/read  [host linear memory API]",
     _mem_got,
     b"ABCD",
 )

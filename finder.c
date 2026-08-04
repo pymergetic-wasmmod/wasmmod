@@ -799,7 +799,9 @@ mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *known_path)
         uint8_t *bytes = NULL;
         uint32_t blen = 0;
         char err[160];
-        if (mp_wasm_cdn_fetch_pack(dotted_name, NULL, &bytes, &blen, err, sizeof(err))) {
+        char origin[MP_WASM_ORIGIN_MAX];
+        if (mp_wasm_cdn_fetch_pack_ex(dotted_name, NULL, &bytes, &blen,
+                origin, sizeof(origin), err, sizeof(err))) {
             const char *dot = strrchr(dotted_name, '.');
             if (dot != NULL) {
                 size_t plen = (size_t)(dot - dotted_name);
@@ -818,7 +820,8 @@ mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *known_path)
                 }
                 vstr_clear(&parent);
             }
-            mp_obj_t mod = mp_wasm_load_pack_bytes(bytes, blen, dotted_name);
+            mp_obj_t mod = mp_pack_load_bytes_at(bytes, blen, dotted_name,
+                origin[0] != '\0' ? origin : NULL);
             MICROPY_WASM_FREE(bytes);
             existing = lookup_loaded(dotted_name);
             if (existing != MP_OBJ_NULL) {
@@ -891,7 +894,7 @@ mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *known_path)
             }
             vstr_clear(&parent);
         }
-        mp_obj_t mod = mp_wasm_load_pack_path(vstr_null_terminated_str(&path), dotted_name);
+        mp_obj_t mod = mp_pack_load_path(vstr_null_terminated_str(&path), dotted_name);
         vstr_clear(&path);
         existing = lookup_loaded(dotted_name);
         if (existing != MP_OBJ_NULL) {

@@ -381,18 +381,18 @@ int mp_wasm_host_call_export_i32(const char *pack, size_t pack_len,
     if (nargs > 0 && args == NULL) {
         return -1;
     }
-    mp_wasm_module_t *mod = mp_wasm_registry_find(pname);
+    mp_pack_t *mod = mp_wasm_registry_find(pname);
     if (mod == NULL) {
         return -1;
     }
     char err[64];
     if (nargs == 0) {
-        if (!mp_wasm_module_call0(mod, fname, out, err, sizeof(err))) {
+        if (!mp_pack_call0(mod, fname, out, err, sizeof(err))) {
             return -1;
         }
         return 0;
     }
-    if (!mp_wasm_module_call_i32(mod, fname, args, nargs, out, err, sizeof(err))) {
+    if (!mp_pack_call_i32(mod, fname, args, nargs, out, err, sizeof(err))) {
         return -1;
     }
     return 0;

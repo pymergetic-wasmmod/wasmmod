@@ -5,12 +5,12 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
-use wasmmod_read::{without_sig_section, SigView, SourceView};
+use wasmmod_read::{list_sections, section_payload, without_sig_section, SigView, SourceView};
 
 fn usage() -> ! {
     eprintln!(
         "\
-wasmmod-read — standalone wasmmod.source / wasmmod.sig reader
+wasmmod-read — standalone wasmmod.source / wasmmod.sig / section reader
 
 Usage:
   wasmmod-read meta PATH.wasm|.aot|.elf
@@ -19,6 +19,8 @@ Usage:
   wasmmod-read extract PATH -o DIR
   wasmmod-read sig PATH
   wasmmod-read verify --trust ROOT.crt.der PATH
+  wasmmod-read sections PATH
+  wasmmod-read section PATH INDEX [--hex]
 
 Build (from wasmmod repo root):
   cargo build --release -p wasmmod-read
@@ -57,7 +59,7 @@ fn cmd_verify(path: &PathBuf, trust: &PathBuf) -> Result<(), String> {
     std::fs::write(&payload, &stripped).map_err(|e| e.to_string())?;
     std::fs::write(&sig, &view.sig).map_err(|e| e.to_string())?;
     let certs = der_certs(&view.chain)?;
-    std::fs::write(&leaf_der, &certs[0]).map_err(|e| e.to_string())?;
+    std::fs::write(&leaf_der, certs[0]).map_err(|e| e.to_string())?;
     let trust_bytes = std::fs::read(trust).map_err(|e| e.to_string())?;
     if trust_bytes.first() == Some(&0x30) {
         openssl_ok(&[
@@ -311,6 +313,89 @@ fn main() -> ExitCode {
             }) {
                 Ok((n, _)) => {
                     eprintln!("extracted {n} files → {}", out.display());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("wasmmod-read: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "sections" => {
+            let path = args.first().map(PathBuf::from).unwrap_or_else(|| usage());
+            match std::fs::read(&path)
+                .map_err(wasmmod_read::Error::from)
+                .and_then(|data| list_sections(&data))
+            {
+                Ok(secs) => {
+                    for s in secs {
+                        println!(
+                            "{:>3}  {:8}  {:6}  type={:<4}  {}",
+                            s.index,
+                            s.size,
+                            s.role.as_str(),
+                            s.type_id,
+                            s.name
+                        );
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("wasmmod-read: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "section" => {
+            if args.len() < 2 {
+                usage();
+            }
+            let path = PathBuf::from(&args[0]);
+            let index: u32 = match args[1].parse() {
+                Ok(v) => v,
+                Err(_) => {
+                    eprintln!("wasmmod-read: section INDEX must be an integer");
+                    return ExitCode::from(2);
+                }
+            };
+            let hex = args.iter().any(|a| a == "--hex");
+            match std::fs::read(&path)
+                .map_err(wasmmod_read::Error::from)
+                .and_then(|data| {
+                    let payload = section_payload(&data, index)?.to_vec();
+                    Ok(payload)
+                }) {
+                Ok(bytes) => {
+                    if hex {
+                        for (i, chunk) in bytes.chunks(16).enumerate() {
+                            let off = i * 16;
+                            print!("{off:08x}  ");
+                            for (j, b) in chunk.iter().enumerate() {
+                                if j == 8 {
+                                    print!(" ");
+                                }
+                                print!("{b:02x} ");
+                            }
+                            for j in chunk.len()..16 {
+                                if j == 8 {
+                                    print!(" ");
+                                }
+                                print!("   ");
+                            }
+                            print!(" |");
+                            for b in chunk {
+                                let c = if (32..127).contains(b) {
+                                    *b as char
+                                } else {
+                                    '.'
+                                };
+                                print!("{c}");
+                            }
+                            println!("|");
+                        }
+                    } else {
+                        let _ = io::stdout().write_all(&bytes);
+                    }
                     ExitCode::SUCCESS
                 }
                 Err(e) => {

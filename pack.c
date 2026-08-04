@@ -90,17 +90,17 @@ bool mp_wasm_find_custom_section(const uint8_t *buf, uint32_t len, const char *n
     return mp_wasm_format_find_section(buf, len, name, payload, payload_len);
 }
 
-bool mp_wasm_pack_find_section(const uint8_t *wasm, uint32_t len, const uint8_t **payload, uint32_t *payload_len) {
-    return mp_wasm_find_custom_section(wasm, len, MP_WASM_PACK_SECTION, payload, payload_len);
+bool mp_pack_manifest_find_section(const uint8_t *wasm, uint32_t len, const uint8_t **payload, uint32_t *payload_len) {
+    return mp_wasm_find_custom_section(wasm, len, MP_PACK_SECTION, payload, payload_len);
 }
 
 bool mp_wasm_imports_find_section(const uint8_t *wasm, uint32_t len, const uint8_t **payload, uint32_t *payload_len) {
     return mp_wasm_find_custom_section(wasm, len, MP_WASM_IMPORTS_SECTION, payload, payload_len);
 }
 
-bool mp_wasm_pack_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_pack_info_t *out) {
+bool mp_pack_manifest_parse(const uint8_t *payload, uint32_t payload_len, mp_pack_manifest_t *out) {
     memset(out, 0, sizeof(*out));
-    if (payload_len < 14 || memcmp(payload, MP_WASM_PACK_MAGIC, 4) != 0) {
+    if (payload_len < 14 || memcmp(payload, MP_PACK_MAGIC, 4) != 0) {
         return false;
     }
     out->version = read_u16_le(payload + 4);
@@ -120,9 +120,9 @@ bool mp_wasm_pack_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_pa
     if (n_files > 1024) {
         return false;
     }
-    mp_wasm_pack_file_t *files = NULL;
+    mp_pack_manifest_file_t *files = NULL;
     if (n_files > 0) {
-        files = MICROPY_WASM_MALLOC(n_files * sizeof(mp_wasm_pack_file_t));
+        files = MICROPY_WASM_MALLOC(n_files * sizeof(mp_pack_manifest_file_t));
         if (files == NULL) {
             return false;
         }
@@ -182,9 +182,9 @@ bool mp_wasm_pack_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_pa
             memset(out, 0, sizeof(*out));
             return false;
         }
-        mp_wasm_pack_export_t *exports = NULL;
+        mp_pack_manifest_export_t *exports = NULL;
         if (n_exports > 0) {
-            exports = MICROPY_WASM_MALLOC(n_exports * sizeof(mp_wasm_pack_export_t));
+            exports = MICROPY_WASM_MALLOC(n_exports * sizeof(mp_pack_manifest_export_t));
             if (exports == NULL) {
                 MICROPY_WASM_FREE(files);
                 memset(out, 0, sizeof(*out));
@@ -234,14 +234,14 @@ bool mp_wasm_pack_parse(const uint8_t *payload, uint32_t payload_len, mp_wasm_pa
     return true;
 }
 
-bool mp_wasm_pack_file_bytes(const mp_wasm_pack_file_t *f, const uint8_t **out, uint32_t *out_len, uint8_t **to_free) {
+bool mp_pack_manifest_file_bytes(const mp_pack_manifest_file_t *f, const uint8_t **out, uint32_t *out_len, uint8_t **to_free) {
     if (to_free != NULL) {
         *to_free = NULL;
     }
     if (f == NULL || out == NULL || out_len == NULL) {
         return false;
     }
-    if ((f->flags & MP_WASM_PACK_FILE_FLAG_ZLIB) == 0) {
+    if ((f->flags & MP_PACK_FILE_FLAG_ZLIB) == 0) {
         *out = f->data;
         *out_len = f->data_len;
         return true;
@@ -265,7 +265,7 @@ bool mp_wasm_pack_file_bytes(const mp_wasm_pack_file_t *f, const uint8_t **out, 
     return true;
 }
 
-void mp_wasm_pack_info_free(mp_wasm_pack_info_t *info) {
+void mp_pack_manifest_free(mp_pack_manifest_t *info) {
     if (info == NULL) {
         return;
     }

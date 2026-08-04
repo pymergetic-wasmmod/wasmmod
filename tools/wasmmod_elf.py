@@ -141,7 +141,7 @@ def find_section(buf: bytes, name: str) -> Optional[bytes]:
         return None
     # Ignore trailing cookie for shdr bounds
     view = buf
-    ck = _read_cookie(buf)
+    _read_cookie(buf)  # validate cookie; shdr uses full buf
     eh = _parse_ehdr(view)
     shstr = _shdr(view, eh, eh["e_shstrndx"])
     for i in range(eh["e_shnum"]):

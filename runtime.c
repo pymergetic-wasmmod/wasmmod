@@ -84,8 +84,11 @@ bool mp_wasm_loader_register(void);
 
 #define MP_WASM_ERRBUF 128
 
-struct mp_wasm_module_t {
+struct mp_pack_t {
     char name[MP_WASM_NAME_MAX + 1];
+    char origin[MP_WASM_ORIGIN_MAX]; // path/URL of executed artifact (may be empty)
+    char arch[MP_WASM_ARCH_MAX];     // arch infix from origin, or empty
+    mp_wasm_artifact_kind_t kind;
     uint8_t *buf;       // executable (.wasm / .aot / .elf bytes)
     uint32_t buf_len;
     uint8_t *meta;      // pack/imports metadata; NULL ⇒ use buf
@@ -101,7 +104,7 @@ struct mp_wasm_module_t {
 
 #if MICROPY_PY_WASM_ELF
 static void *elf_resolve_import(const char *name, void *ctx);
-void mp_wasm_elf_plt_invalidate(mp_wasm_module_t *mod);
+void mp_pack_elf_plt_invalidate(mp_pack_t *mod);
 #endif
 
 static int runtime_ready;
@@ -183,7 +186,7 @@ void mp_wasm_runtime_deinit(void) {
     runtime_ready = 0;
 }
 
-mp_wasm_module_t *mp_wasm_module_load_ex(const uint8_t *code, uint32_t code_len,
+mp_pack_t *mp_pack_load_ex(const uint8_t *code, uint32_t code_len,
     const uint8_t *meta, uint32_t meta_len, const char *name, const char *path_hint,
     char *errbuf, size_t errbuf_len) {
     char local_err[MP_WASM_ERRBUF];
@@ -226,12 +229,17 @@ mp_wasm_module_t *mp_wasm_module_load_ex(const uint8_t *code, uint32_t code_len,
     }
     #endif
 
-    mp_wasm_module_t *mod = MICROPY_WASM_MALLOC(sizeof(mp_wasm_module_t));
+    mp_pack_t *mod = MICROPY_WASM_MALLOC(sizeof(mp_pack_t));
     if (mod == NULL) {
         set_err(errbuf, errbuf_len, "out of memory");
         return NULL;
     }
     memset(mod, 0, sizeof(*mod));
+    mod->kind = kind;
+    if (path_hint != NULL && path_hint[0] != '\0') {
+        strncpy(mod->origin, path_hint, sizeof(mod->origin) - 1);
+        mp_pack_parse_arch_from_path(path_hint, mod->arch, sizeof(mod->arch));
+    }
     if (name != NULL) {
         strncpy(mod->name, name, sizeof(mod->name) - 1);
     } else {
@@ -320,17 +328,17 @@ fail_mod:
     return NULL;
 }
 
-mp_wasm_module_t *mp_wasm_module_load(const uint8_t *bytes, uint32_t len, const char *name, char *errbuf, size_t errbuf_len) {
-    return mp_wasm_module_load_ex(bytes, len, NULL, 0, name, NULL, errbuf, errbuf_len);
+mp_pack_t *mp_pack_load(const uint8_t *bytes, uint32_t len, const char *name, char *errbuf, size_t errbuf_len) {
+    return mp_pack_load_ex(bytes, len, NULL, 0, name, NULL, errbuf, errbuf_len);
 }
 
-void mp_wasm_module_close(mp_wasm_module_t *mod) {
+void mp_pack_close(mp_pack_t *mod) {
     if (mod == NULL) {
         return;
     }
     mp_wasm_registry_remove(mod);
 #if MICROPY_PY_WASM_ELF
-    mp_wasm_elf_plt_invalidate(mod);
+    mp_pack_elf_plt_invalidate(mod);
     if (mod->elf) {
         mp_wasm_elf_image_free(mod->elf);
         mod->elf = NULL;
@@ -371,17 +379,17 @@ static bool kinds_all_numeric(const wasm_valkind_t *kinds, uint32_t n) {
 #if MICROPY_PY_WASM_ELF
 // Resolve i32 arity from pack export sig tag (0..8 = N i32 args → i32).
 // SIG_AUTO / missing → assume 0 params, 1 i32 result when symbol exists.
-static bool elf_pack_sig_arity(mp_wasm_module_t *mod, const char *func,
+static bool elf_pack_sig_arity(mp_pack_t *mod, const char *func,
     uint32_t *nparams_out, uint32_t *nresults_out) {
     uint32_t np = 0;
     uint32_t nr = 1;
     const uint8_t *payload = NULL;
     uint32_t plen = 0;
-    if (mod->meta && mp_wasm_pack_find_section(mod->meta, mod->meta_len, &payload, &plen)) {
-        mp_wasm_pack_info_t info;
-        if (mp_wasm_pack_parse(payload, plen, &info)) {
+    if (mod->meta && mp_pack_manifest_find_section(mod->meta, mod->meta_len, &payload, &plen)) {
+        mp_pack_manifest_t info;
+        if (mp_pack_manifest_parse(payload, plen, &info)) {
             for (uint32_t i = 0; i < info.n_exports; ++i) {
-                const mp_wasm_pack_export_t *ex = &info.exports[i];
+                const mp_pack_manifest_export_t *ex = &info.exports[i];
                 if (ex->export_len == strlen(func)
                     && memcmp(ex->export_name, func, ex->export_len) == 0) {
                     if (ex->sig <= 8) {
@@ -391,7 +399,7 @@ static bool elf_pack_sig_arity(mp_wasm_module_t *mod, const char *func,
                     break;
                 }
             }
-            mp_wasm_pack_info_free(&info);
+            mp_pack_manifest_free(&info);
         }
     }
     if (nparams_out) {
@@ -411,7 +419,7 @@ static bool elf_pack_sig_arity(mp_wasm_module_t *mod, const char *func,
 
 typedef struct {
     bool used;
-    mp_wasm_module_t *mod;
+    mp_pack_t *mod;
     char func[MP_WASM_NAME_MAX + 1];
     uint32_t nargs;
 } mp_wasm_elf_plt_slot_t;
@@ -424,7 +432,7 @@ static int32_t elf_plt_dispatch(unsigned idx, int32_t a0, int32_t a1, int32_t a2
         return 0;
     }
     mp_wasm_elf_plt_slot_t *s = &elf_plt_slots[idx];
-    wasm_function_inst_t fn = mp_wasm_module_lookup_fn(s->mod, s->func);
+    wasm_function_inst_t fn = mp_pack_lookup_fn(s->mod, s->func);
     if (fn == NULL) {
         return 0;
     }
@@ -441,7 +449,7 @@ static int32_t elf_plt_dispatch(unsigned idx, int32_t a0, int32_t a1, int32_t a2
         args[i].kind = WASM_I32;
         args[i].of.i32 = av[i];
     }
-    if (!mp_wasm_module_call_fn(s->mod, fn, n, args, 1, &result, NULL, 0)) {
+    if (!mp_pack_call_fn(s->mod, fn, n, args, 1, &result, NULL, 0)) {
         return 0;
     }
     return result.of.i32;
@@ -478,7 +486,7 @@ static mp_wasm_elf_plt_fn_t elf_plt_fns[MP_WASM_ELF_PLT_SLOTS] = {
     elf_plt_stub_28, elf_plt_stub_29, elf_plt_stub_30, elf_plt_stub_31,
 };
 
-void mp_wasm_elf_plt_invalidate(mp_wasm_module_t *mod) {
+void mp_pack_elf_plt_invalidate(mp_pack_t *mod) {
     if (mod == NULL) {
         return;
     }
@@ -492,7 +500,7 @@ void mp_wasm_elf_plt_invalidate(mp_wasm_module_t *mod) {
     }
 }
 
-static void *elf_plt_alloc(mp_wasm_module_t *peer, const char *func, uint32_t nargs) {
+static void *elf_plt_alloc(mp_pack_t *peer, const char *func, uint32_t nargs) {
     for (unsigned i = 0; i < MP_WASM_ELF_PLT_SLOTS; ++i) {
         if (elf_plt_slots[i].used
             && elf_plt_slots[i].mod == peer
@@ -545,7 +553,7 @@ static void *elf_resolve_native(const char *module, const char *func) {
 }
 
 static void *elf_resolve_import(const char *name, void *ctx) {
-    mp_wasm_module_t *importer = (mp_wasm_module_t *)ctx;
+    mp_pack_t *importer = (mp_pack_t *)ctx;
     if (importer == NULL || name == NULL || name[0] == '\0') {
         return NULL;
     }
@@ -574,7 +582,7 @@ static void *elf_resolve_import(const char *name, void *ctx) {
             addr = elf_resolve_native(module, name);
             break;
         }
-        mp_wasm_module_t *peer = mp_wasm_registry_find(module);
+        mp_pack_t *peer = mp_wasm_registry_find(module);
         if (peer == NULL) {
             break;
         }
@@ -589,7 +597,7 @@ static void *elf_resolve_import(const char *name, void *ctx) {
             // Prefer Wasm type arity when available.
             uint32_t wnp = 0, wnr = 0;
             wasm_valkind_t *wp = NULL, *wr = NULL;
-            if (mp_wasm_module_func_types(peer, name, &wnp, &wp, &wnr, &wr)) {
+            if (mp_pack_func_types(peer, name, &wnp, &wp, &wnr, &wr)) {
                 np = wnp;
                 MICROPY_WASM_FREE(wp);
                 MICROPY_WASM_FREE(wr);
@@ -603,7 +611,7 @@ static void *elf_resolve_import(const char *name, void *ctx) {
     return addr;
 }
 
-static bool elf_func_types(mp_wasm_module_t *mod, const char *func,
+static bool elf_func_types(mp_pack_t *mod, const char *func,
     uint32_t *nparams_out, wasm_valkind_t **params_out,
     uint32_t *nresults_out, wasm_valkind_t **results_out) {
     if (params_out) {
@@ -724,7 +732,7 @@ static bool elf_invoke_i32(void *fn, uint32_t nargs, const wasm_val_t *args,
     return true;
 }
 
-static bool elf_call_vals(mp_wasm_module_t *mod, const char *func,
+static bool elf_call_vals(mp_pack_t *mod, const char *func,
     uint32_t nargs, wasm_val_t *args,
     uint32_t nresults, wasm_val_t *results,
     char *errbuf, size_t errbuf_len) {
@@ -743,7 +751,7 @@ static bool elf_call_vals(mp_wasm_module_t *mod, const char *func,
 }
 #endif
 
-bool mp_wasm_module_func_types(mp_wasm_module_t *mod, const char *func,
+bool mp_pack_func_types(mp_pack_t *mod, const char *func,
     uint32_t *nparams_out, wasm_valkind_t **params_out,
     uint32_t *nresults_out, wasm_valkind_t **results_out) {
     if (params_out) {
@@ -814,7 +822,7 @@ bool mp_wasm_module_func_types(mp_wasm_module_t *mod, const char *func,
     return true;
 }
 
-wasm_function_inst_t mp_wasm_module_lookup_fn(mp_wasm_module_t *mod, const char *func) {
+wasm_function_inst_t mp_pack_lookup_fn(mp_pack_t *mod, const char *func) {
     if (mod == NULL || func == NULL) {
         return NULL;
     }
@@ -829,7 +837,7 @@ wasm_function_inst_t mp_wasm_module_lookup_fn(mp_wasm_module_t *mod, const char 
     return wasm_runtime_lookup_function(mod->inst, func);
 }
 
-bool mp_wasm_module_call_fn(mp_wasm_module_t *mod, wasm_function_inst_t fn,
+bool mp_pack_call_fn(mp_pack_t *mod, wasm_function_inst_t fn,
     uint32_t nargs, wasm_val_t *args,
     uint32_t nresults, wasm_val_t *results,
     char *errbuf, size_t errbuf_len) {
@@ -846,7 +854,7 @@ bool mp_wasm_module_call_fn(mp_wasm_module_t *mod, wasm_function_inst_t fn,
     }
 #if MICROPY_PY_WASM_ELF
     if (mod->elf != NULL) {
-        // fn is a raw function pointer (see mp_wasm_module_lookup_fn), not a
+        // fn is a raw function pointer (see mp_pack_lookup_fn), not a
         // WAMR object — trust caller-supplied arity, same as the WAMR hot
         // path below (forwarders already validated nparams/nresults at
         // register_forwarders time from the *importing* module's Wasm type).
@@ -870,7 +878,7 @@ bool mp_wasm_module_call_fn(mp_wasm_module_t *mod, wasm_function_inst_t fn,
     return true;
 }
 
-bool mp_wasm_module_call_vals(mp_wasm_module_t *mod, const char *func,
+bool mp_pack_call_vals(mp_pack_t *mod, const char *func,
     uint32_t nargs, wasm_val_t *args,
     uint32_t nresults, wasm_val_t *results,
     char *errbuf, size_t errbuf_len) {
@@ -909,18 +917,18 @@ bool mp_wasm_module_call_vals(mp_wasm_module_t *mod, const char *func,
         set_err(errbuf, errbuf_len, "result buffer too small");
         return false;
     }
-    if (!mp_wasm_module_call_fn(mod, f, nargs, args, nresults, results, errbuf, errbuf_len)) {
+    if (!mp_pack_call_fn(mod, f, nargs, args, nresults, results, errbuf, errbuf_len)) {
         return false;
     }
     MICROPY_WASM_EXPORT_PUBLISH(mod->name, func, (void *)(uintptr_t)f);
     return true;
 }
 
-bool mp_wasm_module_call0(mp_wasm_module_t *mod, const char *func, int32_t *out_result, char *errbuf, size_t errbuf_len) {
-    return mp_wasm_module_call_i32(mod, func, NULL, 0, out_result, errbuf, errbuf_len);
+bool mp_pack_call0(mp_pack_t *mod, const char *func, int32_t *out_result, char *errbuf, size_t errbuf_len) {
+    return mp_pack_call_i32(mod, func, NULL, 0, out_result, errbuf, errbuf_len);
 }
 
-bool mp_wasm_module_call_i32(mp_wasm_module_t *mod, const char *func, const int32_t *args, uint32_t nargs, int32_t *out_result, char *errbuf, size_t errbuf_len) {
+bool mp_pack_call_i32(mp_pack_t *mod, const char *func, const int32_t *args, uint32_t nargs, int32_t *out_result, char *errbuf, size_t errbuf_len) {
     wasm_val_t *vargs = NULL;
     if (nargs > 0) {
         vargs = MICROPY_WASM_MALLOC(nargs * sizeof(*vargs));
@@ -935,7 +943,7 @@ bool mp_wasm_module_call_i32(mp_wasm_module_t *mod, const char *func, const int3
     }
     wasm_val_t result;
     memset(&result, 0, sizeof(result));
-    bool ok = mp_wasm_module_call_vals(mod, func, nargs, vargs, 1, &result, errbuf, errbuf_len);
+    bool ok = mp_pack_call_vals(mod, func, nargs, vargs, 1, &result, errbuf, errbuf_len);
     MICROPY_WASM_FREE(vargs);
     if (!ok) {
         return false;
@@ -946,7 +954,7 @@ bool mp_wasm_module_call_i32(mp_wasm_module_t *mod, const char *func, const int3
     return true;
 }
 
-uint32_t mp_wasm_module_export_names(mp_wasm_module_t *mod, const char **names, uint32_t max_names) {
+uint32_t mp_pack_export_names(mp_pack_t *mod, const char **names, uint32_t max_names) {
     if (mod == NULL || names == NULL || max_names == 0 || mod->module == NULL) {
         return 0;
     }
@@ -965,11 +973,108 @@ uint32_t mp_wasm_module_export_names(mp_wasm_module_t *mod, const char **names, 
     return written;
 }
 
-const char *mp_wasm_module_name(const mp_wasm_module_t *mod) {
+const char *mp_pack_name(const mp_pack_t *mod) {
     return mod ? mod->name : "";
 }
 
-void mp_wasm_module_set_name(mp_wasm_module_t *mod, const char *name) {
+const char *mp_pack_kind_str(const mp_pack_t *mod) {
+    if (mod == NULL) {
+        return "";
+    }
+    switch (mod->kind) {
+        case MP_WASM_KIND_WASM:
+            return "wasm";
+        case MP_WASM_KIND_AOT:
+            return "aot";
+        case MP_WASM_KIND_ELF:
+            return "elf";
+        default:
+            return "";
+    }
+}
+
+const char *mp_pack_origin(const mp_pack_t *mod) {
+    return mod ? mod->origin : "";
+}
+
+const char *mp_pack_arch(const mp_pack_t *mod) {
+    return mod ? mod->arch : "";
+}
+
+void mp_pack_parse_arch_from_path(const char *path, char *out, size_t out_len) {
+    if (out == NULL || out_len == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (path == NULL || path[0] == '\0') {
+        return;
+    }
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    // Drop query/fragment if present (HTTP URIs).
+    size_t n = strlen(base);
+    for (size_t i = 0; i < n; ++i) {
+        if (base[i] == '?' || base[i] == '#') {
+            n = i;
+            break;
+        }
+    }
+    char buf[MP_WASM_NAME_MAX + 1];
+    if (n == 0 || n >= sizeof(buf)) {
+        return;
+    }
+    memcpy(buf, base, n);
+    buf[n] = '\0';
+    if (n > 5 && memcmp(buf + n - 5, ".zlib", 5) == 0) {
+        n -= 5;
+        buf[n] = '\0';
+    }
+    bool tagged = false;
+    if (n > 5 && memcmp(buf + n - 5, ".wasm", 5) == 0) {
+        n -= 5;
+        buf[n] = '\0';
+    } else if (n > 4 && memcmp(buf + n - 4, ".elf", 4) == 0) {
+        n -= 4;
+        buf[n] = '\0';
+        tagged = true;
+    } else if (n > 4 && memcmp(buf + n - 4, ".aot", 4) == 0) {
+        n -= 4;
+        buf[n] = '\0';
+        tagged = true;
+    } else {
+        // .aotN (digits after .aot)
+        size_t i = n;
+        while (i > 0 && buf[i - 1] >= '0' && buf[i - 1] <= '9') {
+            i--;
+        }
+        if (i >= 4 && memcmp(buf + i - 4, ".aot", 4) == 0) {
+            n = i - 4;
+            buf[n] = '\0';
+            tagged = true;
+        }
+    }
+    if (!tagged || n == 0) {
+        return;
+    }
+    const char *dot = strrchr(buf, '.');
+    if (dot == NULL || dot[1] == '\0') {
+        return;
+    }
+    const char *arch = dot + 1;
+    // Reject if the "arch" looks like a multi-segment package stem remnant without
+    // a conventional arch token (must be alnum / _ / - only).
+    for (const char *p = arch; *p; ++p) {
+        char c = *p;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                || (c >= '0' && c <= '9') || c == '_' || c == '-')) {
+            return;
+        }
+    }
+    strncpy(out, arch, out_len - 1);
+    out[out_len - 1] = '\0';
+}
+
+void mp_pack_set_name(mp_pack_t *mod, const char *name) {
     if (mod == NULL) {
         return;
     }
@@ -979,7 +1084,7 @@ void mp_wasm_module_set_name(mp_wasm_module_t *mod, const char *name) {
     }
 }
 
-const uint8_t *mp_wasm_module_bytes(const mp_wasm_module_t *mod, uint32_t *len_out) {
+const uint8_t *mp_pack_bytes(const mp_pack_t *mod, uint32_t *len_out) {
     if (mod == NULL) {
         if (len_out) {
             *len_out = 0;
@@ -992,7 +1097,7 @@ const uint8_t *mp_wasm_module_bytes(const mp_wasm_module_t *mod, uint32_t *len_o
     return mod->buf;
 }
 
-const uint8_t *mp_wasm_module_meta_bytes(const mp_wasm_module_t *mod, uint32_t *len_out) {
+const uint8_t *mp_pack_meta_bytes(const mp_pack_t *mod, uint32_t *len_out) {
     if (mod == NULL) {
         if (len_out) {
             *len_out = 0;
@@ -1007,7 +1112,7 @@ const uint8_t *mp_wasm_module_meta_bytes(const mp_wasm_module_t *mod, uint32_t *
 
 #if MICROPY_PY_WASM_ELF
 typedef struct {
-    mp_wasm_module_t *mod;
+    mp_pack_t *mod;
     mp_wasm_numeric_export_cb cb;
     void *ctx;
 } elf_foreach_ctx_t;
@@ -1021,7 +1126,7 @@ static void elf_foreach_cb(const char *name, void *addr, void *ctx_in) {
 }
 #endif
 
-void mp_wasm_module_foreach_numeric_export(mp_wasm_module_t *mod, mp_wasm_numeric_export_cb cb, void *ctx) {
+void mp_pack_foreach_numeric_export(mp_pack_t *mod, mp_wasm_numeric_export_cb cb, void *ctx) {
     if (mod == NULL || cb == NULL) {
         return;
     }
@@ -1064,10 +1169,10 @@ void mp_wasm_module_foreach_numeric_export(mp_wasm_module_t *mod, mp_wasm_numeri
     }
 }
 
-bool mp_wasm_module_numeric_export_arity(mp_wasm_module_t *mod, const char *name,
+bool mp_pack_numeric_export_arity(mp_pack_t *mod, const char *name,
     uint32_t *nparams_out, uint32_t *nresults_out) {
     uint32_t np = 0, nr = 0;
-    if (!mp_wasm_module_func_types(mod, name, &np, NULL, &nr, NULL)) {
+    if (!mp_pack_func_types(mod, name, &np, NULL, &nr, NULL)) {
         return false;
     }
     if (nparams_out) {
@@ -1079,7 +1184,7 @@ bool mp_wasm_module_numeric_export_arity(mp_wasm_module_t *mod, const char *name
     return true;
 }
 
-void mp_wasm_module_foreach_i32_export(mp_wasm_module_t *mod, mp_wasm_i32_export_cb cb, void *ctx) {
+void mp_pack_foreach_i32_export(mp_pack_t *mod, mp_wasm_i32_export_cb cb, void *ctx) {
     // Legacy helper: only i32 params and at most one i32 result.
     if (mod == NULL || mod->module == NULL || cb == NULL) {
         return;
@@ -1109,11 +1214,11 @@ void mp_wasm_module_foreach_i32_export(mp_wasm_module_t *mod, mp_wasm_i32_export
     }
 }
 
-bool mp_wasm_module_i32_export_arity(mp_wasm_module_t *mod, const char *name, uint32_t *nparams_out) {
+bool mp_pack_i32_export_arity(mp_pack_t *mod, const char *name, uint32_t *nparams_out) {
     uint32_t np = 0, nr = 0;
     wasm_valkind_t *params = NULL;
     wasm_valkind_t *results = NULL;
-    if (!mp_wasm_module_func_types(mod, name, &np, &params, &nr, &results)) {
+    if (!mp_pack_func_types(mod, name, &np, &params, &nr, &results)) {
         return false;
     }
     bool ok = nr <= 1;
@@ -1134,7 +1239,7 @@ bool mp_wasm_module_i32_export_arity(mp_wasm_module_t *mod, const char *name, ui
     return true;
 }
 
-wasm_module_inst_t mp_wasm_module_inst(mp_wasm_module_t *mod) {
+wasm_module_inst_t mp_pack_inst(mp_pack_t *mod) {
     return mod != NULL ? mod->inst : NULL;
 }
 
@@ -1161,16 +1266,16 @@ bool mp_wasm_linear_from_exec(wasm_exec_env_t exec_env, uint32_t off, uint32_t n
     return true;
 }
 
-bool mp_wasm_module_linear(mp_wasm_module_t *mod, uint32_t off, uint32_t n, void **out) {
+bool mp_pack_linear(mp_pack_t *mod, uint32_t off, uint32_t n, void **out) {
     if (mod == NULL || mod->exec == NULL) {
         return false;
     }
     return mp_wasm_linear_from_exec(mod->exec, off, n, out);
 }
 
-bool mp_wasm_module_mem_read(mp_wasm_module_t *mod, uint32_t off, uint32_t n, void *dst) {
+bool mp_pack_mem_read(mp_pack_t *mod, uint32_t off, uint32_t n, void *dst) {
     void *src;
-    if (dst == NULL || !mp_wasm_module_linear(mod, off, n, &src)) {
+    if (dst == NULL || !mp_pack_linear(mod, off, n, &src)) {
         return false;
     }
     if (n > 0) {
@@ -1179,9 +1284,9 @@ bool mp_wasm_module_mem_read(mp_wasm_module_t *mod, uint32_t off, uint32_t n, vo
     return true;
 }
 
-bool mp_wasm_module_mem_write(mp_wasm_module_t *mod, uint32_t off, uint32_t n, const void *src) {
+bool mp_pack_mem_write(mp_pack_t *mod, uint32_t off, uint32_t n, const void *src) {
     void *dst;
-    if (src == NULL || !mp_wasm_module_linear(mod, off, n, &dst)) {
+    if (src == NULL || !mp_pack_linear(mod, off, n, &dst)) {
         return false;
     }
     if (n > 0) {
@@ -1190,7 +1295,7 @@ bool mp_wasm_module_mem_write(mp_wasm_module_t *mod, uint32_t off, uint32_t n, c
     return true;
 }
 
-uint32_t mp_wasm_module_mem_alloc(mp_wasm_module_t *mod, uint32_t n, void **native_out) {
+uint32_t mp_pack_mem_alloc(mp_pack_t *mod, uint32_t n, void **native_out) {
     if (mod == NULL || mod->inst == NULL) {
         return 0;
     }
@@ -1205,7 +1310,7 @@ uint32_t mp_wasm_module_mem_alloc(mp_wasm_module_t *mod, uint32_t n, void **nati
     return (uint32_t)off;
 }
 
-void mp_wasm_module_mem_free(mp_wasm_module_t *mod, uint32_t off) {
+void mp_pack_mem_free(mp_pack_t *mod, uint32_t off) {
     if (mod == NULL || mod->inst == NULL || off == 0) {
         return;
     }
