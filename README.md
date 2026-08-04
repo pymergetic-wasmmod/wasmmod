@@ -127,9 +127,14 @@ Flat form (e.g. under `packs/`): `a.b.c.wasm`
 Explicit: `wasm.load_pack("packs/foo.wasm", "foo")` or `…/foo.elf`.
 Browser builds stay wasm-only (`MICROPY_PY_WASM_ELF=0`).
 
+**Inspect (offline):** `wasm.symbols` / `addr2line` / `locations` / `disasm` / `mpy_disasm`
+(and `tools/wasmmod_inspect.py`, `wasmmod-read symbols|…`). CDN Inspect UI talks HTTP
+only. See [docs/PACK.md](docs/PACK.md#pack-inspect-symbols--addr2line--disasm).
+
 ```bash
 make -C examples demo    # real REPL: micropython -i < demo_readme.py
 make -C examples repl    # interactive — type it yourself
+make -C examples test-elf
 ```
 
 ---

@@ -121,13 +121,13 @@ sign-packs: packs sign-key
 		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) packs/hello.elf; \
 		wrap packs/hello.elf; \
 	fi; \
-	for f in packs/client.elf packs/hostcall.elf packs/hello.aarch64.elf; do \
+	for f in packs/client.elf packs/hostcall.elf packs/ticks.elf packs/hello.aarch64.elf; do \
 		[ -f "$$f" ] || continue; \
 		echo "SIGN $$f"; \
 		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$f; \
 		wrap $$f; \
 	done; \
-	for base in hello client hostcall; do \
+	for base in hello client hostcall ticks; do \
 		if [ -f packs/$$base.elf ]; then \
 			cp -f packs/$$base.elf packs/$$base.$$(uname -m).elf; \
 			wrap packs/$$base.$$(uname -m).elf; \

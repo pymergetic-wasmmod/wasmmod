@@ -509,6 +509,11 @@ def main(argv: list[str] | None = None) -> int:
             ln = "" if loc.line is None else f":{loc.line}"
             print(f"{loc.role:6} {loc.path}{ln}")
         return 0
+    if args.cmd == "locations":
+        for loc in locations_for_symbol(data, args.name):
+            ln = "" if loc.line is None else f":{loc.line}"
+            print(f"{loc.role:6} {loc.path}{ln}")
+        return 0
     if args.cmd == "disasm":
         for line in disasm(data, args.index, args.offset, args.limit):
             hx = line.raw.hex()
