@@ -16,7 +16,7 @@ print("install_hook", root)
 wasm.install_hook(root)
 print("wasm.path =", wasm.path)
 
-print("import hello  # finder → HTTP GET hello.wasm")
+print("import hello  # finder → HTTP GET hello.elf or hello.wasm (unsigned)")
 import hello
 
 print("  sys.modules['hello'] =", sys.modules.get("hello"))

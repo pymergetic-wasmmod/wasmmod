@@ -24,8 +24,17 @@ print("install_hook", root)
 wasm.install_hook(root)
 print("wasm.path =", wasm.path)
 
+# Explicit signed ELF URL (fetch prefers hello.elf.zlib twin when present).
+elf_url = root.rstrip("/") + "/hello.elf"
+print("load_pack", elf_url)
+he = wasm.load_pack(elf_url)
+print("  hello.elf hello()  ->", he.hello())
+print("  hello.elf add(2,3) ->", he.add(2, 3))
+assert he.hello() == 42
+assert he.add(2, 3) == 5
+
 # With MICROPY_WASM_CONTAINERS=elf,aot,wasm the finder prefers hello.elf when present.
-print("import hello  # finder → HTTP GET hello.elf or hello.wasm (+ verify)")
+print("import hello  # finder → HTTP GET hello.elf (+ verify)")
 import hello
 
 print("  sys.modules['hello'] =", sys.modules.get("hello"))

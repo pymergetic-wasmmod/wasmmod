@@ -14,8 +14,11 @@ OUT_DIR = ../../packs
 
 all:
 	python3 $(WASMMOD) pack-tree test_a2 -o $(OUT_DIR)
+	rm -f $(OUT_DIR)/test_a2.wasm.zlib \
+		$(OUT_DIR)/test_a2.test_d2.wasm.zlib \
+		$(OUT_DIR)/test_a2.test_b2.test_c2.wasm.zlib
 
 clean:
-	rm -f $(OUT_DIR)/test_a2.wasm \
-		$(OUT_DIR)/test_a2.test_d2.wasm \
-		$(OUT_DIR)/test_a2.test_b2.test_c2.wasm
+	rm -f $(OUT_DIR)/test_a2.wasm $(OUT_DIR)/test_a2.wasm.zlib \
+		$(OUT_DIR)/test_a2.test_d2.wasm $(OUT_DIR)/test_a2.test_d2.wasm.zlib \
+		$(OUT_DIR)/test_a2.test_b2.test_c2.wasm $(OUT_DIR)/test_a2.test_b2.test_c2.wasm.zlib

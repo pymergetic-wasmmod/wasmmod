@@ -13,6 +13,7 @@ all: $(OUT)
 $(OUT): src/client.c pack.toml ../guest.h $(WASM_PACK)
 	mkdir -p ../packs
 	python3 $(WASM_PACK) . -o $(OUT)
+	rm -f $(OUT).zlib
 
 clean:
-	rm -f $(OUT)
+	rm -f $(OUT) $(OUT).zlib

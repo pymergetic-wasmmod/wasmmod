@@ -12,6 +12,7 @@ all: $(OUT)
 $(OUT): src/bridge.c src/lib.rs src/__init__.py pack.toml ../guest.h $(WASM_PACK)
 	mkdir -p ../packs
 	python3 $(WASM_PACK) . -o $(OUT)
+	rm -f $(OUT).zlib
 
 clean:
-	rm -f $(OUT) .bridge.*.o
+	rm -f $(OUT) $(OUT).zlib .bridge.*.o
