@@ -24,7 +24,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """
-Host reader for wasmmod.source / wasmmod.sig on .wasm or .aot.
+Host reader for wasmmod.source / wasmmod.sig on .wasm, .aot, or .elf.
 
 Thin wrapper around the Rust binary (crates/wasmmod-read):
 

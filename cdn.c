@@ -24,6 +24,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "py/runtime.h"
+
 #include "extmod/wasmmod/cdn.h"
 #include "extmod/wasmmod/fetch.h"
 #include "extmod/wasmmod/finder.h"
@@ -191,7 +193,8 @@ static bool metal_fetch(const char *name, const char *version,
     const char *ver = (version != NULL) ? version : "";
 
     // Probe order follows MICROPY_WASM_CONTAINERS (zlib preferred per try_fetch path).
-    const char *exts[12];
+    // ELF mirrors finder try_elf_variants: name.<arch>.elf(.zlib) then naked .elf.
+    const char *exts[24];
     unsigned n = 0;
 #ifndef MICROPY_WASM_CONTAINERS
 #define MICROPY_WASM_CONTAINERS "elf,aot,wasm"
@@ -202,10 +205,16 @@ static bool metal_fetch(const char *name, const char *version,
     mp_wasm_aot_format_ext(aot_ext, sizeof(aot_ext));
     snprintf(aot_zlib, sizeof(aot_zlib), "%s.zlib", aot_ext);
 #endif
+#if MICROPY_PY_WASM_ELF
+    // Storage for ".<arch>.elf" / ".<arch>.elf.zlib" (arch tags from wasm.arch).
+    char elf_arch_ext[8][48];
+    char elf_arch_zlib[8][56];
+    unsigned n_elf_arch = 0;
+#endif
     {
         const char *pref = MICROPY_WASM_CONTAINERS;
         const char *p = pref;
-        while (*p && n + 2 < 12) {
+        while (*p && n + 2 < 24) {
             while (*p == ',' || *p == ' ') {
                 p++;
             }
@@ -219,8 +228,28 @@ static bool metal_fetch(const char *name, const char *version,
             size_t kn = (size_t)(p - start);
 #if MICROPY_PY_WASM_ELF
             if (kn == 3 && memcmp(start, "elf", 3) == 0) {
-                exts[n++] = ".elf.zlib";
-                exts[n++] = ".elf";
+                mp_wasm_arch_ensure();
+                size_t n_arch = 0;
+                mp_obj_t *arch_items = NULL;
+                mp_obj_list_get(mp_wasm_arch_obj(), &n_arch, &arch_items);
+                for (size_t ai = 0; ai < n_arch && n_elf_arch < 8 && n + 2 < 24; ++ai) {
+                    if (!mp_obj_is_str(arch_items[ai])) {
+                        continue;
+                    }
+                    const char *arch = mp_obj_str_get_str(arch_items[ai]);
+                    if (arch == NULL || arch[0] == '\0') {
+                        continue;
+                    }
+                    snprintf(elf_arch_ext[n_elf_arch], sizeof(elf_arch_ext[0]), ".%s.elf", arch);
+                    snprintf(elf_arch_zlib[n_elf_arch], sizeof(elf_arch_zlib[0]), ".%s.elf.zlib", arch);
+                    exts[n++] = elf_arch_zlib[n_elf_arch];
+                    exts[n++] = elf_arch_ext[n_elf_arch];
+                    n_elf_arch++;
+                }
+                if (n + 2 < 24) {
+                    exts[n++] = ".elf.zlib";
+                    exts[n++] = ".elf";
+                }
                 continue;
             }
 #endif
