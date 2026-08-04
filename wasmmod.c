@@ -25,6 +25,7 @@
  */
 
 
+#include <stdio.h>
 #include <string.h>
 
 #include "py/mpstate.h"
@@ -37,6 +38,7 @@
 #include "extmod/wasmmod/mod.h"
 #include "extmod/wasmmod/verify.h"
 #include "extmod/wasmmod/version.h"
+#include "wasm_export.h"
 
 #ifndef MICROPY_WASM_PACK_ARCH
 #define MICROPY_WASM_PACK_ARCH ""
@@ -101,12 +103,26 @@ mp_obj_t mod_wasm___init__(void) {
 MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm___init___obj, mod_wasm___init__);
 #endif
 
+static mp_obj_t mod_wasm_wamr_version(void) {
+    uint32_t major = 0, minor = 0, patch = 0;
+    wasm_runtime_get_version(&major, &minor, &patch);
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "%u.%u.%u",
+        (unsigned)major, (unsigned)minor, (unsigned)patch);
+    if (n < 0) {
+        n = 0;
+    }
+    return mp_obj_new_str(buf, (size_t)n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_wamr_version_obj, mod_wasm_wamr_version);
+
 static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_wasm) },
     #if MICROPY_MODULE_BUILTIN_INIT
     { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&mod_wasm___init___obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_version), MP_ROM_PTR(&mp_wasm_version_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wamr_version), MP_ROM_PTR(&mod_wasm_wamr_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_path), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_path_obj)) },
     { MP_ROM_QSTR(MP_QSTR_arch), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_arch_obj)) },
     { MP_ROM_QSTR(MP_QSTR_VERIFY), MP_ROM_INT(MICROPY_WASM_VERIFY) },
@@ -123,6 +139,10 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_import_wasm), MP_ROM_PTR(&mod_wasm_import_wasm_obj) },
     { MP_ROM_QSTR(MP_QSTR_install_hook), MP_ROM_PTR(&mod_wasm_install_hook_obj) },
     { MP_ROM_QSTR(MP_QSTR_cdn), MP_ROM_PTR(&mod_wasm_cdn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_catalog), MP_ROM_PTR(&mod_wasm_catalog_obj) },
+    { MP_ROM_QSTR(MP_QSTR_session_id), MP_ROM_PTR(&mod_wasm_session_id_obj) },
+    { MP_ROM_QSTR(MP_QSTR_publish), MP_ROM_PTR(&mod_wasm_publish_obj) },
+    { MP_ROM_QSTR(MP_QSTR_publish_file), MP_ROM_PTR(&mod_wasm_publish_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_uninstall_hook), MP_ROM_PTR(&mod_wasm_uninstall_hook_obj) },
     { MP_ROM_QSTR(MP_QSTR_unload), MP_ROM_PTR(&mod_wasm_unload_obj) },
     { MP_ROM_QSTR(MP_QSTR_add_trust), MP_ROM_PTR(&mod_wasm_add_trust_obj) },

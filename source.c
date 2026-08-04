@@ -443,14 +443,6 @@ int mp_wasm_source_list_files(const mp_wasm_source_view_t *v, const char *module
         // Include all under prefix for simplicity; submodule pointers are separate.
         const char *rest = f->path + mount_len;
         size_t rest_len = f->path_len - mount_len;
-        size_t skip = 0;
-        for (size_t j = 0; j < mod_len; ++j) {
-            if (module_or_null[j] == '.') {
-                skip++;
-            } else {
-                skip++;
-            }
-        }
         // After matching module path, remaining should not contain another package __init__ depth
         // for "files only at this level": allow files in this dir and non-package files.
         if (mod_len > 0) {

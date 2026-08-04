@@ -1,0 +1,12 @@
+# Local override: this directory is highlight-only C++ (not freestanding pack C).
+CompileFlags:
+  CompilationDatabase: None
+  Remove:
+    - -xc
+    - -std=gnu99
+    - --target=*
+    - -ffreestanding
+    - -nostdlib
+  Add:
+    - -xc++
+    - -std=c++17

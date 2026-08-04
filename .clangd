@@ -16,13 +16,13 @@
 #   make -C ../../ports/unix MICROPY_PY_WASM=1 BUILD=build-wasm
 #   ln -sfn ../../ports/unix/build-wasm/genhdr genhdr
 #
-# -xc: clangd often treats orphan .h as Objective-C++, which rejects -std=gnu99.
+# Do NOT put -xc in the default fragment — that forces C mode on .cpp samples.
+# -xc is applied only to .c/.h via PathMatch below (orphan .h as ObjC++ otherwise
+# rejects -std=gnu99).
 
 CompileFlags:
   CompilationDatabase: None
   Add:
-    - -xc
-    - -std=gnu99
     - -DUNIX
     - -DMICROPY_PY_WASM=1
     - -I.
@@ -44,6 +44,15 @@ CompileFlags:
     - -I**/build-wasm-src
     - -I**/build-wasm-verify
     - -I**/build-wasm-e2e
+
+# Host / loader C sources and headers.
+---
+If:
+  PathMatch: .*\.(c|h)$
+CompileFlags:
+  Add:
+    - -xc
+    - -std=gnu99
 
 # QSTR pool fragments (Q(name)) are not C — makeqstrdata consumes them.
 # Prefer extensionless qstrdefs.wasmmod so clangd does not parse as a header.
@@ -77,6 +86,22 @@ CompileFlags:
     - -nostdlib
     - -Iexamples
 
+# Highlight / docs C++ under examples (must not inherit -xc from .c/.h rules).
+---
+If:
+  PathMatch: .*/examples/.*\.(cpp|cc|cxx|hpp|hh|hxx)$
+CompileFlags:
+  CompilationDatabase: None
+  Remove:
+    - -xc
+    - -std=gnu99
+    - --target=*
+    - -ffreestanding
+    - -nostdlib
+  Add:
+    - -xc++
+    - -std=c++17
+
 # Vendored WAMR / third_party: not our code — skip indexing & diagnostics.
 ---
 If:
@@ -85,3 +110,21 @@ Index:
   Background: Skip
 Diagnostics:
   Suppress: '*'
+
+# Browser platform: host clang has no emscripten.h; io_browser.c stubs under
+# !__EMSCRIPTEN__. Includes are relative (../../../io.h) so metalpython-as-
+# workspace clangd still resolves without relying on -I../...
+---
+If:
+  PathMatch: .*/ports/micropython/webassembly/.*
+CompileFlags:
+  CompilationDatabase: None
+  Add:
+    - -xc
+    - -std=gnu99
+    - -DMICROPY_PY_WASM=1
+    - -I.
+    - -I../..
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None

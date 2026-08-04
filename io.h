@@ -40,7 +40,7 @@
 // without changing wasmmod call sites. See ports/PORT.md.
 // ---------------------------------------------------------------------------
 
-#define MP_WASM_IO_OPS_VERSION (1u)
+#define MP_WASM_IO_OPS_VERSION (2u)
 
 typedef enum {
     MP_WASM_IO_OK = 0,       // success (fetch: bytes valid; probe: exists)
@@ -52,6 +52,14 @@ typedef enum {
 typedef void (*mp_wasm_io_fetch_cb_t)(void *ctx, mp_wasm_io_result_t st,
     uint8_t *buf, uint32_t len);
 typedef void (*mp_wasm_io_probe_cb_t)(void *ctx, mp_wasm_io_result_t st);
+
+// Optional write/publish hook (v2). method e.g. "POST"; body may be NULL.
+// DECLINE / NULL → publish not supported on this host.
+typedef mp_wasm_io_result_t (*mp_wasm_io_request_t)(const char *method, const char *uri,
+    const uint8_t *body, uint32_t body_len,
+    const char *content_type,
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *errbuf, size_t errbuf_len);
 
 typedef struct mp_wasm_io_ops_t {
     uint32_t version; // MP_WASM_IO_OPS_VERSION
@@ -68,11 +76,12 @@ typedef struct mp_wasm_io_ops_t {
     // Optional cooperative yield during long default I/O (Metal scheduler).
     void (*yield)(void);
 
-    // --- reserved (v1: must be NULL) — Metal async without ABI break ---
-    // int (*fetch_async)(uri, mp_wasm_io_fetch_cb_t cb, void *ctx);
-    // int (*probe_async)(uri, mp_wasm_io_probe_cb_t cb, void *ctx);
-    void *reserved0;
-    void *reserved1;
+    // v2 write path (browser/native multipart publish). NULL until wired.
+    mp_wasm_io_request_t request;
+
+    // Reserved put alias / future slot (must be NULL if unused).
+    void *put;
+
     void *userdata;
 } mp_wasm_io_ops_t;
 

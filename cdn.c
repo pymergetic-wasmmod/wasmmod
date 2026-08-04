@@ -26,6 +26,7 @@
 #include "extmod/wasmmod/finder.h"
 #include "extmod/wasmmod/alloc.h" // IWYU pragma: keep — MICROPY_WASM_MALLOC
 #include "extmod/wasmmod/zlibutil.h"
+#include "extmod/wasmmod/io.h"
 
 #ifndef MP_WASM_CDN_BASE_MAX
 #define MP_WASM_CDN_BASE_MAX (256)
@@ -37,6 +38,10 @@
 static mp_wasm_cdn_driver_t g_driver = MP_WASM_CDN_DRIVER_PATH;
 static char g_base[MP_WASM_CDN_BASE_MAX];
 static char g_token[MP_WASM_CDN_TOKEN_MAX];
+#ifndef MP_WASM_CDN_SESSION_ID_MAX
+#define MP_WASM_CDN_SESSION_ID_MAX (64)
+#endif
+static char g_session_id[MP_WASM_CDN_SESSION_ID_MAX];
 
 static bool looks_like_cdn_base(const char *url) {
     if (url == NULL) {
@@ -59,6 +64,7 @@ void mp_wasm_cdn_reset(void) {
     g_driver = MP_WASM_CDN_DRIVER_PATH;
     g_base[0] = '\0';
     g_token[0] = '\0';
+    g_session_id[0] = '\0';
     mp_wasm_fetch_set_auth_bearer(NULL);
 }
 
@@ -240,6 +246,93 @@ bool mp_wasm_cdn_fetch_pack(const char *name, const char *version,
         return metal_fetch(name, version, out_bytes, out_len, errbuf, errbuf_len);
     }
     return path_fetch(name, version, out_bytes, out_len, errbuf, errbuf_len);
+}
+
+void mp_wasm_cdn_set_session_id(const char *session_id) {
+    g_session_id[0] = '\0';
+    if (session_id == NULL || session_id[0] == '\0') {
+        return;
+    }
+    size_t n = strlen(session_id);
+    if (n >= MP_WASM_CDN_SESSION_ID_MAX) {
+        n = MP_WASM_CDN_SESSION_ID_MAX - 1;
+    }
+    memcpy(g_session_id, session_id, n);
+    g_session_id[n] = '\0';
+}
+
+const char *mp_wasm_cdn_session_id(void) {
+    return g_session_id;
+}
+
+bool mp_wasm_cdn_fetch_index(const char *channel,
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *errbuf, size_t errbuf_len) {
+    if (out_bytes == NULL || out_len == NULL) {
+        return false;
+    }
+    *out_bytes = NULL;
+    *out_len = 0;
+    if (g_base[0] == '\0' || g_driver != MP_WASM_CDN_DRIVER_METAL) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "cdn: configure metal-cdn base first (wasm.cdn)");
+        }
+        return false;
+    }
+    const char *ch = (channel != NULL && channel[0] != '\0') ? channel : "lead";
+    char uri[MP_WASM_CDN_BASE_MAX + 96];
+    if (ch[0] == '@') {
+        snprintf(uri, sizeof(uri), "%s/index/pin/%s", g_base, ch + 1);
+    } else if (strncmp(ch, "pin/", 4) == 0) {
+        snprintf(uri, sizeof(uri), "%s/index/pin/%s", g_base, ch + 4);
+    } else {
+        snprintf(uri, sizeof(uri), "%s/index/%s", g_base, ch);
+    }
+    vstr_t tmp;
+    vstr_init(&tmp, 256);
+    if (!mp_wasm_fetch(uri, &tmp, errbuf, errbuf_len)) {
+        vstr_clear(&tmp);
+        return false;
+    }
+    uint8_t *buf = MICROPY_WASM_MALLOC(tmp.len ? tmp.len : 1);
+    if (buf == NULL) {
+        vstr_clear(&tmp);
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "cdn: oom");
+        }
+        return false;
+    }
+    if (tmp.len) {
+        memcpy(buf, tmp.buf, tmp.len);
+    }
+    *out_bytes = buf;
+    *out_len = (uint32_t)tmp.len;
+    vstr_clear(&tmp);
+    return true;
+}
+
+bool mp_wasm_cdn_publish(const char *name, const char *version,
+    const uint8_t *data, uint32_t data_len,
+    bool lead, bool pin, const char *token,
+    char *errbuf, size_t errbuf_len) {
+    (void)name;
+    (void)version;
+    (void)data;
+    (void)data_len;
+    (void)lead;
+    (void)pin;
+    (void)token;
+    const mp_wasm_io_ops_t *ops = mp_wasm_io_get();
+    if (ops != NULL && ops->request != NULL) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "cdn: publish request op not fully wired");
+        }
+        return false;
+    }
+    if (errbuf && errbuf_len) {
+        snprintf(errbuf, errbuf_len, "cdn: publish not supported on this host yet");
+    }
+    return false;
 }
 
 #endif // MICROPY_PY_WASM

@@ -48,12 +48,13 @@
  * - `MP_WASM_IO_DECLINE` — not your URI; wasmmod tries the next backend
  * - `MP_WASM_IO_ERR` — you handled it and it failed (finder tries next candidate)
  *
- * ### Async later
+ * ### Async / write later
  *
- * `mp_wasm_io_ops_t.reserved0/1` are reserved for `fetch_async` / `probe_async`
- * function pointers. Until then, Metal should block or park inside `fetch` /
- * `probe`. When async slots land, wasmmod can grow optional non-blocking
- * entry points without changing pack format or Python APIs.
+ * `mp_wasm_io_ops_t.request` (v2) is the optional HTTP write/publish hook
+ * (`POST` multipart to metal-cdn). `put` is reserved. Until wired, guest
+ * `wasm.publish*` raises `NotImplementedError`. Browser `io_browser` leaves
+ * both NULL. Until async slots land, Metal should block or park inside
+ * `fetch` / `probe`.
  *
  * ## Other hooks
  *
@@ -78,4 +79,13 @@
  *
  * Defaults: POSIX HTTP(S) in `fetch.c` when `MICROPY_WASM_HTTP_NATIVE=1`;
  * VFS via `mp_reader`; verify via mbedtls when `MICROPY_WASM_VERIFY!=0`.
+ *
+ * ## MicroPython platforms
+ *
+ * | Path | Role |
+ * |------|------|
+ * | `ports/micropython/` | Shared make fragment + optional `mpconfig_wasm.h` |
+ * | `ports/micropython/webassembly/` | Browser: `js.fetch` I/O + Emscripten WAMR (`WASMMOD_EMSCRIPTEN=1`) |
+ * | `ports/metal/` | (planned) Metal async→sync I/O ops |
+ * | `ports/cpython/` | CPython tooling helpers |
  */

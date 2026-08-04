@@ -68,14 +68,16 @@ static mp_wasm_io_result_t io_decline_probe(const char *uri) {
     (void)uri;
     return MP_WASM_IO_DECLINE;
 }
-
+#if defined(__GNUC__)
+__attribute__((unused))
+#endif
 static const mp_wasm_io_ops_t mp_wasm_io_builtin = {
     .version = MP_WASM_IO_OPS_VERSION,
     .fetch = io_decline_fetch,
     .probe = io_decline_probe,
     .yield = NULL,
-    .reserved0 = NULL,
-    .reserved1 = NULL,
+    .request = NULL,
+    .put = NULL,
     .userdata = NULL,
 };
 
@@ -120,6 +122,25 @@ void mp_wasm_join_uri(const char *root, const char *rel, vstr_t *out) {
         rel++;
     }
     vstr_add_str(out, rel);
+}
+
+// Shared with native HTTP and browser I/O (Authorization header).
+static char g_auth_bearer[256];
+
+void mp_wasm_fetch_set_auth_bearer(const char *token) {
+    g_auth_bearer[0] = '\0';
+    if (token != NULL && token[0] != '\0') {
+        size_t n = strlen(token);
+        if (n >= sizeof(g_auth_bearer)) {
+            n = sizeof(g_auth_bearer) - 1;
+        }
+        memcpy(g_auth_bearer, token, n);
+        g_auth_bearer[n] = '\0';
+    }
+}
+
+const char *mp_wasm_fetch_auth_bearer(void) {
+    return g_auth_bearer;
 }
 
 static bool fetch_file(const char *path, vstr_t *out) {
@@ -423,20 +444,6 @@ static bool conn_open(http_conn_t *c, const parsed_url_t *u, char *errbuf, size_
 }
 
 // method = "GET" or "HEAD". If body_out non-NULL and GET, appends response body.
-static char g_auth_bearer[256];
-
-void mp_wasm_fetch_set_auth_bearer(const char *token) {
-    g_auth_bearer[0] = '\0';
-    if (token != NULL && token[0] != '\0') {
-        size_t n = strlen(token);
-        if (n >= sizeof(g_auth_bearer)) {
-            n = sizeof(g_auth_bearer) - 1;
-        }
-        memcpy(g_auth_bearer, token, n);
-        g_auth_bearer[n] = '\0';
-    }
-}
-
 static bool http_exchange(const char *method, const char *uri, vstr_t *body_out,
     int *status_out, char *errbuf, size_t errbuf_len) {
     parsed_url_t u;
@@ -590,10 +597,6 @@ static bool native_http_probe(const char *uri) {
 }
 
 #else // !MICROPY_WASM_HTTP_NATIVE
-
-void mp_wasm_fetch_set_auth_bearer(const char *token) {
-    (void)token;
-}
 
 static bool native_http_fetch(const char *uri, vstr_t *out, char *errbuf, size_t errbuf_len) {
     (void)uri;

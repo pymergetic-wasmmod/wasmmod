@@ -136,6 +136,7 @@ wasmmod/
 ├── pack.*  runtime.*  forward.*  verify.*   portable core
 ├── fetch.*  io.h  wasmmod.c  finder.*  host.*  MicroPython host
 ├── ports/                                   make / cmake / mpconfig / PORT.md
+│   └── micropython/webassembly/             browser: js.fetch I/O + Emscripten WAMR
 ├── tools/wasm_{pack,sign}.py                host-agnostic CLIs
 ├── examples/                                sources + packs/ + call matrix
 │   └── packs/                               built <name>.wasm artifacts
@@ -146,9 +147,9 @@ wasmmod/
 └── third_party/wamr                         WAMR (Apache-2.0)
 ```
 
-Pack sections are named `wasmmod.pack` / `wasmmod.imports` / `wasmmod.host` / `wasmmod.sig` — see [docs/PACK.md](docs/PACK.md). Host I/O replaceability (Metal async): [ports/PORT.md](ports/PORT.md).
+Pack sections are named `wasmmod.pack` / `wasmmod.imports` / `wasmmod.host` / `wasmmod.sig` — see [docs/PACK.md](docs/PACK.md). Host I/O replaceability (Metal async, browser `js.fetch`): [ports/PORT.md](ports/PORT.md).
 
-CDN / channel publish (lead + `@version` pins, index schema): separate repo
+CDN / channel publish (lead + `@version` pins, index schema, browser µPy shell): separate repo
 [metal-cdn](https://github.com/pymergetic/metal-cdn).
 
 One-shot release (pack → AOT → sign → zlib → upload):
@@ -221,7 +222,29 @@ endif()
 Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).  
 Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`.  
 `wasm.version` is always the package release string from [`VERSION`](VERSION) (e.g. `'0.1.2-alpha'`).  
+`wasm.wamr_version()` returns the linked WAMR `major.minor.patch` string.  
+`wasm.AOT_VERSION` is the AOT file-format N used in CDN artifact names.  
 Guests see the same loader surface as WAMR imports on module **`wasmmod`**: `version`, `mode`, `verify`, `trust_count`, `call_i32` (dynamic pack export; peer of host `wasm.c_call` / `rs_call`). Callbacks/slots stay on **`wasmmod.host`**.
+
+CDN loader without loading a pack:
+
+```python
+wasm.cdn("https://cdn.example/cdn")   # MetalCdnDriver; no pack fetch
+wasm.install_hook()                   # import finder on; still no pack load
+wasm.session_id("…")                  # optional correlation id (autoexec sets this)
+# import hello                        # first HTTP / VFS pack load
+names = wasm.catalog()                # GET …/index/lead → package name list
+# wasm.publish("pkg", "0.1.0", data)  # NotImplemented until host request op
+```
+
+`wasm.load(path_or_bytes)` loads a raw `.wasm` module (not a metal pack). Prefer
+`wasm.load_pack(...)` / `import` for CDN packs.
+
+**Browser (Emscripten):** out-of-tree variant under
+[`ports/micropython/webassembly/`](ports/micropython/webassembly/) — `js.fetch` I/O
+(with optional Bearer + `X-Shell-Session-Id` when configured),
+no pollution of vanilla `ports/webassembly/`. See that folder’s README for build +
+sync into metal-cdn `static/repl/`.
 
 Optional host trampoline (metalpython): `tools/wasmmod.py` → `extmod/wasmmod/tools/wasmmod.py`.  
 MetalPython host branch layout (`wasmmod` PR track under product `master`): [BRANCHES.md](BRANCHES.md).
@@ -243,6 +266,11 @@ make -C extmod/wasmmod/examples test-verify    # ECDSA .sig+.crt + baked root CA
 make -C extmod/wasmmod/examples test-signed    # PKI sign + VFS + HTTP verify
 make -C extmod/wasmmod/examples demo           # real micropython -i session
 make -C extmod/wasmmod/examples repl           # interactive unix REPL
+
+# Browser µPy + wasmmod (needs emsdk on PATH):
+source ~/emsdk/emsdk_env.sh
+make -C extmod/wasmmod/ports/micropython/webassembly -j"$(nproc)"
+# → ports/webassembly/build-wasmmod/micropython.{mjs,wasm}
 ```
 
 ```text
@@ -260,7 +288,8 @@ ALL ENGINES OK
 ```
 
 Details: [examples/README.md](examples/README.md) · pack format: [docs/PACK.md](docs/PACK.md) ·
-CDN channels: [metal-cdn](https://github.com/pymergetic/metal-cdn).
+browser port: [ports/micropython/webassembly/README.md](ports/micropython/webassembly/README.md) ·
+CDN channels / shell: [metal-cdn](https://github.com/pymergetic/metal-cdn).
 
 ---
 

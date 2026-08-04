@@ -35,4 +35,20 @@ bool mp_wasm_cdn_fetch_pack(const char *name, const char *version,
     uint8_t **out_bytes, uint32_t *out_len,
     char *errbuf, size_t errbuf_len);
 
+// GET {base}/index/{channel} raw JSON bytes (metal driver only).
+// channel NULL/"lead" → lead; "@1.0" or "pin/1.0" → pin index. Caller frees *out_bytes.
+bool mp_wasm_cdn_fetch_index(const char *channel,
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *errbuf, size_t errbuf_len);
+
+// Publish stub — returns false until io ops.request is wired (browser POST).
+bool mp_wasm_cdn_publish(const char *name, const char *version,
+    const uint8_t *data, uint32_t data_len,
+    bool lead, bool pin, const char *token,
+    char *errbuf, size_t errbuf_len);
+
+// Process-global shell/loader session id (correlation header / autoexec bind).
+void mp_wasm_cdn_set_session_id(const char *session_id);
+const char *mp_wasm_cdn_session_id(void);
+
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_CDN_H

@@ -7,6 +7,8 @@
 # Bake host root CA(s) into the image (public DER only):
 #   make MICROPY_WASM_VERIFY=1 MICROPY_WASM_TRUST_CA=/path/to/root.crt.der
 # C defaults (optional): ports/micropython/mpconfig_wasm.h
+# Browser platform: ports/micropython/webassembly/ + WASMMOD_EMSCRIPTEN=1
+#   Out-of-tree variant: make -C ports/micropython/webassembly  (VARIANT_DIR=…/variant)
 # Port flash hook: #define MICROPY_WASM_TRUST_BOOT() … mp_wasm_trust_add(…)
 
 WASMMOD_DIR ?= extmod/wasmmod
@@ -65,7 +67,18 @@ CFLAGS_EXTMOD += -DMICROPY_PY_WASM=1 \
 	-DMICROPY_WASM_VERIFY=$(MICROPY_WASM_VERIFY) \
 	-DMICROPY_WASM_VERSION=\"$(MICROPY_WASM_VERSION)\" \
 	-DMICROPY_WASM_AOT_VERSION=$(MICROPY_WASM_AOT_VERSION)
+
+# Host: unix product-mini needs pthread/dl; browser (Emscripten) does not.
+WASMMOD_EMSCRIPTEN ?= 0
+ifeq ($(WASMMOD_EMSCRIPTEN),1)
+LDFLAGS_EXTMOD += -L$(WAMR_BUILD) -liwasm -lm
+# Browser platform: js.fetch I/O (ports/micropython/webassembly/).
+SRC_WASMMOD_WEB = $(WASMMOD_DIR)/ports/micropython/webassembly/io_browser.c
+PY_O += $(addprefix $(BUILD)/, $(SRC_WASMMOD_WEB:.c=.o))
+SRC_QSTR += $(SRC_WASMMOD_WEB)
+else
 LDFLAGS_EXTMOD += -L$(WAMR_BUILD) -liwasm -lpthread -ldl -lm
+endif
 ifneq ($(filter 1,$(MICROPY_PY_WASM_JIT) $(MICROPY_PY_WASM_FAST_JIT)),)
 LDFLAGS_EXTMOD += -lstdc++
 endif
@@ -97,6 +110,17 @@ LDFLAGS_EXTMOD += $(shell $(LLVM_CONFIG) --ldflags --libs 2>/dev/null) \
 	-Wl,-rpath,$(shell $(LLVM_CONFIG) --libdir 2>/dev/null)
 endif
 
+ifeq ($(WASMMOD_EMSCRIPTEN),1)
+# Emscripten host: toolchain + C invokeNative (no host asm) + WASI type shim.
+EMSCRIPTEN_CMAKE_TOOLCHAIN ?= $(shell dirname $$(command -v emcc 2>/dev/null))/cmake/Modules/Platform/Emscripten.cmake
+WAMR_EM_WASI_SHIM ?= $(abspath $(TOP)/$(WASMMOD_DIR)/ports/micropython/webassembly/wamr_em_wasi_shim.h)
+WAMR_CMAKE_EXTRA += \
+	-DCMAKE_TOOLCHAIN_FILE=$(EMSCRIPTEN_CMAKE_TOOLCHAIN) \
+	-DCMAKE_C_FLAGS="-include $(WAMR_EM_WASI_SHIM)" \
+	-DWAMR_BUILD_TARGET=X86_32 \
+	-DWAMR_BUILD_INVOKE_NATIVE_GENERAL=1
+endif
+
 $(WAMR_BUILD)/libiwasm.a:
 	$(Q)$(MKDIR) -p $(WAMR_BUILD)
 	$(Q)cmake -S $(TOP)/$(WAMR_DIR)/product-mini/platforms/linux -B $(WAMR_BUILD) \
@@ -111,7 +135,7 @@ $(WAMR_BUILD)/libiwasm.a:
 		-DWAMR_DISABLE_HW_BOUND_CHECK=1 \
 		-DWAMR_BUILD_LOAD_CUSTOM_SECTION=1 \
 		$(WAMR_CMAKE_EXTRA)
-	$(Q)cmake --build $(WAMR_BUILD) --target vmlib -j
+	$(Q)+$(MAKE) -C $(WAMR_BUILD) vmlib
 
 $(BUILD)/$(WASMMOD_DIR)/wasmmod.o $(BUILD)/$(WASMMOD_DIR)/modobj.o \
 $(BUILD)/$(WASMMOD_DIR)/modapi.o $(BUILD)/$(WASMMOD_DIR)/packload.o \
@@ -121,6 +145,10 @@ $(BUILD)/$(WASMMOD_DIR)/forward.o $(BUILD)/$(WASMMOD_DIR)/fetch.o \
 $(BUILD)/$(WASMMOD_DIR)/cdn.o $(BUILD)/$(WASMMOD_DIR)/resolve.o \
 $(BUILD)/$(WASMMOD_DIR)/verify.o $(BUILD)/$(WASMMOD_DIR)/host.o \
 $(BUILD)/$(WASMMOD_DIR)/source.o $(BUILD)/$(WASMMOD_DIR)/zlibutil.o: $(WAMR_BUILD)/libiwasm.a
+
+ifeq ($(WASMMOD_EMSCRIPTEN),1)
+$(BUILD)/$(WASMMOD_DIR)/ports/micropython/webassembly/io_browser.o: $(WAMR_BUILD)/libiwasm.a
+endif
 
 ifeq ($(MICROPY_PY_WASM_MATRIX),1)
 WASM_HOST_MATRIX_O = $(BUILD)/$(WASMMOD_DIR)/examples/host_matrix.o

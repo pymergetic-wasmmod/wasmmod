@@ -1159,6 +1159,157 @@ static mp_obj_t mod_wasm_cdn(size_t n_args, const mp_obj_t *args) {
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_cdn_obj, 1, 2, mod_wasm_cdn);
 
+// wasm.catalog(channel="lead") → list of package name strings
+static mp_obj_t mod_wasm_catalog(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_channel };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_channel, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    const char *channel = "lead";
+    if (args[ARG_channel].u_obj != mp_const_none) {
+        if (!mp_obj_is_str(args[ARG_channel].u_obj)) {
+            mp_raise_TypeError(MP_ERROR_TEXT("catalog: channel must be str"));
+        }
+        channel = mp_obj_str_get_str(args[ARG_channel].u_obj);
+    }
+
+    char err[160];
+    uint8_t *buf = NULL;
+    uint32_t len = 0;
+    if (!mp_wasm_cdn_fetch_index(channel, &buf, &len, err, sizeof(err))) {
+        mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("%s"), err);
+    }
+
+    // Parse JSON via json.loads when available.
+    mp_obj_t json_mod = mp_import_name(MP_QSTR_json, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+    mp_obj_t loads = mp_load_attr(json_mod, MP_QSTR_loads);
+    mp_obj_t text = mp_obj_new_str((const char *)buf, len);
+    MICROPY_WASM_FREE(buf);
+    mp_obj_t doc = mp_call_function_1(loads, text);
+    if (!mp_obj_is_dict_or_ordereddict(doc)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("catalog: index JSON root must be object"));
+    }
+    mp_obj_t packages = mp_obj_dict_get(doc, MP_OBJ_NEW_QSTR(MP_QSTR_packages));
+    if (!mp_obj_is_dict_or_ordereddict(packages)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("catalog: missing packages object"));
+    }
+    mp_map_t *map = mp_obj_dict_get_map(packages);
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (size_t i = 0; i < map->alloc; ++i) {
+        if (!mp_map_slot_is_filled(map, i)) {
+            continue;
+        }
+        mp_obj_list_append(out, map->table[i].key);
+    }
+    return out;
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_catalog_obj, 0, mod_wasm_catalog);
+
+// wasm.session_id  get/set via function: wasm.session_id() / wasm.session_id(id)
+static mp_obj_t mod_wasm_session_id(size_t n_args, const mp_obj_t *args) {
+    if (n_args >= 1) {
+        if (args[0] == mp_const_none) {
+            mp_wasm_cdn_set_session_id(NULL);
+        } else if (mp_obj_is_str(args[0])) {
+            mp_wasm_cdn_set_session_id(mp_obj_str_get_str(args[0]));
+        } else {
+            mp_raise_TypeError(MP_ERROR_TEXT("session_id must be str or None"));
+        }
+    }
+    const char *sid = mp_wasm_cdn_session_id();
+    if (sid == NULL || sid[0] == '\0') {
+        return mp_const_none;
+    }
+    return mp_obj_new_str(sid, strlen(sid));
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_session_id_obj, 0, 1, mod_wasm_session_id);
+
+// wasm.publish(name, version, data, *, lead=True, pin=True, token=None)
+static mp_obj_t mod_wasm_publish(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_name, ARG_version, ARG_data, ARG_lead, ARG_pin, ARG_token };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_name, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_version, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_data, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_lead, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
+        { MP_QSTR_pin, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
+        { MP_QSTR_token, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    if (!mp_obj_is_str(args[ARG_name].u_obj) || !mp_obj_is_str(args[ARG_version].u_obj)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("publish: name and version must be str"));
+    }
+    const char *name = mp_obj_str_get_str(args[ARG_name].u_obj);
+    const char *version = mp_obj_str_get_str(args[ARG_version].u_obj);
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(args[ARG_data].u_obj, &bufinfo, MP_BUFFER_READ);
+    const char *token = NULL;
+    if (args[ARG_token].u_obj != mp_const_none) {
+        if (!mp_obj_is_str(args[ARG_token].u_obj)) {
+            mp_raise_TypeError(MP_ERROR_TEXT("publish: token must be str"));
+        }
+        token = mp_obj_str_get_str(args[ARG_token].u_obj);
+    }
+    char err[160];
+    if (!mp_wasm_cdn_publish(name, version, bufinfo.buf, (uint32_t)bufinfo.len,
+            args[ARG_lead].u_bool, args[ARG_pin].u_bool, token, err, sizeof(err))) {
+        mp_raise_msg_varg(&mp_type_NotImplementedError, MP_ERROR_TEXT("%s"), err);
+    }
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_publish_obj, 3, mod_wasm_publish);
+
+// wasm.publish_file(path, name, version, *, lead=True, pin=True, token=None)
+static mp_obj_t mod_wasm_publish_file(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_path, ARG_name, ARG_version, ARG_lead, ARG_pin, ARG_token };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_path, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_name, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_version, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_lead, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
+        { MP_QSTR_pin, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
+        { MP_QSTR_token, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    if (!mp_obj_is_str(args[ARG_path].u_obj)
+        || !mp_obj_is_str(args[ARG_name].u_obj)
+        || !mp_obj_is_str(args[ARG_version].u_obj)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("publish_file: path, name, version must be str"));
+    }
+    const char *path = mp_obj_str_get_str(args[ARG_path].u_obj);
+    char err[160];
+    vstr_t code;
+    if (!mp_wasm_fetch(path, &code, err, sizeof(err))) {
+        mp_raise_OSError_with_filename(MP_ENOENT, path);
+    }
+    const char *token = NULL;
+    if (args[ARG_token].u_obj != mp_const_none) {
+        if (!mp_obj_is_str(args[ARG_token].u_obj)) {
+            vstr_clear(&code);
+            mp_raise_TypeError(MP_ERROR_TEXT("publish_file: token must be str"));
+        }
+        token = mp_obj_str_get_str(args[ARG_token].u_obj);
+    }
+    bool ok = mp_wasm_cdn_publish(
+        mp_obj_str_get_str(args[ARG_name].u_obj),
+        mp_obj_str_get_str(args[ARG_version].u_obj),
+        (const uint8_t *)code.buf, (uint32_t)code.len,
+        args[ARG_lead].u_bool, args[ARG_pin].u_bool, token, err, sizeof(err));
+    vstr_clear(&code);
+    if (!ok) {
+        mp_raise_msg_varg(&mp_type_NotImplementedError, MP_ERROR_TEXT("%s"), err);
+    }
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_publish_file_obj, 3, mod_wasm_publish_file);
+
 static mp_obj_t mod_wasm_uninstall_hook(void) {
     #if !MICROPY_CAN_OVERRIDE_BUILTINS
     return mp_const_none;

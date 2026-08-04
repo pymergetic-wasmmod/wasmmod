@@ -901,8 +901,10 @@ CDN-oriented layout (channels + format-tagged AOT):
   hello.aot6.zlib           # format only (no arch infix)
 ```
 
-Distribution software (index schema, publish stub, roadmap):
+Distribution software (index schema, HTTP publish, browser shell / sessions):
 [pymergetic/metal-cdn](https://github.com/pymergetic/metal-cdn).
+Guest catalog consume is `wasm.catalog()`; guest `wasm.publish*` stays a stub until
+host `mp_wasm_io_ops_t.request` is wired.
 
 ## Custom section: `wasmmod.imports` **(proposed)**
 

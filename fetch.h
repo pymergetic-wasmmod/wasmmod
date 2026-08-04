@@ -44,7 +44,8 @@ bool mp_wasm_uri_is_http(const char *uri);
 // Join root + relative path (root may be a directory or URL prefix).
 void mp_wasm_join_uri(const char *root, const char *rel, vstr_t *out);
 
-// Optional Bearer token for native HTTP (CDN). Pass NULL to clear.
+// Optional Bearer token for native / browser HTTP (CDN). Pass NULL to clear.
 void mp_wasm_fetch_set_auth_bearer(const char *token);
+const char *mp_wasm_fetch_auth_bearer(void);
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_FETCH_H
