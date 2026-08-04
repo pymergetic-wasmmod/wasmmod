@@ -348,6 +348,24 @@ wasm.cdn("http://127.0.0.1:8000/cdn", token)  # selects MetalCdnDriver
 `install_hook("…/cdn")` also selects that driver when the URL looks like a CDN
 base; flat pack mirrors keep `PathDriver`. See [Circular deps and phased load](#circular-deps-and-phased-load).
 
+Under `MetalCdnDriver`, `metal_fetch` probes lead/pin URLs in the same
+container order as the VFS finder (`MICROPY_WASM_CONTAINERS`), preferring
+`.zlib` twins. For **ELF** and **AOT** it tries `name.<arch>.ext` from
+`wasm.arch` before naked `name.ext`, then legacy `.aot` after `.aot{N}`:
+
+```text
+…/artifacts/lead/hello.x86_64.elf.zlib
+…/artifacts/lead/hello.x86_64.elf
+…/artifacts/lead/hello.elf.zlib
+…/artifacts/lead/hello.elf
+…/artifacts/lead/hello.x86_64.aot6.zlib   # when MICROPY_PY_WASM_AOT
+…
+…/artifacts/lead/hello.wasm.zlib
+…/artifacts/lead/hello.wasm
+```
+
+Pin fetches use `/artifacts/pin/{ver}/…` with the same suffix list.
+
 `wasm.verify()` returns the current flag; `wasm.VERIFY` is the compile-time
 `MICROPY_WASM_VERIFY` mode (0/1/2). Runtime `verify(False)` skips checks even
 when compile-time mode is on (unsigned smoke / local trees).

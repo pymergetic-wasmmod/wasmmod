@@ -193,8 +193,8 @@ static bool metal_fetch(const char *name, const char *version,
     const char *ver = (version != NULL) ? version : "";
 
     // Probe order follows MICROPY_WASM_CONTAINERS (zlib preferred per try_fetch path).
-    // ELF mirrors finder try_elf_variants: name.<arch>.elf(.zlib) then naked .elf.
-    const char *exts[24];
+    // ELF/AOT mirror finder: name.<arch>.ext(.zlib) then naked ext (+ legacy .aot).
+    const char *exts[32];
     unsigned n = 0;
 #ifndef MICROPY_WASM_CONTAINERS
 #define MICROPY_WASM_CONTAINERS "elf,aot,wasm"
@@ -204,6 +204,13 @@ static bool metal_fetch(const char *name, const char *version,
     char aot_zlib[24];
     mp_wasm_aot_format_ext(aot_ext, sizeof(aot_ext));
     snprintf(aot_zlib, sizeof(aot_zlib), "%s.zlib", aot_ext);
+    // ".<arch>.aotN" / ".<arch>.aotN.zlib" (+ legacy ".aot" twins).
+    char aot_arch_ext[8][48];
+    char aot_arch_zlib[8][56];
+    char aot_leg_arch_ext[8][40];
+    char aot_leg_arch_zlib[8][48];
+    unsigned n_aot_arch = 0;
+    unsigned n_aot_leg_arch = 0;
 #endif
 #if MICROPY_PY_WASM_ELF
     // Storage for ".<arch>.elf" / ".<arch>.elf.zlib" (arch tags from wasm.arch).
@@ -214,7 +221,7 @@ static bool metal_fetch(const char *name, const char *version,
     {
         const char *pref = MICROPY_WASM_CONTAINERS;
         const char *p = pref;
-        while (*p && n + 2 < 24) {
+        while (*p && n + 2 < 32) {
             while (*p == ',' || *p == ' ') {
                 p++;
             }
@@ -232,7 +239,7 @@ static bool metal_fetch(const char *name, const char *version,
                 size_t n_arch = 0;
                 mp_obj_t *arch_items = NULL;
                 mp_obj_list_get(mp_wasm_arch_obj(), &n_arch, &arch_items);
-                for (size_t ai = 0; ai < n_arch && n_elf_arch < 8 && n + 2 < 24; ++ai) {
+                for (size_t ai = 0; ai < n_arch && n_elf_arch < 8 && n + 2 < 32; ++ai) {
                     if (!mp_obj_is_str(arch_items[ai])) {
                         continue;
                     }
@@ -246,7 +253,7 @@ static bool metal_fetch(const char *name, const char *version,
                     exts[n++] = elf_arch_ext[n_elf_arch];
                     n_elf_arch++;
                 }
-                if (n + 2 < 24) {
+                if (n + 2 < 32) {
                     exts[n++] = ".elf.zlib";
                     exts[n++] = ".elf";
                 }
@@ -255,8 +262,51 @@ static bool metal_fetch(const char *name, const char *version,
 #endif
 #if MICROPY_PY_WASM_AOT
             if (kn == 3 && memcmp(start, "aot", 3) == 0) {
-                exts[n++] = aot_zlib;
-                exts[n++] = aot_ext;
+                mp_wasm_arch_ensure();
+                size_t n_arch = 0;
+                mp_obj_t *arch_items = NULL;
+                mp_obj_list_get(mp_wasm_arch_obj(), &n_arch, &arch_items);
+                for (size_t ai = 0; ai < n_arch && n_aot_arch < 8 && n + 2 < 32; ++ai) {
+                    if (!mp_obj_is_str(arch_items[ai])) {
+                        continue;
+                    }
+                    const char *arch = mp_obj_str_get_str(arch_items[ai]);
+                    if (arch == NULL || arch[0] == '\0') {
+                        continue;
+                    }
+                    snprintf(aot_arch_ext[n_aot_arch], sizeof(aot_arch_ext[0]), ".%s%s", arch, aot_ext);
+                    snprintf(aot_arch_zlib[n_aot_arch], sizeof(aot_arch_zlib[0]), ".%s%s.zlib", arch, aot_ext);
+                    exts[n++] = aot_arch_zlib[n_aot_arch];
+                    exts[n++] = aot_arch_ext[n_aot_arch];
+                    n_aot_arch++;
+                }
+                if (n + 2 < 32) {
+                    exts[n++] = aot_zlib;
+                    exts[n++] = aot_ext;
+                }
+                // Legacy unversioned .aot after format-tagged name (finder parity).
+                if (strcmp(aot_ext, ".aot") != 0) {
+                    for (size_t ai = 0; ai < n_arch && n_aot_leg_arch < 8 && n + 2 < 32; ++ai) {
+                        if (!mp_obj_is_str(arch_items[ai])) {
+                            continue;
+                        }
+                        const char *arch = mp_obj_str_get_str(arch_items[ai]);
+                        if (arch == NULL || arch[0] == '\0') {
+                            continue;
+                        }
+                        snprintf(aot_leg_arch_ext[n_aot_leg_arch], sizeof(aot_leg_arch_ext[0]),
+                            ".%s.aot", arch);
+                        snprintf(aot_leg_arch_zlib[n_aot_leg_arch], sizeof(aot_leg_arch_zlib[0]),
+                            ".%s.aot.zlib", arch);
+                        exts[n++] = aot_leg_arch_zlib[n_aot_leg_arch];
+                        exts[n++] = aot_leg_arch_ext[n_aot_leg_arch];
+                        n_aot_leg_arch++;
+                    }
+                    if (n + 2 < 32) {
+                        exts[n++] = ".aot.zlib";
+                        exts[n++] = ".aot";
+                    }
+                }
                 continue;
             }
 #endif

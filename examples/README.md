@@ -93,7 +93,7 @@ assert test_c2.c2_answer() == 42
 | Target | Host `BUILD=` | Needs |
 |--------|---------------|--------|
 | `test` | `build-wasm` | — |
-| `test-elf` | `build-wasm` | `hello.elf` / `client.elf` / `hostcall.elf` (from `packs`) |
+| `test-elf` | `build-wasm` | `hello.elf` / `client.elf` / `hostcall.elf` + `hello.aarch64.elf` (arch reject); `run_elf.py` |
 | `test-tree` | `build-wasm` | tree packs (offline path) |
 | `test-tree-cdn` | `build-wasm` | running metal-cdn (dotted names) |
 | `test-aot` | `build-wasm-aot` | matching `wamrc` from nested `third_party/wamr` |
