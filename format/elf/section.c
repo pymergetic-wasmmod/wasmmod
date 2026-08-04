@@ -18,6 +18,7 @@
 #include "extmod/wasmmod/format/elf/section.h"
 
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -36,7 +37,7 @@
 #define SHT_NOBITS 8
 #define SHT_REL 9
 
-#pragma pack(push, 1)
+/* ELF64 LE — natural alignment; avoid #pragma pack across #if (clangd). */
 typedef struct {
     uint8_t e_ident[EI_NIDENT];
     uint16_t e_type;
@@ -66,7 +67,9 @@ typedef struct {
     uint64_t sh_addralign;
     uint64_t sh_entsize;
 } Elf64_Shdr;
-#pragma pack(pop)
+
+_Static_assert(sizeof(Elf64_Ehdr) == 64, "Elf64_Ehdr size");
+_Static_assert(sizeof(Elf64_Shdr) == 64, "Elf64_Shdr size");
 
 static void wr16(uint8_t *p, uint16_t v) {
     p[0] = (uint8_t)v;

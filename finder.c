@@ -304,7 +304,8 @@ static bool try_elf_variants(const char *root, const char *stem, bool allow_pkg,
 #endif
 }
 
-// Preference from MICROPY_WASM_CONTAINERS (e.g. "elf,aot,wasm").
+// Preference from MICROPY_WASM_CONTAINERS (compile-time string, e.g.
+// "elf,aot,wasm"). Browser/Emscripten forces "wasm" only — no runtime switch.
 static bool try_stem_variants(const char *root, const char *stem, bool allow_pkg,
     bool url, vstr_t *path_out) {
 #ifndef MICROPY_WASM_CONTAINERS

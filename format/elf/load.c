@@ -6,6 +6,9 @@
  * Copyright (c) 2026 Rouven Raudzus <raudzus@pymergetic.com>
  *
  * In-tree ELF64 ET_REL loader (x86_64 / aarch64). No dlopen / ld.so.
+ *
+ * Linked only when MICROPY_PY_WASM_ELF=1 (unix/Metal). Browser/Emscripten
+ * builds omit this file entirely (WASMMOD_EMSCRIPTEN → ELF=0).
  */
 
 #ifndef MICROPY_PY_WASM
@@ -20,8 +23,9 @@
 
 #include "extmod/wasmmod/format/elf/load.h"
 
-#include <string.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -97,7 +101,8 @@
 
 #define MP_WASM_ELF_PAGE(addr) ((uint64_t)(addr) & ~0xfffull)
 
-#pragma pack(push, 1)
+/* ELF64 LE layouts match natural alignment — no #pragma pack (clangd
+ * mis-tracks pack push/pop across the file-scoped #if … #endif). */
 typedef struct {
     uint8_t e_ident[EI_NIDENT];
     uint16_t e_type;
@@ -142,7 +147,11 @@ typedef struct {
     uint64_t r_info;
     int64_t r_addend;
 } Elf64_Rela;
-#pragma pack(pop)
+
+_Static_assert(sizeof(Elf64_Ehdr) == 64, "Elf64_Ehdr size");
+_Static_assert(sizeof(Elf64_Shdr) == 64, "Elf64_Shdr size");
+_Static_assert(sizeof(Elf64_Sym) == 24, "Elf64_Sym size");
+_Static_assert(sizeof(Elf64_Rela) == 24, "Elf64_Rela size");
 
 static void set_err(char *errbuf, size_t errbuf_len, const char *msg) {
     if (errbuf == NULL || errbuf_len == 0) {

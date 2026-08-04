@@ -24,7 +24,10 @@ MICROPY_PY_WASM_FAST_JIT ?= 0
 MICROPY_PY_WASM_MATRIX ?= 0
 MICROPY_WASM_VERIFY ?= 0
 
-# In-tree ELF64 ET_REL loader (unix/Metal). Off for browser.
+# Container engines are compile-time, not a runtime "browser mode" flag.
+# WASMMOD_EMSCRIPTEN=1 (webassembly variant): no ET_REL loader linked, finder
+# probes .wasm only, I/O via js.fetch. Unix/Metal: ELF + AOT + Wasm preference.
+# See docs/PACK.md ("Browser: wasm-only") and ports/micropython/webassembly/README.md.
 ifeq ($(WASMMOD_EMSCRIPTEN),1)
 MICROPY_PY_WASM_ELF ?= 0
 MICROPY_WASM_CONTAINERS ?= wasm

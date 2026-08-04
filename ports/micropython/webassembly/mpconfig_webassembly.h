@@ -8,6 +8,10 @@
  *
  * Build: make -C ports/micropython/webassembly  (WASMMOD_EMSCRIPTEN=1).
  * ASYNCIFY is required so js.fetch can park inside sync mp_wasm_io_ops_t.
+ *
+ * Browser = Wasm guest packs only (no host-arch ET_REL / mmap loader).
+ * micropython.mk (WASMMOD_EMSCRIPTEN=1) sets MICROPY_PY_WASM_ELF=0; the
+ * webassembly PathMatch in extmod/wasmmod/.clangd does the same for the IDE.
  */
 #ifndef MICROPY_INCLUDED_WASMMOD_MPCONFIG_WEBASSEMBLY_H
 #define MICROPY_INCLUDED_WASMMOD_MPCONFIG_WEBASSEMBLY_H

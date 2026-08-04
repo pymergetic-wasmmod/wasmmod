@@ -59,6 +59,10 @@ bool mp_wasm_loader_register(void);
 #define MICROPY_PY_WASM_ELF (0)
 #endif
 
+// ELF execute is compile-gated (MICROPY_PY_WASM_ELF), not a runtime browser
+// flag. WASMMOD_EMSCRIPTEN builds omit format/elf/load.c and set containers
+// to "wasm" only — see ports/micropython/micropython.mk.
+
 #include "extmod/wasmmod/format/common/format.h"
 #if MICROPY_PY_WASM_ELF
 #include "extmod/wasmmod/format/elf/load.h"
@@ -224,7 +228,9 @@ mp_pack_t *mp_pack_load_ex(const uint8_t *code, uint32_t code_len,
     #endif
     #if !MICROPY_PY_WASM_ELF
     if (kind == MP_WASM_KIND_ELF) {
-        set_err(errbuf, errbuf_len, "ELF disabled (build with MICROPY_PY_WASM_ELF=1)");
+        // Browser/Emscripten images never link the ET_REL loader.
+        set_err(errbuf, errbuf_len,
+            "ELF disabled (MICROPY_PY_WASM_ELF=0; browser builds are wasm-only)");
         return NULL;
     }
     #endif
@@ -278,6 +284,7 @@ mp_pack_t *mp_pack_load_ex(const uint8_t *code, uint32_t code_len,
     }
 
 #if MICROPY_PY_WASM_ELF
+    // In-tree ET_REL path (unix/Metal). Not compiled into browser images.
     if (kind == MP_WASM_KIND_ELF) {
         if (!mp_wasm_elf_image_load(mod->buf, mod->buf_len, elf_resolve_import, mod,
                 &mod->elf, errbuf, errbuf_len)) {
