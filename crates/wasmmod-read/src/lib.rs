@@ -411,7 +411,7 @@ pub fn parse_mpws(payload: &[u8]) -> Result<(bool, Vec<u8>, Vec<u8>)> {
 
 /// Artifact bytes ECDSA covers for an embedded wasmmod.sig.
 pub fn without_sig_section(buf: &[u8]) -> Result<Vec<u8>> {
-    if buf.len() < 8 || buf[0] != 0 {
+    if buf.len() < 8 {
         return Err(Error::NotModule);
     }
     let want = SIG_SECTION.as_bytes();
@@ -480,15 +480,175 @@ pub fn without_sig_section(buf: &[u8]) -> Result<Vec<u8>> {
         }
         return Ok(out);
     }
+    if &buf[0..4] == b"\x7fELF" {
+        return without_sig_section_elf(buf);
+    }
     Err(Error::NotModule)
+}
+
+/// WPSE trailing cookie (matches tools/wasmmod_elf.py).
+const WPSE_MAGIC: &[u8; 4] = b"WPSE";
+const WPSE_SIZE: usize = 28; // 4s QQ H H I
+
+fn read_wpse_cookie(buf: &[u8]) -> Option<(u64, u64, u16, u16)> {
+    if buf.len() < WPSE_SIZE {
+        return None;
+    }
+    let off = buf.len() - WPSE_SIZE;
+    if &buf[off..off + 4] != WPSE_MAGIC {
+        return None;
+    }
+    let old_len = u64::from_le_bytes(buf[off + 4..off + 12].try_into().ok()?);
+    let old_shoff = u64::from_le_bytes(buf[off + 12..off + 20].try_into().ok()?);
+    let old_shnum = u16::from_le_bytes(buf[off + 20..off + 22].try_into().ok()?);
+    let old_shstrndx = u16::from_le_bytes(buf[off + 22..off + 24].try_into().ok()?);
+    if old_len == 0 || old_len as usize > buf.len() - WPSE_SIZE {
+        return None;
+    }
+    Some((old_len, old_shoff, old_shnum, old_shstrndx))
+}
+
+fn without_sig_section_elf(buf: &[u8]) -> Result<Vec<u8>> {
+    // No sig → drop trailing cookie only (clean naked digest).
+    let has_sig = matches!(extract_elf_section(buf, SIG_SECTION)?, Some(_));
+    if !has_sig {
+        if let Some(_) = read_wpse_cookie(buf) {
+            return Ok(buf[..buf.len() - WPSE_SIZE].to_vec());
+        }
+        return Ok(buf.to_vec());
+    }
+    let Some((old_len, old_shoff, old_shnum, old_shstrndx)) = read_wpse_cookie(buf) else {
+        return Err(Error::Truncated);
+    };
+    // Require sig payload to live at/after old_len (last-append WPSE restore).
+    if buf.len() < 64 || buf[4] != 2 || buf[5] != 1 {
+        return Err(Error::Truncated);
+    }
+    let shoff = u64::from_le_bytes(buf[40..48].try_into().unwrap()) as usize;
+    let shentsize = u16::from_le_bytes(buf[58..60].try_into().unwrap()) as usize;
+    let shnum = u16::from_le_bytes(buf[60..62].try_into().unwrap()) as usize;
+    let shstrndx = u16::from_le_bytes(buf[62..64].try_into().unwrap()) as usize;
+    if shentsize < 64 || shnum == 0 || shstrndx >= shnum || shoff + shnum * shentsize > buf.len()
+    {
+        return Err(Error::Truncated);
+    }
+    let shstr = &buf[shoff + shstrndx * shentsize..];
+    let str_off = u64::from_le_bytes(shstr[24..32].try_into().unwrap()) as usize;
+    let str_sz = u64::from_le_bytes(shstr[32..40].try_into().unwrap()) as usize;
+    if str_off + str_sz > buf.len() {
+        return Err(Error::Truncated);
+    }
+    let strtab = &buf[str_off..str_off + str_sz];
+    let want = SIG_SECTION.as_bytes();
+    let want_dot = format!(".{SIG_SECTION}");
+    let mut ok = false;
+    for i in 0..shnum {
+        let sh = &buf[shoff + i * shentsize..];
+        let name_off = u32::from_le_bytes(sh[0..4].try_into().unwrap()) as usize;
+        let typ = u32::from_le_bytes(sh[4..8].try_into().unwrap());
+        if typ != 1 && typ != 7 {
+            continue;
+        }
+        if name_off >= strtab.len() {
+            continue;
+        }
+        let end = strtab[name_off..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|p| name_off + p)
+            .unwrap_or(strtab.len());
+        let sname = &strtab[name_off..end];
+        if sname != want && sname != want_dot.as_bytes() {
+            continue;
+        }
+        let sec_off = u64::from_le_bytes(sh[24..32].try_into().unwrap());
+        if sec_off >= old_len {
+            ok = true;
+            break;
+        }
+    }
+    if !ok {
+        return Err(Error::Truncated);
+    }
+    let mut out = buf[..old_len as usize].to_vec();
+    if out.len() < 64 {
+        return Err(Error::Truncated);
+    }
+    out[40..48].copy_from_slice(&old_shoff.to_le_bytes());
+    out[60..62].copy_from_slice(&old_shnum.to_le_bytes());
+    out[62..64].copy_from_slice(&old_shstrndx.to_le_bytes());
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn rejects_non_module() {
         assert!(matches!(SourceView::open_bytes(b"nope"), Err(Error::NotModule)));
+        assert!(matches!(without_sig_section(b"nope"), Err(Error::NotModule)));
+    }
+
+    #[test]
+    fn elf_without_sig_wpse_roundtrip() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("wasmmod root");
+        let tools = root.join("tools");
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("wasmmod_read_elf_{stamp}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("t.c");
+        let obj = dir.join("t.o");
+        let signed = dir.join("t.elf");
+        std::fs::write(&src, "int answer(void) { return 42; }\n").unwrap();
+        assert!(Command::new("gcc")
+            .args([
+                "-ffreestanding",
+                "-fPIC",
+                "-fno-plt",
+                "-fno-stack-protector",
+                "-O2",
+                "-c",
+                "-o",
+            ])
+            .arg(&obj)
+            .arg(&src)
+            .status()
+            .unwrap()
+            .success());
+        let py = format!(
+            "import sys\nsys.path.insert(0, r'{tools}')\nimport wasmmod_elf as elf\n\
+raw = open(r'{obj}', 'rb').read()\nout = elf.append_section(raw, 'wasmmod.sig', b'FAKE_SIG_BYTES')\n\
+open(r'{signed}', 'wb').write(out)\n",
+            tools = tools.display(),
+            obj = obj.display(),
+            signed = signed.display(),
+        );
+        let out = Command::new("python3")
+            .arg("-c")
+            .arg(&py)
+            .output()
+            .expect("python3");
+        assert!(
+            out.status.success(),
+            "py: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let naked = std::fs::read(&obj).unwrap();
+        let with_sig = std::fs::read(&signed).unwrap();
+        assert!(extract_elf_section(&with_sig, "wasmmod.sig")
+            .unwrap()
+            .is_some());
+        let stripped = without_sig_section(&with_sig).expect("strip elf sig");
+        assert_eq!(stripped, naked);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

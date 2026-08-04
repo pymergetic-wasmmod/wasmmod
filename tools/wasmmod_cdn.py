@@ -565,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
     p_get.add_argument(
         "--unwrap",
         action="store_true",
-        help="Unwrap MPZL .zlib to naked .wasm/.aot on disk",
+        help="Unwrap MPZL .zlib to naked .wasm/.aot/.elf on disk",
     )
     p_get.set_defaults(func=cmd_get)
 

@@ -62,6 +62,7 @@ SOURCE_SKIP_SUFFIXES = frozenset(
     {
         ".wasm",
         ".aot",
+        ".elf",
         ".mpack",
         ".sig",
         ".crt",

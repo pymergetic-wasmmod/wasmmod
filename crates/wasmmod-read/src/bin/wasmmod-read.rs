@@ -13,7 +13,7 @@ fn usage() -> ! {
 wasmmod-read — standalone wasmmod.source / wasmmod.sig reader
 
 Usage:
-  wasmmod-read meta PATH.wasm|.aot
+  wasmmod-read meta PATH.wasm|.aot|.elf
   wasmmod-read list PATH
   wasmmod-read read PATH RELPATH
   wasmmod-read extract PATH -o DIR

@@ -181,7 +181,9 @@ python3 tools/wasmmod.py cdn show hello
 python3 tools/wasmmod.py cdn get hello -o ./packs --unwrap
 ```
 
-CI: [`.github/workflows/publish-pack.yml`](.github/workflows/publish-pack.yml).
+CI: [`.github/workflows/publish-pack.yml`](.github/workflows/publish-pack.yml)
+(optional `elf` / `arch` inputs). Offline ELF section tests:
+`pytest tools/test_wasmmod_elf.py`; device smoke: `make -C examples test-elf`.
 
 ```mermaid
 flowchart LR

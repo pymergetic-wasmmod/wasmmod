@@ -284,7 +284,7 @@ def _aot_align4(buf: bytes) -> bytes:
 
 
 def without_sig_section(buf: bytes) -> bytes:
-    """Artifact bytes that ECDSA covers for embedded wasmmod.sig (.wasm or .aot)."""
+    """Artifact bytes that ECDSA covers for embedded wasmmod.sig (.wasm / .aot / .elf)."""
     if len(buf) < 8:
         raise SystemExit("artifact too small")
     want = SIG_SECTION.encode()
@@ -355,7 +355,7 @@ def without_sig_section(buf: bytes) -> bytes:
 
 
 def append_sig_section(buf: bytes, payload: bytes) -> bytes:
-    """Append wasmmod.sig to a sig-free .wasm or .aot (same embed model)."""
+    """Append wasmmod.sig to a sig-free .wasm / .aot / .elf (same embed model)."""
     if len(buf) < 8:
         raise SystemExit("artifact too small")
     if buf[:4] == b"\x00asm":
@@ -426,7 +426,7 @@ def parse_mpws(payload: bytes) -> dict:
 
 
 def inspect_sig(buf: bytes) -> dict | None:
-    """Return sig meta for a .wasm/.aot, or None if no wasmmod.sig."""
+    """Return sig meta for a .wasm/.aot/.elf, or None if no wasmmod.sig."""
     from wasmmod_source import extract_custom_section
 
     payload = extract_custom_section(buf, SIG_SECTION)

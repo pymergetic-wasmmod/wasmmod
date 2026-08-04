@@ -440,6 +440,7 @@ payloads** on both engines:
 |-------------|-------------------------|
 | `.wasm` | Wasm custom sections (`id=0`) |
 | `.aot` | WAMR AOT custom sections (`type=100`, RAW) via `wamrc --emit-custom-sections=…` |
+| `.elf` | ELF64 `SHT_PROGBITS` named `.wasmmod.*` (+ WPSE cookie for strip/sign) |
 
 `tools/wasmmod.py pack … --aot` always passes
 
@@ -472,7 +473,7 @@ python3 tools/wasmmod.py pack examples/hello/ -o hello.wasm --aot
 ```
 
 Signature verify hashes the **loaded artifact without `wasmmod.sig`**.
-Same rules for `.wasm` and `.aot`. One file — no detached `.sig`/`.crt`.
+Same rules for `.wasm`, `.aot`, and `.elf`. One file — no detached `.sig`/`.crt`.
 
 ### Loader behaviour
 
@@ -573,12 +574,12 @@ verified *before* instantiate.
 
 ### Distribution shape
 
-**Embedded only** (`.wasm` and `.aot`):
+**Embedded only** (`.wasm` / `.aot` / `.elf`):
 
 - `tools/wasmmod.py sign sign --key … --chain chain.der PATH`
-  → `wasmmod.sig` (Wasm custom section or AOT CUSTOM/RAW) with MPWS (sig + chain)
+  → `wasmmod.sig` (Wasm custom / AOT CUSTOM/RAW / ELF `.wasmmod.sig` + WPSE) with MPWS (sig + chain)
 - Loader hashes the artifact *without* that section
-- Sign **each** deliverable after it is final (after `wamrc` for AOT)
+- Sign **each** deliverable after it is final (after `wamrc` for AOT; after `pack-elf` for ELF)
 
 Inspect:
 
@@ -1017,7 +1018,7 @@ bytecode compress **on** (v3, same policy). Toggle with `--compress-source` /
 `[source] compress` and `--compress` / `[pack] compress`. Whole-artifact
 MPZL wrap is separate (`tools/wasmmod.py zlib`).
 
-Contents: pack tree minus build artifacts (`.wasm`, `.aot`, `build/`,
+Contents: pack tree minus build artifacts (`.wasm`, `.aot`, `.elf`, `build/`,
 `*.o`, …). Includes `pack.toml`, `src/**`, co-located markdown/licenses.
 
 Runtime / tools:
