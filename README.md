@@ -164,6 +164,12 @@ pip install -r requirements-publish.txt
 python3 tools/wasmmod.py publish examples/hello --version 0.1.0 \
   --key .keys/sign/leaf.key.pem --chain .keys/sign/chain.der \
   --cdn-url https://cdn.example/cdn --token "$METAL_CDN_TOKEN" --claim
+
+# Also upload a prebuilt ELF twin (staged under -o; --arch inserts CDN infix):
+python3 tools/wasmmod.py publish examples/hello --version 0.1.0 \
+  --elf examples/packs/hello.elf --arch x86_64 \
+  --key .keys/sign/leaf.key.pem --chain .keys/sign/chain.der \
+  --cdn-url https://cdn.example/cdn --token "$METAL_CDN_TOKEN"
 ```
 
 Remote index / lookup / download (pip-style):

@@ -61,6 +61,101 @@ def test_arch_rename_aot(tmp_path: Path) -> None:
     assert not aot.exists()
 
 
+def test_arch_rename_elf(tmp_path: Path) -> None:
+    pub = _load("wasmmod_publish")
+    elf = tmp_path / "hello.elf"
+    elf.write_bytes(b"\x7fELF" + b"\x00" * 32)
+    files = pub.stage_artifacts(
+        [elf],
+        key=None,
+        chain=None,
+        cert=None,
+        do_sign=False,
+        do_zlib=True,
+        also_naked=False,
+        arch="x86_64",
+    )
+    assert len(files) == 1
+    assert files[0].name == "hello.x86_64.elf.zlib"
+    assert not elf.exists()
+    # Already arch-tagged stems are left alone.
+    tagged = tmp_path / "hello.aarch64.elf"
+    tagged.write_bytes(b"\x7fELF" + b"\x00" * 16)
+    files2 = pub.stage_artifacts(
+        [tagged],
+        key=None,
+        chain=None,
+        cert=None,
+        do_sign=False,
+        do_zlib=False,
+        also_naked=False,
+        arch="x86_64",
+    )
+    assert files2 == [tagged]
+
+
+def test_from_artifacts_elf_arch_preserves_source(tmp_path: Path) -> None:
+    pub = _load("wasmmod_publish")
+    src = tmp_path / "src"
+    out = tmp_path / "out"
+    src.mkdir()
+    elf = src / "hello.elf"
+    elf.write_bytes(b"\x7fELF" + b"\x00" * 32)
+    rc = pub.main(
+        [
+            "--from-artifacts",
+            str(elf),
+            "--package",
+            "hello",
+            "--version",
+            "0.1.0",
+            "--arch",
+            "x86_64",
+            "--no-sign",
+            "--dry-run",
+            "-o",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert elf.is_file(), "source ELF must not be renamed/deleted"
+    assert (out / "hello.x86_64.elf.zlib").is_file()
+
+
+def test_elf_flag_alongside_wasm_artifact(tmp_path: Path) -> None:
+    pub = _load("wasmmod_publish")
+    src = tmp_path / "src"
+    out = tmp_path / "out"
+    src.mkdir()
+    wasm = src / "hello.wasm"
+    elf = src / "hello.elf"
+    wasm.write_bytes(b"\x00asm\x01\x00\x00\x00")
+    elf.write_bytes(b"\x7fELF" + b"\x00" * 32)
+    rc = pub.main(
+        [
+            "--from-artifacts",
+            str(wasm),
+            "--elf",
+            str(elf),
+            "--package",
+            "hello",
+            "--version",
+            "0.1.0",
+            "--arch",
+            "x86_64",
+            "--no-sign",
+            "--dry-run",
+            "-o",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert elf.is_file()
+    assert (out / "hello.x86_64.elf.zlib").is_file()
+    # Wasm is zlib-wrapped in place when it is the --from-artifacts path.
+    assert Path(str(wasm) + ".zlib").is_file()
+
+
 def test_dry_run_from_artifacts(tmp_path: Path) -> None:
     pub = _load("wasmmod_publish")
     wasm = tmp_path / "demo.wasm"

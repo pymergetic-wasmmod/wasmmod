@@ -20,6 +20,14 @@ on:
         required: false
         type: boolean
         default: false
+      elf:
+        description: Extra .elf path to upload beside Wasm (relative to wasmmod root)
+        required: false
+        default: ""
+      arch:
+        description: Arch infix for AOT/ELF CDN names (e.g. x86_64)
+        required: false
+        default: ""
       cdn_url:
         description: metal-cdn base URL
         required: true
@@ -56,6 +64,8 @@ jobs:
             echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
             echo "package=${{ inputs.package }}" >> "$GITHUB_OUTPUT"
             echo "aot=${{ inputs.aot }}" >> "$GITHUB_OUTPUT"
+            echo "elf=${{ inputs.elf }}" >> "$GITHUB_OUTPUT"
+            echo "arch=${{ inputs.arch }}" >> "$GITHUB_OUTPUT"
             echo "cdn_url=${{ inputs.cdn_url }}" >> "$GITHUB_OUTPUT"
           else
             # tag pack-<name>-<version> e.g. pack-hello-0.1.0
@@ -66,6 +76,8 @@ jobs:
             echo "version=${ver}" >> "$GITHUB_OUTPUT"
             echo "package=${name}" >> "$GITHUB_OUTPUT"
             echo "aot=false" >> "$GITHUB_OUTPUT"
+            echo "elf=" >> "$GITHUB_OUTPUT"
+            echo "arch=" >> "$GITHUB_OUTPUT"
             echo "cdn_url=${{ vars.METAL_CDN_URL }}" >> "$GITHUB_OUTPUT"
           fi
 
@@ -100,5 +112,11 @@ jobs:
           fi
           if [ "${{ steps.meta.outputs.aot }}" = "true" ]; then
             args+=(--aot)
+          fi
+          if [ -n "${{ steps.meta.outputs.elf }}" ]; then
+            args+=(--elf "${{ steps.meta.outputs.elf }}")
+          fi
+          if [ -n "${{ steps.meta.outputs.arch }}" ]; then
+            args+=(--arch "${{ steps.meta.outputs.arch }}")
           fi
           python3 "${args[@]}"
