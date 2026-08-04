@@ -24,12 +24,15 @@ $(OUT) $(OUT_ARCH): src/hello.c pack.toml ../hello/src/__init__.py
 	$(CC) $(CFLAGS) -o /tmp/hello_elf.o src/hello.c
 	MPY_CROSS="$(MPY_CROSS)" python3 $(WASMMOD) pack-elf --obj /tmp/hello_elf.o --manifest pack.toml -o $(OUT)
 	cp -f $(OUT) $(OUT_ARCH)
+	rm -f $(OUT).zlib $(OUT_ARCH).zlib
 
 # Cross-built artifact for ARM hosts / CDN; not runnable on x86_64 loaders.
 aarch64: src/hello.c pack.toml ../hello/src/__init__.py
 	mkdir -p ../packs
 	$(CLANG) $(AARCH64_CFLAGS) -o /tmp/hello_elf_aarch64.o src/hello.c
 	MPY_CROSS="$(MPY_CROSS)" python3 $(WASMMOD) pack-elf --obj /tmp/hello_elf_aarch64.o --manifest pack.toml -o $(OUT_AARCH64)
+	rm -f $(OUT_AARCH64).zlib
 
 clean:
-	rm -f $(OUT) $(OUT_ARCH) $(OUT_AARCH64) /tmp/hello_elf.o /tmp/hello_elf_aarch64.o
+	rm -f $(OUT) $(OUT_ARCH) $(OUT_AARCH64) $(OUT).zlib $(OUT_ARCH).zlib $(OUT_AARCH64).zlib \
+		/tmp/hello_elf.o /tmp/hello_elf_aarch64.o

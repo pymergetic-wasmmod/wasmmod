@@ -24,7 +24,8 @@ print("install_hook", root)
 wasm.install_hook(root)
 print("wasm.path =", wasm.path)
 
-print("import hello  # finder → HTTP GET hello.wasm (+ .sig/.crt)")
+# With MICROPY_WASM_CONTAINERS=elf,aot,wasm the finder prefers hello.elf when present.
+print("import hello  # finder → HTTP GET hello.elf or hello.wasm (+ verify)")
 import hello
 
 print("  sys.modules['hello'] =", sys.modules.get("hello"))

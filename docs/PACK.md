@@ -942,6 +942,8 @@ zlib      …   RFC 1950 of the naked .wasm/.aot/.elf
 Tools: `tools/wasmmod.py zlib wrap|unwrap|info`. Sign the naked artifact first,
 then wrap. Finder prefers `path.wasm.zlib` / `path.aot{N}.zlib` /
 `path[.arch].elf.zlib` when present; loader unwraps **before** verify/load.
+`make -C examples sign-packs` re-wraps after each sign so twins cannot lag
+behind a freshly signed naked file (stale `.zlib` would fail VERIFY).
 
 CDN-oriented layout (channels + format-tagged AOT / ELF):
 

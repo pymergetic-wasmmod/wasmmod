@@ -12,6 +12,9 @@ make -C extmod/wasmmod/ports/micropython/webassembly -j$(nproc)
 # → ports/webassembly/build-wasmmod/micropython.mjs (+ .wasm)
 # Defaults: MICROPY_WASM_VERIFY=1 + trust CA from examples/.keys (sign-key).
 #   MICROPY_WASM_VERIFY=0 make -C …/webassembly   # unsigned smoke
+#
+# Browser builds force MICROPY_PY_WASM_ELF=0 and MICROPY_WASM_CONTAINERS=wasm
+# (no ET_REL execute under Emscripten). Ship/serve `.wasm` only for the REPL.
 ```
 
 Equivalent manual invoke:

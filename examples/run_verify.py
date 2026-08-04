@@ -29,6 +29,13 @@ assert h.hello() == 42
 assert h.add(2, 3) == 5
 assert h.greet() == "hello from pack py"
 
+print("load_pack('packs/hello.elf')  # signed ELF container")
+he = wasm.load_pack("packs/hello.elf")
+print("  hello.elf hello()  ->", he.hello())
+print("  hello.elf add(2,3) ->", he.add(2, 3))
+assert he.hello() == 42
+assert he.add(2, 3) == 5
+
 # Without trust, required verify must reject.
 print("trust_clear(); load_pack('packs/client.wasm')  # expect verify fail")
 wasm.trust_clear()
@@ -41,5 +48,15 @@ except Exception as e:
     # Must be signature/trust rejection — not a false green from missing deps.
     if "verify" not in msg and "signature" not in msg and "trust" not in msg:
         raise SystemExit("FAIL: expected verify/signature error, got: %r" % (e,))
+
+print("load_pack('packs/hello.elf') without trust  # expect verify fail")
+try:
+    wasm.load_pack("packs/hello.elf")
+    raise SystemExit("FAIL: ELF load succeeded without trust")
+except Exception as e:
+    print("  rejected:", type(e).__name__, e)
+    msg = str(e).lower()
+    if "verify" not in msg and "signature" not in msg and "trust" not in msg:
+        raise SystemExit("FAIL: expected ELF verify/signature error, got: %r" % (e,))
 
 print("test-verify OK")

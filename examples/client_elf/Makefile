@@ -20,6 +20,7 @@ $(OUT) $(OUT_ARCH): src/client.c pack.toml
 	$(CC) $(CFLAGS) -o /tmp/client_elf.o src/client.c
 	python3 $(WASMMOD) pack-elf --obj /tmp/client_elf.o --manifest pack.toml -o $(OUT)
 	cp -f $(OUT) $(OUT_ARCH)
+	rm -f $(OUT).zlib $(OUT_ARCH).zlib
 
 clean:
-	rm -f $(OUT) $(OUT_ARCH) /tmp/client_elf.o
+	rm -f $(OUT) $(OUT_ARCH) $(OUT).zlib $(OUT_ARCH).zlib /tmp/client_elf.o

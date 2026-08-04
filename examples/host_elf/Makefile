@@ -19,6 +19,7 @@ $(OUT) $(OUT_ARCH): src/hostcall.c pack.toml
 	$(CC) $(CFLAGS) -o /tmp/hostcall_elf.o src/hostcall.c
 	python3 $(WASMMOD) pack-elf --obj /tmp/hostcall_elf.o --manifest pack.toml -o $(OUT)
 	cp -f $(OUT) $(OUT_ARCH)
+	rm -f $(OUT).zlib $(OUT_ARCH).zlib
 
 clean:
-	rm -f $(OUT) $(OUT_ARCH) /tmp/hostcall_elf.o
+	rm -f $(OUT) $(OUT_ARCH) $(OUT).zlib $(OUT_ARCH).zlib /tmp/hostcall_elf.o
