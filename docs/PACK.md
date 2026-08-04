@@ -1083,6 +1083,7 @@ Keep optional and boring for upstream. Full contract: [ports/PORT.md](../ports/P
 | **G** | HTTP fetch hook + optional mbedtls signature verify |
 | **H** | `wasm.install_hook()` (+ optional `builtinimport` path-walk) so `import` auto-loads packs |
 | **I** | AOT: `MICROPY_PY_WASM_AOT`, finder prefers `.aot`, `wamrc` in pack tool docs |
+| **J** | ELF: `.elf` / `.<arch>.elf` in-tree ET_REL loader, `MICROPY_WASM_CONTAINERS`, publish `--elf` |
 
 ## Compatibility
 
