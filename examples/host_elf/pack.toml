@@ -1,0 +1,31 @@
+# Pack: ELF guest → wasmmod.host.call0_i32 / call_i32.
+
+type = "package"
+name = "hostcall"
+version = "0.1.0"
+impl = ["c"]
+comment = "ELF pack that calls Python via wasmmod.host slots."
+
+[[exports]]
+func = "via_host0"
+sig = "i32"
+
+[[exports]]
+func = "via_host"
+sig = "i32_i32"
+
+[[exports]]
+func = "host_mode"
+sig = "i32"
+
+[[imports]]
+module = "wasmmod.host"
+func = "call0_i32"
+
+[[imports]]
+module = "wasmmod.host"
+func = "call_i32"
+
+[[imports]]
+module = "wasmmod"
+func = "mode"

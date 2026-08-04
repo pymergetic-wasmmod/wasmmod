@@ -28,6 +28,10 @@
 #define MICROPY_PY_WASM (0)
 #endif
 
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
 #if MICROPY_PY_WASM
 
 #include <limits.h>
@@ -159,5 +163,42 @@ bool mp_wasm_loader_register(void) {
     loader_registered = 1;
     return true;
 }
+
+#if MICROPY_PY_WASM_ELF
+// ELF guests have no Wasm linear memory — only parameterless loader queries.
+
+static int32_t elf_loader_mode(void) {
+    return loader_mode(NULL);
+}
+static int32_t elf_loader_verify(void) {
+    return loader_verify(NULL);
+}
+static int32_t elf_loader_trust_count(void) {
+    return loader_trust_count(NULL);
+}
+
+typedef struct {
+    const char *name;
+    void *addr;
+} mp_wasm_elf_loader_native_t;
+
+static const mp_wasm_elf_loader_native_t elf_loader_natives[] = {
+    { "mode", (void *)elf_loader_mode },
+    { "verify", (void *)elf_loader_verify },
+    { "trust_count", (void *)elf_loader_trust_count },
+};
+
+void *mp_wasm_loader_elf_lookup(const char *func) {
+    if (func == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < sizeof(elf_loader_natives) / sizeof(elf_loader_natives[0]); ++i) {
+        if (strcmp(elf_loader_natives[i].name, func) == 0) {
+            return elf_loader_natives[i].addr;
+        }
+    }
+    return NULL;
+}
+#endif // MICROPY_PY_WASM_ELF
 
 #endif // MICROPY_PY_WASM

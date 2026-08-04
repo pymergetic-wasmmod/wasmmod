@@ -28,6 +28,10 @@
 #define MICROPY_PY_WASM (0)
 #endif
 
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
 #if MICROPY_PY_WASM
 
 #include <string.h>
@@ -789,5 +793,71 @@ bool mp_wasm_host_register(void) {
     host_registered = 1;
     return true;
 }
+
+#if MICROPY_PY_WASM_ELF
+// System V entrypoints for in-tree ELF guests (no wasm_exec_env_t).
+// Linear-memory APIs (call_buf, call_py, mem_copy_*) stay Wasm-only.
+
+static int32_t elf_host_call_i32(int32_t slot, int32_t arg) {
+    return host_call_i32(NULL, slot, arg);
+}
+static int32_t elf_host_call0_i32(int32_t slot) {
+    return host_call0_i32(NULL, slot);
+}
+static int64_t elf_host_call_i64(int32_t slot, int64_t arg) {
+    return host_call_i64(NULL, slot, arg);
+}
+static float elf_host_call_f32(int32_t slot, float arg) {
+    return host_call_f32(NULL, slot, arg);
+}
+static double elf_host_call_f64(int32_t slot, double arg) {
+    return host_call_f64(NULL, slot, arg);
+}
+static int32_t elf_host_call_mem(int32_t slot, int32_t cookie) {
+    return host_call_mem(NULL, slot, cookie);
+}
+static int32_t elf_host_call_obj(int32_t slot, int32_t handle) {
+    return host_call_obj(NULL, slot, handle);
+}
+static int32_t elf_host_mem_alloc(int32_t size) {
+    return host_mem_alloc(NULL, size);
+}
+static void elf_host_mem_free(int32_t cookie) {
+    host_mem_free(NULL, cookie);
+}
+static int32_t elf_host_mem_len(int32_t cookie) {
+    return host_mem_len(NULL, cookie);
+}
+
+typedef struct {
+    const char *name;
+    void *addr;
+} mp_wasm_elf_native_t;
+
+static const mp_wasm_elf_native_t elf_host_natives[] = {
+    { "call_i32", (void *)elf_host_call_i32 },
+    { "call0_i32", (void *)elf_host_call0_i32 },
+    { "call_i64", (void *)elf_host_call_i64 },
+    { "call_f32", (void *)elf_host_call_f32 },
+    { "call_f64", (void *)elf_host_call_f64 },
+    { "call_mem", (void *)elf_host_call_mem },
+    { "call_obj", (void *)elf_host_call_obj },
+    { "mem_alloc", (void *)elf_host_mem_alloc },
+    { "mem_free", (void *)elf_host_mem_free },
+    { "mem_len", (void *)elf_host_mem_len },
+};
+
+void *mp_wasm_host_elf_lookup(const char *func) {
+    if (func == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < sizeof(elf_host_natives) / sizeof(elf_host_natives[0]); ++i) {
+        if (strcmp(elf_host_natives[i].name, func) == 0) {
+            return elf_host_natives[i].addr;
+        }
+    }
+    return NULL;
+}
+#endif // MICROPY_PY_WASM_ELF
 
 #endif // MICROPY_PY_WASM

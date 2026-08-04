@@ -64,6 +64,7 @@ packs:
 	$(MAKE) -C hello_elf
 	$(MAKE) -C client
 	$(MAKE) -C client_elf
+	$(MAKE) -C host_elf
 	$(MAKE) -C mixed
 	$(MAKE) -C bridge
 	$(MAKE) -C tree

@@ -61,6 +61,8 @@ bool mp_wasm_loader_register(void);
 #include "extmod/wasmmod/format/common/format.h"
 #if MICROPY_PY_WASM_ELF
 #include "extmod/wasmmod/format/elf/load.h"
+#include "extmod/wasmmod/host.h"
+#include "extmod/wasmmod/loader.h"
 #include "extmod/wasmmod/pack.h"
 #endif
 
@@ -520,6 +522,16 @@ static bool elf_is_host_module(const char *module) {
         || strcmp(module, MP_WASM_MODULE) == 0;
 }
 
+static void *elf_resolve_native(const char *module, const char *func) {
+    if (strcmp(module, MP_WASM_HOST_MODULE) == 0) {
+        return mp_wasm_host_elf_lookup(func);
+    }
+    if (strcmp(module, MP_WASM_MODULE) == 0) {
+        return mp_wasm_loader_elf_lookup(func);
+    }
+    return NULL; // micropython.* not wired for ELF
+}
+
 static void *elf_resolve_import(const char *name, void *ctx) {
     mp_wasm_module_t *importer = (mp_wasm_module_t *)ctx;
     if (importer == NULL || name == NULL || name[0] == '\0') {
@@ -547,7 +559,8 @@ static void *elf_resolve_import(const char *name, void *ctx) {
         memcpy(module, im->module, ml);
         module[ml] = '\0';
         if (elf_is_host_module(module)) {
-            break; // host natives not wired for ELF yet
+            addr = elf_resolve_native(module, name);
+            break;
         }
         mp_wasm_module_t *peer = mp_wasm_registry_find(module);
         if (peer == NULL) {

@@ -36,8 +36,17 @@
 #define MICROPY_PY_WASM_MATRIX (0)
 #endif
 
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
 // Register WAMR natives for module "wasmmod.host".
 bool mp_wasm_host_register(void);
+
+#if MICROPY_PY_WASM_ELF
+// System V address for ELF undef resolve (NULL if Wasm-only / unknown).
+void *mp_wasm_host_elf_lookup(const char *func);
+#endif
 
 // ---- Callable slots (guest → Python) ----
 

@@ -29,7 +29,15 @@
 
 #include <stdbool.h>
 
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
 // Register WAMR natives for module "wasmmod" (guest mirror of host wasm.*).
 bool mp_wasm_loader_register(void);
+
+#if MICROPY_PY_WASM_ELF
+void *mp_wasm_loader_elf_lookup(const char *func);
+#endif
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_LOADER_H
