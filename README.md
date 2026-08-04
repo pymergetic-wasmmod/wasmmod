@@ -1,6 +1,6 @@
 # wasmmod
 
-**v0.1.2-alpha** — signed WASM packs for Python.
+**v0.1.3-alpha** — signed WASM packs for Python.
 
 > **Experimental.** This is a pre-release (`-alpha`). APIs, pack layout, verify/HTTP
 > surfaces, and build flags may change without a stable compatibility promise.
@@ -221,7 +221,7 @@ endif()
 
 Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).  
 Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`.  
-`wasm.version` is always the package release string from [`VERSION`](VERSION) (e.g. `'0.1.2-alpha'`).  
+`wasm.version` is always the package release string from [`VERSION`](VERSION) (e.g. `'0.1.3-alpha'`).  
 `wasm.wamr_version()` returns the linked WAMR `major.minor.patch` string.  
 `wasm.AOT_VERSION` is the AOT file-format N used in CDN artifact names.  
 Guests see the same loader surface as WAMR imports on module **`wasmmod`**: `version`, `mode`, `verify`, `trust_count`, `call_i32` (dynamic pack export; peer of host `wasm.c_call` / `rs_call`). Callbacks/slots stay on **`wasmmod.host`**.

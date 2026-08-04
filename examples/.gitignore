@@ -5,6 +5,7 @@
 *.sig
 *.crt
 *.wat
+!hello/docs/sample.wat
 .*.o
 .engine-summary
 .keys/
