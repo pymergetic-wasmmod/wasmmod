@@ -1,6 +1,6 @@
 # wasmmod
 
-**v0.1.3-alpha** — signed WASM packs for Python.
+**v0.1.3-alpha** — signed packs for Python (`.wasm` / `.aot` / `.elf`).
 
 > **Experimental.** This is a pre-release (`-alpha`). APIs, pack layout, verify/HTTP
 > surfaces, and build flags may change without a stable compatibility promise.
@@ -8,7 +8,7 @@
 > until a non-alpha release. Engine matrix and demos are exercised often, but the
 > surface is still moving fast.
 
-One `.wasm` file can ship **C + Rust + embedded Python**, talk to peer packs, and call back into the host — loaded by [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) through a small MicroPython `wasm` module (CPython path planned). Opt-in only (`MICROPY_PY_WASM=0` by default); host trees stay unchanged unless they include the submodule and turn the flag on.
+One pack file can ship **C + Rust + embedded Python**, talk to peer packs, and call back into the host. **Wasm/AOT** run on [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime); **ELF** (`.elf` / `.<arch>.elf`, ET_REL) uses an in-tree reloc loader (no `dlopen`). Same MicroPython `wasm` module either way (CPython path planned). Opt-in only (`MICROPY_PY_WASM=0` by default); host trees stay unchanged unless they include the submodule and turn the flag on.
 
 Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
 
@@ -23,9 +23,10 @@ Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
 | Superpower | What you get |
 |------------|----------------|
 | **Multi-impl packs** | C, Rust, and pack-local Python in one artifact |
-| **Guest → guest** | `bridge` imports `hello` / `mixed` without host glue per call |
+| **Containers** | `.wasm` · `.aotN` · `.elf` / `.<arch>.elf` (same MPWI/sign/finder) |
+| **Guest → guest** | `bridge` / ELF `client` import peers without host glue per call |
 | **Guest → host → Py** | `wasmmod.host` slots, buffers, mem cookies, object handles |
-| **Engine matrix** | Interp · AOT · Fast JIT · LLVM JIT — same packs |
+| **Engine matrix** | Interp · AOT · Fast JIT · LLVM JIT — same Wasm packs; ELF skips WAMR |
 
 ```
 caller\callee | Py  | C   | RS
@@ -120,7 +121,11 @@ See also `make -C examples test-http`.
 Path form (dots → `/`): `a/b/c/__init__.wasm` · `a/b/c.wasm`  
 Flat form (e.g. under `packs/`): `a.b.c.wasm`
 
-**AOT only:** `wasm.arch` tags select `*.<arch>.aot` (then plain `.aot`), then portable `.wasm`. Nested names *inside* one pack (`hello.util`) still come from embedded pack-Python when no leaf file exists. Explicit: `wasm.load_pack("packs/foo.wasm", "foo")`.
+**Containers / preference:** `MICROPY_WASM_CONTAINERS` (unix default `elf,aot,wasm`) picks
+`*.elf` / `*.<arch>.elf` / AOT / Wasm (+ `.zlib`). Nested names *inside* one pack
+(`hello.util`) still come from embedded pack-Python when no leaf file exists.
+Explicit: `wasm.load_pack("packs/foo.wasm", "foo")` or `…/foo.elf`.
+Browser builds stay wasm-only (`MICROPY_PY_WASM_ELF=0`).
 
 ```bash
 make -C examples demo    # real REPL: micropython -i < demo_readme.py
@@ -139,7 +144,7 @@ wasmmod/
 │   └── micropython/webassembly/             browser: js.fetch I/O + Emscripten WAMR
 ├── tools/wasm_{pack,sign}.py                host-agnostic CLIs
 ├── examples/                                sources + packs/ + call matrix
-│   └── packs/                               built <name>.wasm artifacts
+│   └── packs/                               built <name>.{wasm,elf,aotN} artifacts
 ├── screenshots/                             README eye-catchers
 ├── docs/PACK.md                             section format
 ├── BRANCHES.md                              MetalPython host branch layout
@@ -219,7 +224,8 @@ if(MICROPY_PY_WASM)
 endif()
 ```
 
-Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,JIT,FAST_JIT,MATRIX}`).  
+Enable with `make MICROPY_PY_WASM=1` (optional `MICROPY_PY_WASM_{AOT,ELF,JIT,FAST_JIT,MATRIX}`,
+`MICROPY_WASM_CONTAINERS=elf,aot,wasm`). Unix defaults ELF on when Wasm is on; browser forces wasm-only.
 Optional C defaults: `#include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"`.  
 `wasm.version` is always the package release string from [`VERSION`](VERSION) (e.g. `'0.1.3-alpha'`).  
 `wasm.wamr_version()` returns the linked WAMR `major.minor.patch` string.  

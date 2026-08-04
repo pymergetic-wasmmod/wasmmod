@@ -5,7 +5,8 @@
 > See the [package README](../README.md) status note.
 
 Build freestanding guests and load them with MicroPython's optional `wasm`
-module (WAMR-backed, `MICROPY_PY_WASM=1`).
+module (`MICROPY_PY_WASM=1`). Wasm/AOT use WAMR; **ELF** packs (`.elf`) use the
+in-tree ET_REL loader (`MICROPY_PY_WASM_ELF=1`, unix default).
 
 **Pack format / design:** [docs/PACK.md](../docs/PACK.md) (`examples/PACK.md` is a
 symlink) — mixed C/C++/Rust + Python tree, `sys.modules` registration,
@@ -35,6 +36,9 @@ not leak into the mpy-cross output path.
 make -C extmod/wasmmod/examples test
 # equivalent if symlink exists:
 # make -C examples/wasmmod test
+
+# ELF container smoke (hello / client peer / hostcall → Python slots)
+make -C extmod/wasmmod/examples test-elf
 
 # Interp + AOT + Fast JIT (+ LLVM JIT if a complete LLVM is available)
 make -C extmod/wasmmod/examples test-engines
@@ -89,6 +93,7 @@ assert test_c2.c2_answer() == 42
 | Target | Host `BUILD=` | Needs |
 |--------|---------------|--------|
 | `test` | `build-wasm` | — |
+| `test-elf` | `build-wasm` | `hello.elf` / `client.elf` / `hostcall.elf` (from `packs`) |
 | `test-tree` | `build-wasm` | tree packs (offline path) |
 | `test-tree-cdn` | `build-wasm` | running metal-cdn (dotted names) |
 | `test-aot` | `build-wasm-aot` | matching `wamrc` from nested `third_party/wamr` |
@@ -139,12 +144,32 @@ loader picks the best compatible `.mpy` (else `.py`) and ignores `.pyc`.
 A future CPython port would do the inverse. CLI:
 `--freeze` / `--no-freeze`, `--python-target …`, `--keep-source`.
 
+## ELF packs (no WAMR)
+
+Same register/connect/sign path as Wasm; execute is in-tree ET_REL:
+
+| Example | Artifact | Notes |
+|---------|----------|--------|
+| `hello_elf/` | `packs/hello.elf` | freestanding exports |
+| `client_elf/` | `packs/client.elf` | peer `hello` via MPWI + GOT |
+| `host_elf/` | `packs/hostcall.elf` | `wasmmod.host` slots → Python |
+
+```sh
+make -C extmod/wasmmod/examples/hello_elf
+make -C extmod/wasmmod/examples/hello_elf aarch64   # CDN twin (not runnable on x86)
+make -C extmod/wasmmod/examples test-elf
+# pack-elf CLI: python3 tools/wasmmod.py pack-elf --obj foo.o --manifest pack.toml -o foo.elf
+```
+
 ## Manual pieces
 
 ```sh
 # 1) Build guest packs
 make -C extmod/wasmmod/examples/hello
+make -C extmod/wasmmod/examples/hello_elf
 make -C extmod/wasmmod/examples/client   # guest→guest → hello
+make -C extmod/wasmmod/examples/client_elf
+make -C extmod/wasmmod/examples/host_elf
 make -C extmod/wasmmod/examples/mixed    # C + Rust in one pack
 make -C extmod/wasmmod/examples/bridge   # full matrix bridge
 
