@@ -10,10 +10,13 @@ TOOLS = Path(__file__).resolve().parent
 
 
 def _load(stem: str):
+    import sys
+
     path = TOOLS / f"{stem}.py"
     spec = importlib.util.spec_from_file_location(stem, path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[stem] = mod
     spec.loader.exec_module(mod)
     return mod
 

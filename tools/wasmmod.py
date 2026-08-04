@@ -82,6 +82,8 @@ def _load(stem: str):
     if spec is None or spec.loader is None:
         raise SystemExit(f"wasmmod: cannot load {path}")
     mod = importlib.util.module_from_spec(spec)
+    # dataclasses need the module in sys.modules during class body exec.
+    sys.modules[stem] = mod
     spec.loader.exec_module(mod)
     return mod
 

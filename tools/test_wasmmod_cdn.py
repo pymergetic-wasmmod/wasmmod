@@ -10,10 +10,13 @@ TOOLS = Path(__file__).resolve().parent
 
 
 def _load():
+    import sys
+
     path = TOOLS / "wasmmod_cdn.py"
     spec = importlib.util.spec_from_file_location("wasmmod_cdn", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["wasmmod_cdn"] = mod
     spec.loader.exec_module(mod)
     return mod
 
