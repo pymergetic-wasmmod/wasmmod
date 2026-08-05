@@ -1086,6 +1086,12 @@ not a compacted 0…n−1 sequence — so hex / disasm / symbols agree. Host too
 optional Capstone (`pip install capstone`) for `.text`; otherwise hex `db` / `op_*` lines.
 C `mp_wasm_inspect_disasm` stays Capstone-free.
 
+Host **addr2line** (Python tools / `wasmmod-read` / CDN): optional `pyelftools`, else
+system `addr2line` (binutils) on `-g` ELF → `role=dwarf` file:line; else enclosing
+FUNC as `role=sym`. In-tree MicroPython `wasm.addr2line` stays the lightweight
+sym/dwarf-stub path (no process spawn). `locations` also scans embedded
+`wasmmod.source` / pack text for `def`/`decl`/`twin` (ELF packs use `[source] embed`).
+
 ```sh
 # Pack/source/sig summary (CDN client when installed; else offline MPZL-aware dump):
 tools/wasmmod.py inspect hello.elf
@@ -1093,7 +1099,9 @@ tools/wasmmod.py inspect hello.elf
 tools/wasmmod.py inspect symbols hello.elf
 tools/wasmmod.py inspect addr2line hello.elf 0x10
 wasmmod-read symbols hello.elf
+wasmmod-read addr2line hello.elf 0
 wasmmod-read has-dwarf hello.elf
+wasmmod-read locations hello.elf hello
 wasmmod-read disasm hello.elf INDEX [OFFSET [LIMIT]]
 wasmmod-read disasm hello.wasm 0 [OFFSET [LIMIT]]   # Wasm: index ignored; code section
 # Func exports carry code-payload offset/size so Inspect hex/asm differ per export.
