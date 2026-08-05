@@ -1026,7 +1026,7 @@ fn after_name_paren<'a>(line: &'a str, name: &str) -> Option<&'a str> {
                     return Some(skip_ws(&rest[i + 1..]));
                 }
             }
-            b';' | b'}' => return None,
+            b';' | b'{' | b'}' => return None,
             _ => {}
         }
         i += 1;
