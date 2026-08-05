@@ -946,7 +946,224 @@ pub fn disasm(
     Ok(Vec::new())
 }
 
-/// Locations for a symbol name (addr2line at func start + `role=sym`).
+/// Paths worth scanning for symbol defs (matches CDN `_is_code_source_path`).
+fn is_code_source_path(path: &str) -> bool {
+    if path.is_empty() || path.ends_with(".mpy") {
+        return false;
+    }
+    let norm = path.replace('\\', "/").trim_start_matches("./").to_ascii_lowercase();
+    if norm.starts_with("docs/") || format!("/{norm}").contains("/docs/") {
+        return false;
+    }
+    [
+        ".py", ".pyi", ".c", ".h", ".cc", ".cpp", ".hpp", ".hh", ".rs",
+    ]
+    .iter()
+    .any(|sfx| norm.ends_with(sfx))
+}
+
+fn line_is_commentish(line: &str) -> bool {
+    let s = line.trim();
+    if s.is_empty() {
+        return false;
+    }
+    if s.starts_with("//") || s.starts_with("/*") {
+        return true;
+    }
+    if let Some(rest) = s.strip_prefix('*') {
+        return rest.is_empty() || rest.starts_with([' ', '\t', '/']);
+    }
+    false
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Next `\bname\b` start index in `hay`, or None.
+fn find_word(hay: &str, name: &str) -> Option<usize> {
+    if name.is_empty() {
+        return None;
+    }
+    let hb = hay.as_bytes();
+    let nb = name.as_bytes();
+    let mut i = 0usize;
+    while i + nb.len() <= hb.len() {
+        if &hb[i..i + nb.len()] == nb {
+            let before_ok = i == 0 || !is_ident_byte(hb[i - 1]);
+            let after = i + nb.len();
+            let after_ok = after >= hb.len() || !is_ident_byte(hb[after]);
+            if before_ok && after_ok {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn skip_ws(s: &str) -> &str {
+    s.trim_start_matches([' ', '\t'])
+}
+
+/// After `name`, match `(…)` with no `;`/`{`/`}` inside the args, return rest after `)`.
+fn after_name_paren<'a>(line: &'a str, name: &str) -> Option<&'a str> {
+    let start = find_word(line, name)?;
+    let mut rest = skip_ws(&line[start + name.len()..]);
+    if !rest.starts_with('(') {
+        return None;
+    }
+    rest = &rest[1..];
+    let mut depth = 1i32;
+    let bytes = rest.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b';' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(skip_ws(&rest[i + 1..]));
+                }
+            }
+            b';' | b'}' => return None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Definition-like hits — mirrors `tools/wasmmod_inspect._source_def_hits`.
+fn source_def_hits(path: &str, text: &str, name: &str) -> Vec<(i32, &'static str)> {
+    let mut hits = Vec::new();
+    let lines: Vec<&str> = text.lines().collect();
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".py") || lower.ends_with(".pyi") {
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
+            let mut s = line.trim_start();
+            if let Some(rest) = s.strip_prefix("async") {
+                if rest.starts_with([' ', '\t']) {
+                    s = skip_ws(rest);
+                }
+            }
+            if let Some(rest) = s.strip_prefix("def") {
+                if !rest.starts_with([' ', '\t']) {
+                    continue;
+                }
+                let rest = skip_ws(rest);
+                if !rest.starts_with(name) {
+                    continue;
+                }
+                let after = &rest[name.len()..];
+                if !after.is_empty() && is_ident_byte(after.as_bytes()[0]) {
+                    continue;
+                }
+                if skip_ws(after).starts_with('(') {
+                    hits.push(((i + 1) as i32, "twin"));
+                }
+            }
+        }
+        return hits;
+    }
+    if lower.ends_with(".rs") {
+        for (i, line) in lines.iter().enumerate() {
+            if line_is_commentish(line) {
+                continue;
+            }
+            let mut s = line.trim_start();
+            if let Some(rest) = s.strip_prefix("pub") {
+                if rest.starts_with([' ', '\t']) {
+                    s = skip_ws(rest);
+                }
+            }
+            if let Some(rest) = s.strip_prefix("async") {
+                if rest.starts_with([' ', '\t']) {
+                    s = skip_ws(rest);
+                }
+            }
+            if let Some(rest) = s.strip_prefix("fn") {
+                if !rest.starts_with([' ', '\t']) {
+                    continue;
+                }
+                let rest = skip_ws(rest);
+                if !rest.starts_with(name) {
+                    continue;
+                }
+                let after = &rest[name.len()..];
+                if !after.is_empty() && is_ident_byte(after.as_bytes()[0]) {
+                    continue;
+                }
+                let after = skip_ws(after);
+                if after.starts_with('(') || after.starts_with('<') {
+                    hits.push(((i + 1) as i32, "def"));
+                }
+            }
+        }
+        return hits;
+    }
+    let is_header = lower.ends_with(".h")
+        || lower.ends_with(".hpp")
+        || lower.ends_with(".hh");
+    for (i, line) in lines.iter().enumerate() {
+        let lineno = (i + 1) as i32;
+        if line_is_commentish(line) {
+            continue;
+        }
+        if let Some(after) = after_name_paren(line, name) {
+            if after.starts_with('{') {
+                hits.push((lineno, if is_header { "decl" } else { "def" }));
+                continue;
+            }
+            if is_header && after.starts_with(';') {
+                hits.push((lineno, "decl"));
+                continue;
+            }
+            if after.is_empty() && !is_header {
+                for j in (i + 1)..lines.len().min(i + 4) {
+                    let nxt = lines[j].trim();
+                    if nxt.is_empty() || line_is_commentish(lines[j]) {
+                        continue;
+                    }
+                    if nxt.starts_with('{') {
+                        hits.push((lineno, "def"));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    hits
+}
+
+fn append_embedded_source_locations(buf: &[u8], name: &str, out: &mut Vec<Location>) {
+    let Ok(view) = SourceView::open_bytes(buf) else {
+        return;
+    };
+    for f in &view.files {
+        if !is_code_source_path(&f.path) {
+            continue;
+        }
+        let Ok(bytes) = f.bytes() else {
+            continue;
+        };
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+        for (line, role) in source_def_hits(&f.path, text, name) {
+            out.push(Location {
+                path: f.path.clone(),
+                line: Some(line),
+                role: role.into(),
+            });
+        }
+    }
+}
+
+/// Locations for a symbol name (addr2line at func start + `role=sym` + source defs).
 pub fn locations_for_symbol(buf: &[u8], name: &str) -> Result<Vec<Location>> {
     let mut out = Vec::new();
     for s in list_symbols(buf)? {
@@ -968,6 +1185,7 @@ pub fn locations_for_symbol(buf: &[u8], name: &str) -> Result<Vec<Location>> {
         }
         break;
     }
+    append_embedded_source_locations(buf, name, &mut out);
     // Dedupe (path, line, role) — matches Python tools/wasmmod_inspect.py.
     let mut seen = std::collections::HashSet::new();
     out.retain(|l| seen.insert((l.path.clone(), l.line, l.role.clone())));
@@ -1607,5 +1825,71 @@ open(r'{signed}', 'wb').write(out)\n",
     fn locations_dedupe_sym_role() {
         // Minimal ET_REL-ish ELF not required: empty locations for missing name.
         assert!(locations_for_symbol(b"nope", "x").unwrap().is_empty());
+    }
+
+    #[test]
+    fn source_def_hits_skips_comments_and_calls() {
+        let text = "\
+int hello(void);\n\
+int helper(void) { return hello(); }\n\
+/* int hello(void) { */\n\
+// int hello(void) {\n\
+/*\n\
+ * int hello(void) { return 0; }\n\
+ */\n\
+int hello(void)\n\
+{\n\
+    return 42;\n\
+}\n";
+        let hits = source_def_hits("src/hello.c", text, "hello");
+        assert!(hits.iter().any(|(l, r)| *l == 8 && *r == "def"));
+        assert!(!hits.iter().any(|(l, _)| matches!(l, 1 | 2 | 3 | 4 | 6)));
+
+        let hdr = "int hello(void);\n/* Call hello(x). */\n";
+        let decls = source_def_hits("src/hello.h", hdr, "hello");
+        assert_eq!(decls, vec![(1, "decl")]);
+
+        let py = "def hello():\n    return 42\n\ndef other():\n    return hello()\n";
+        let twins = source_def_hits("__init__.py", py, "hello");
+        assert_eq!(twins, vec![(1, "twin")]);
+    }
+
+    #[test]
+    fn locations_scan_embedded_source() {
+        // Minimal Wasm + MPSR with one C file defining hello.
+        let mut mpsr = Vec::new();
+        mpsr.extend_from_slice(b"MPSR");
+        mpsr.extend_from_slice(&1u16.to_le_bytes()); // version
+        mpsr.extend_from_slice(&0u16.to_le_bytes()); // flags
+        let name = b"hello";
+        mpsr.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        mpsr.extend_from_slice(name);
+        mpsr.extend_from_slice(&0u16.to_le_bytes()); // pkg_version len
+        mpsr.extend_from_slice(&0u16.to_le_bytes()); // n_tags
+        mpsr.extend_from_slice(&1u32.to_le_bytes()); // n_files
+        let path = b"src/hello.c";
+        mpsr.extend_from_slice(&(path.len() as u16).to_le_bytes());
+        mpsr.extend_from_slice(path);
+        mpsr.push(0); // flags
+        let body = b"/* int hello(void) { */\nint hello(void) { return 1; }\n";
+        mpsr.extend_from_slice(&(body.len() as u32).to_le_bytes()); // raw_len
+        mpsr.extend_from_slice(&(body.len() as u32).to_le_bytes()); // data_len
+        mpsr.extend_from_slice(body);
+
+        let mut wasm = b"\0asm\x01\x00\x00\x00".to_vec();
+        let mut custom = Vec::new();
+        let sec_name = b"wasmmod.source";
+        custom.extend(uleb(sec_name.len() as u32));
+        custom.extend_from_slice(sec_name);
+        custom.extend_from_slice(&mpsr);
+        wasm.push(0);
+        wasm.extend(uleb(custom.len() as u32));
+        wasm.extend(custom);
+
+        let locs = locations_for_symbol(&wasm, "hello").unwrap();
+        assert!(locs.iter().any(|l| {
+            l.path == "src/hello.c" && l.line == Some(2) && l.role == "def"
+        }));
+        assert!(!locs.iter().any(|l| l.path == "src/hello.c" && l.line == Some(1)));
     }
 }
