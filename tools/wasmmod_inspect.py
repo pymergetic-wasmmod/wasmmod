@@ -610,6 +610,43 @@ def _embedded_code_sources(buf: bytes) -> dict[str, str]:
     return out
 
 
+_ROLE_RANK = {
+    "dwarf": 0,
+    "def": 1,
+    "decl": 2,
+    "twin": 3,
+    "sym": 9,
+}
+
+
+def _collapse_locations(locs: list[Location]) -> list[Location]:
+    """One chip per source line: merge dwarf+def on the same file:line.
+
+    Basename keys so ``hello.c:4`` and ``src/hello.c:4`` collapse; keep the
+    best role and the longest path.
+    """
+    best: dict[tuple[object, ...], Location] = {}
+    order: list[tuple[object, ...]] = []
+    for loc in locs:
+        if loc.line is not None:
+            key: tuple[object, ...] = ("L", loc.path.rsplit("/", 1)[-1], loc.line)
+        else:
+            key = ("N", loc.path, loc.role)
+        cur = best.get(key)
+        if cur is None:
+            order.append(key)
+            best[key] = loc
+            continue
+        rank_new = _ROLE_RANK.get(loc.role, 5)
+        rank_old = _ROLE_RANK.get(cur.role, 5)
+        path = loc.path if len(loc.path) >= len(cur.path) else cur.path
+        role = loc.role if rank_new < rank_old else cur.role
+        if rank_new == rank_old and len(loc.path) > len(cur.path):
+            role = loc.role
+        best[key] = Location(path=path, line=loc.line, role=role)
+    return [best[k] for k in order]
+
+
 def locations_for_symbol(
     buf: bytes,
     name: str,
@@ -629,16 +666,7 @@ def locations_for_symbol(
         for path, text in sources.items():
             for line_no, role in _source_def_hits(path, text, name):
                 locs.append(Location(path=path, line=line_no, role=role))
-    # dedupe (path, line, role)
-    seen: set[tuple[str, int | None, str]] = set()
-    uniq: list[Location] = []
-    for loc in locs:
-        key = (loc.path, loc.line, loc.role)
-        if key in seen:
-            continue
-        seen.add(key)
-        uniq.append(loc)
-    return uniq
+    return _collapse_locations(locs)
 
 
 def _section_by_index(buf: bytes, index: int) -> tuple[str | None, bytes]:

@@ -1381,10 +1381,73 @@ pub fn locations_for_symbol(buf: &[u8], name: &str) -> Result<Vec<Location>> {
         break;
     }
     append_embedded_source_locations(buf, name, &mut out);
-    // Dedupe (path, line, role) — matches Python tools/wasmmod_inspect.py.
-    let mut seen = std::collections::HashSet::new();
-    out.retain(|l| seen.insert((l.path.clone(), l.line, l.role.clone())));
-    Ok(out)
+    Ok(collapse_locations(out))
+}
+
+fn role_rank(role: &str) -> u8 {
+    match role {
+        "dwarf" => 0,
+        "def" => 1,
+        "decl" => 2,
+        "twin" => 3,
+        "sym" => 9,
+        _ => 5,
+    }
+}
+
+/// One chip per source line: merge dwarf+def on the same basename:line.
+fn collapse_locations(locs: Vec<Location>) -> Vec<Location> {
+    use std::collections::HashMap;
+
+    // ("L", basename, line) or ("N", path, role)
+    type K = (u8, String, u64);
+    let mut best: HashMap<K, Location> = HashMap::new();
+    let mut order: Vec<K> = Vec::new();
+    for loc in locs {
+        let key = match loc.line {
+            Some(n) => {
+                let base = loc
+                    .path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&loc.path)
+                    .to_string();
+                (0u8, base, n as u64)
+            }
+            None => (1u8, format!("{}\0{}", loc.path, loc.role), 0),
+        };
+        match best.get_mut(&key) {
+            None => {
+                order.push(key.clone());
+                best.insert(key, loc);
+            }
+            Some(cur) => {
+                let rank_new = role_rank(&loc.role);
+                let rank_old = role_rank(&cur.role);
+                let path = if loc.path.len() >= cur.path.len() {
+                    loc.path.clone()
+                } else {
+                    cur.path.clone()
+                };
+                let role = if rank_new < rank_old
+                    || (rank_new == rank_old && loc.path.len() > cur.path.len())
+                {
+                    loc.role.clone()
+                } else {
+                    cur.role.clone()
+                };
+                *cur = Location {
+                    path,
+                    line: loc.line,
+                    role,
+                };
+            }
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|k| best.remove(&k))
+        .collect()
 }
 
 /// Basic `.mpy` dump: header + bytecode bytes.
@@ -2020,6 +2083,38 @@ open(r'{signed}', 'wb').write(out)\n",
     fn locations_dedupe_sym_role() {
         // Minimal ET_REL-ish ELF not required: empty locations for missing name.
         assert!(locations_for_symbol(b"nope", "x").unwrap().is_empty());
+    }
+
+    #[test]
+    fn collapse_locations_prefers_dwarf_and_longer_path() {
+        let out = collapse_locations(vec![
+            Location {
+                path: "hello.c".into(),
+                line: Some(4),
+                role: "dwarf".into(),
+            },
+            Location {
+                path: "hello".into(),
+                line: None,
+                role: "sym".into(),
+            },
+            Location {
+                path: "src/hello.c".into(),
+                line: Some(4),
+                role: "def".into(),
+            },
+            Location {
+                path: "src/hello.h".into(),
+                line: Some(1),
+                role: "decl".into(),
+            },
+        ]);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].path, "src/hello.c");
+        assert_eq!(out[0].line, Some(4));
+        assert_eq!(out[0].role, "dwarf");
+        assert_eq!(out[1].role, "sym");
+        assert_eq!(out[2].path, "src/hello.h");
     }
 
     #[test]

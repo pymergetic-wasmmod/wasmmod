@@ -102,7 +102,28 @@ def test_locations_auto_load_elf_source() -> None:
     assert ELF.is_file(), f"missing {ELF}"
     data = ELF.read_bytes()
     locs = insp.locations_for_symbol(data, "hello")
-    assert any(l.role == "def" and l.path.endswith("hello.c") for l in locs)
+    # dwarf+def on the same line collapse; prefer dwarf with the longer path.
+    lined = [l for l in locs if l.line is not None and l.path.endswith("hello.c")]
+    assert lined
+    keys = [(l.path.rsplit("/", 1)[-1], l.line) for l in lined]
+    assert len(keys) == len(set(keys))
+    assert any(l.role in ("dwarf", "def") for l in lined)
+
+
+def test_locations_collapse_dwarf_and_def() -> None:
+    locs = insp._collapse_locations(
+        [
+            insp.Location(path="hello.c", line=4, role="dwarf"),
+            insp.Location(path="hello", line=None, role="sym"),
+            insp.Location(path="src/hello.c", line=4, role="def"),
+            insp.Location(path="src/hello.h", line=1, role="decl"),
+        ]
+    )
+    assert [(l.path, l.line, l.role) for l in locs] == [
+        ("src/hello.c", 4, "dwarf"),
+        ("hello", None, "sym"),
+        ("src/hello.h", 1, "decl"),
+    ]
 
 
 def test_locations_skips_block_comment_star_lines() -> None:
