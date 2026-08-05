@@ -1018,16 +1018,16 @@ fn after_name_paren<'a>(line: &'a str, name: &str) -> Option<&'a str> {
     let bytes = rest.as_bytes();
     let mut i = 0usize;
     while i < bytes.len() {
-        match bytes[i] {
-            b';' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(skip_ws(&rest[i + 1..]));
-                }
+        let c = bytes[i];
+        if c == b'(' {
+            depth += 1;
+        } else if c == b')' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(skip_ws(&rest[i + 1..]));
             }
-            b';' | b'{' | b'}' => return None,
-            _ => {}
+        } else if c == b';' || c == b'{' || c == b'}' {
+            return None;
         }
         i += 1;
     }
