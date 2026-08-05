@@ -644,7 +644,9 @@ def _collapse_locations(locs: list[Location]) -> list[Location]:
         if rank_new == rank_old and len(loc.path) > len(cur.path):
             role = loc.role
         best[key] = Location(path=path, line=loc.line, role=role)
-    return [best[k] for k in order]
+    out = [best[k] for k in order]
+    out.sort(key=lambda l: (_ROLE_RANK.get(l.role, 5), l.path))
+    return out
 
 
 def locations_for_symbol(

@@ -121,8 +121,8 @@ def test_locations_collapse_dwarf_and_def() -> None:
     )
     assert [(l.path, l.line, l.role) for l in locs] == [
         ("src/hello.c", 4, "dwarf"),
-        ("hello", None, "sym"),
         ("src/hello.h", 1, "decl"),
+        ("hello", None, "sym"),
     ]
 
 

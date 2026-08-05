@@ -1444,10 +1444,16 @@ fn collapse_locations(locs: Vec<Location>) -> Vec<Location> {
             }
         }
     }
-    order
+    let mut out: Vec<Location> = order
         .into_iter()
         .filter_map(|k| best.remove(&k))
-        .collect()
+        .collect();
+    out.sort_by(|a, b| {
+        role_rank(&a.role)
+            .cmp(&role_rank(&b.role))
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    out
 }
 
 /// Basic `.mpy` dump: header + bytecode bytes.
@@ -2113,8 +2119,9 @@ open(r'{signed}', 'wb').write(out)\n",
         assert_eq!(out[0].path, "src/hello.c");
         assert_eq!(out[0].line, Some(4));
         assert_eq!(out[0].role, "dwarf");
-        assert_eq!(out[1].role, "sym");
-        assert_eq!(out[2].path, "src/hello.h");
+        assert_eq!(out[1].path, "src/hello.h");
+        assert_eq!(out[1].role, "decl");
+        assert_eq!(out[2].role, "sym");
     }
 
     #[test]
