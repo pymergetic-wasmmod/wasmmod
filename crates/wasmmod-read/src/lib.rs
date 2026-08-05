@@ -834,10 +834,11 @@ pub fn addr2line(buf: &[u8], addr: u64) -> Result<Vec<Location>> {
         if s.kind != "func" || s.size == 0 {
             continue;
         }
-        if s.offset <= addr && addr < s.offset + s.size {
-            if best.map(|b| s.offset >= b.offset).unwrap_or(true) {
-                best = Some(s);
-            }
+        if s.offset <= addr
+            && addr < s.offset + s.size
+            && best.map(|b| s.offset >= b.offset).unwrap_or(true)
+        {
+            best = Some(s);
         }
     }
     Ok(match best {
@@ -1125,9 +1126,9 @@ fn source_def_hits(path: &str, text: &str, name: &str) -> Vec<(i32, &'static str
                 continue;
             }
             if after.is_empty() && !is_header {
-                for j in (i + 1)..lines.len().min(i + 4) {
-                    let nxt = lines[j].trim();
-                    if nxt.is_empty() || line_is_commentish(lines[j]) {
+                for nxt_line in lines.iter().take(lines.len().min(i + 4)).skip(i + 1) {
+                    let nxt = nxt_line.trim();
+                    if nxt.is_empty() || line_is_commentish(nxt_line) {
                         continue;
                     }
                     if nxt.starts_with('{') {

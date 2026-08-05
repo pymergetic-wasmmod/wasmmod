@@ -17,14 +17,14 @@ import zlib
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 TOOLS = Path(__file__).resolve().parent
 TOOLS_DIR = TOOLS
 PROG = "wasmmod inspect"
 sys.path.insert(0, str(TOOLS))
 
-import wasmmod_elf as elf  # noqa: E402
+import wasmmod_elf as elf
 
 SHT_SYMTAB = 2
 SHT_STRTAB = 3
@@ -68,7 +68,7 @@ class DisasmLine:
     text: str
 
 
-def _iter_shdrs(buf: bytes) -> Iterable[tuple[int, dict, Optional[str]]]:
+def _iter_shdrs(buf: bytes) -> Iterable[tuple[int, dict, str | None]]:
     if not elf.is_elf64_le(buf):
         return
         yield  # pragma: no cover — make this a generator
@@ -341,9 +341,10 @@ def addr2line(buf: bytes, addr: int) -> list[Location]:
     for s in _list_symbols_elf(buf):
         if s.kind != "func" or s.size <= 0:
             continue
-        if s.offset <= addr < s.offset + s.size:
-            if best is None or s.offset >= best.offset:
-                best = s
+        if s.offset <= addr < s.offset + s.size and (
+            best is None or s.offset >= best.offset
+        ):
+            best = s
     if best is None:
         return []
     return [Location(path=best.name, line=None, role="sym")]
@@ -378,7 +379,7 @@ def _addr2line_dwarf(buf: bytes, addr: int) -> list[Location]:
                     return out
                 if not state.end_sequence:
                     prev = state
-    except Exception:
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError):
         return []
     return []
 
@@ -392,7 +393,7 @@ def _line_is_commentish(line: str) -> bool:
     s = line.strip()
     if not s:
         return False
-    if s.startswith("//") or s.startswith("/*"):
+    if s.startswith(("//", "/*")):
         return True
     if s.startswith("*"):
         return len(s) == 1 or s[1] in " \t/"
@@ -477,7 +478,7 @@ def _embedded_code_sources(buf: bytes) -> dict[str, str]:
     source = _load("wasmmod_source")
     try:
         payload = source.extract_custom_section(buf, "wasmmod.source")
-    except Exception:
+    except (OSError, ValueError, TypeError, AttributeError):
         payload = None
     if payload:
         try:
@@ -489,16 +490,16 @@ def _embedded_code_sources(buf: bytes) -> dict[str, str]:
                 try:
                     raw = source.read_file_entry(entry)
                     text = raw.decode("utf-8")
-                except Exception:
+                except (OSError, ValueError, TypeError, UnicodeDecodeError, KeyError):
                     continue
                 if "\x00" in text:
                     continue
                 out[path] = text
-        except Exception:
+        except (OSError, ValueError, TypeError, KeyError, struct.error):
             pass
     try:
         pack_payload = source.extract_custom_section(buf, "wasmmod.pack")
-    except Exception:
+    except (OSError, ValueError, TypeError, AttributeError):
         pack_payload = None
     if not pack_payload or len(pack_payload) < 12 or pack_payload[:4] != b"MPWP":
         return out
@@ -578,7 +579,7 @@ def locations_for_symbol(
     return uniq
 
 
-def _section_by_index(buf: bytes, index: int) -> tuple[Optional[str], bytes]:
+def _section_by_index(buf: bytes, index: int) -> tuple[str | None, bytes]:
     for i, sh, name in _iter_shdrs(buf):
         if i == index:
             data = buf[sh["sh_offset"] : sh["sh_offset"] + sh["sh_size"]]
@@ -862,7 +863,7 @@ def _main_ops(argv: list[str]) -> int:
     if data[:4] == b"MPZL":
         try:
             data = _load("wasmmod_zlib").unwrap_bytes(data)
-        except Exception:
+        except (OSError, ValueError, TypeError, AttributeError):
             pass
 
     if args.cmd == "symbols":
