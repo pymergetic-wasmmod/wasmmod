@@ -560,6 +560,26 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
                 set_err(errbuf, errbuf_len, msg);
                 return false;
             }
+            // Reject writes past the target section (8-byte vs 4-byte by type).
+            {
+                size_t need = 4;
+                if (typ == R_X86_64_NONE) {
+                    need = 0;
+                } else if (typ == R_X86_64_64 || typ == R_AARCH64_ABS64
+                    || typ == R_X86_64_PC64 || typ == R_AARCH64_PREL64) {
+                    need = 8;
+                }
+                if (need != 0
+                    && (rela->r_offset > tgt.sh_size
+                        || tgt.sh_size - rela->r_offset < need)) {
+                    munmap(map, map_size);
+                    MICROPY_WASM_FREE(sec_addr);
+                    MICROPY_WASM_FREE(got_off);
+                    MICROPY_WASM_FREE(sym_addr);
+                    set_err(errbuf, errbuf_len, "rela offset OOB");
+                    return false;
+                }
+            }
             uint8_t *P = target_base + rela->r_offset;
             int64_t A = rela->r_addend;
             switch (typ) {

@@ -77,13 +77,6 @@ EM_ASYNC_JS(int, mp_wasm_js_http_get, (const char *uri, const char *auth, const 
         const ab = await resp.arrayBuffer();
         const u8 = new Uint8Array(ab);
         const n = u8.length;
-        const mag = n >= 4
-            ? (("00" + u8[0].toString(16)).slice(-2) +
-               ("00" + u8[1].toString(16)).slice(-2) +
-               ("00" + u8[2].toString(16)).slice(-2) +
-               ("00" + u8[3].toString(16)).slice(-2))
-            : "";
-        console.log("[wasmmod fetch]", resp.status, "len=" + n, "magic=" + mag, url);
         const ptr = _malloc(n > 0 ? n : 1);
         if (!ptr) {
             return -1;
