@@ -23,6 +23,21 @@ One pack file can ship **C + Rust + embedded Python**, talk to peer packs, and c
 
 Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
 
+### Public C API (`include/`)
+
+Hosts and guests compile against **`include/` only** (`pm_wasmmod.h`, `pm_upy.h`, `pm_guest.h`).
+Implementations live in mirrored **`glue/`**. See [include/README.md](include/README.md).
+Rust bindgen: [`crates/pm`](crates/pm) (`cargo check -p pm`) — not headers under `include/`.
+
+```c
+#include <pm_wasmmod.h>
+#include <pm_upy.h>
+
+pm_wasmmod_runtime_init();
+if (!pm_upy_has(PM_UPY_FEAT_GC)) { /* skip or handle */ }
+/* wasmmod registers as module face "wasm" at runtime init */
+```
+
 ## Install (two ways)
 
 | Role | How |
@@ -84,7 +99,7 @@ def answer():
 **C guest** imports peers + host with one macro:
 
 ```c
-#include "../../guest.h"
+#include "pm_guest.h"
 
 MP_WASM_IMPORT("hello", int, hello, void);
 MP_WASM_IMPORT("mixed", int, mixed_answer, void);

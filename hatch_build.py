@@ -48,8 +48,10 @@ class CustomBuildHook(BuildHookInterface):
 
         for name in ("loader.c", "wasmmod.c"):
             shutil.copy2(root / name, share / name)
-        for name in ("crates", "format", "ports", "examples"):
-            _copy_filtered(root / name, share / name)
+        for name in ("crates", "format", "ports", "examples", "include", "glue"):
+            src = root / name
+            if src.is_dir():
+                _copy_filtered(src, share / name)
         (share / "tools").mkdir(parents=True, exist_ok=True)
         shutil.copy2(root / "tools" / "wasmmod.py", share / "tools" / "wasmmod.py")
 

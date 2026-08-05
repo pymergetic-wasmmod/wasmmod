@@ -12,6 +12,7 @@
 
 #include <string.h>
 
+#include "pm_upy/features.h"
 #include "py/mphal.h"
 #include "wasm_export.h"
 
@@ -23,8 +24,20 @@ static int32_t upy_ticks_ms_wasm(wasm_exec_env_t exec_env) {
     return (int32_t)mp_hal_ticks_ms();
 }
 
+static int32_t upy_features_wasm(wasm_exec_env_t exec_env) {
+    (void)exec_env;
+    return (int32_t)pm_upy_features();
+}
+
+static int32_t upy_has_wasm(wasm_exec_env_t exec_env, int32_t feat) {
+    (void)exec_env;
+    return pm_upy_has((pm_upy_feat_t)feat) ? 1 : 0;
+}
+
 static NativeSymbol upy_runtime_symbols[] = {
     { "ticks_ms", (void *)upy_ticks_ms_wasm, "()i", NULL },
+    { "features", (void *)upy_features_wasm, "()i", NULL },
+    { "has", (void *)upy_has_wasm, "(i)i", NULL },
 };
 
 bool mp_wasm_upy_catalog_register(void) {
@@ -45,6 +58,14 @@ static uint32_t upy_ticks_ms_elf(void) {
     return (uint32_t)mp_hal_ticks_ms();
 }
 
+static uint32_t upy_features_elf(void) {
+    return pm_upy_features();
+}
+
+static int32_t upy_has_elf(int32_t feat) {
+    return pm_upy_has((pm_upy_feat_t)feat) ? 1 : 0;
+}
+
 typedef struct {
     const char *module;
     const char *func;
@@ -53,6 +74,8 @@ typedef struct {
 
 static const upy_elf_slot_t upy_elf_slots[] = {
     { "micropython.runtime", "ticks_ms", (void *)upy_ticks_ms_elf },
+    { "micropython.runtime", "features", (void *)upy_features_elf },
+    { "micropython.runtime", "has", (void *)upy_has_elf },
 };
 
 void *mp_wasm_upy_catalog_elf_lookup(const char *module, const char *func) {

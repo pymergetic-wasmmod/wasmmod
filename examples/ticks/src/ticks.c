@@ -1,7 +1,5 @@
 /* Wasm guest: micropython.runtime.ticks_ms (host catalog). */
-#include "../../guest.h"
-
-MP_WASM_IMPORT("micropython.runtime", unsigned int, ticks_ms, void);
+#include "pm_upy/hal/time.h"
 
 unsigned int elapsed(void) {
     return ticks_ms();

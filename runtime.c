@@ -40,6 +40,7 @@
 #include "extmod/wasmmod/forward.h"
 #include "extmod/wasmmod/runtime.h"
 #include "extmod/wasmmod/verify.h"
+#include "pm_wasmmod/module.h"
 #include "wasm_export.h"
 
 // Defined in host.c / upy_catalog.c (need the full MicroPython include path).
@@ -183,6 +184,8 @@ bool mp_wasm_runtime_init(void) {
         wasm_runtime_destroy();
         return false;
     }
+    /* Gut-exposure module face: same name as Python `import wasm`. */
+    (void)pm_wasmmod_module_install("wasm");
     runtime_ready = 1;
     return true;
 }

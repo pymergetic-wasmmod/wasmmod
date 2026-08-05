@@ -36,6 +36,11 @@ MICROPY_PY_WASM_ELF ?= 1
 MICROPY_WASM_CONTAINERS ?= elf,aot,wasm
 endif
 
+INC += -I$(TOP)/$(WASMMOD_DIR)/include
+# Private impl headers (runtime.h, zlibutil.h, …). Keep genhdr/ out of this
+# tree (gitignored) so it cannot shadow $(BUILD)/genhdr.
+INC += -I$(TOP)/$(WASMMOD_DIR)
+
 SRC_WASMMOD = \
 	$(WASMMOD_DIR)/wasmmod.c \
 	$(WASMMOD_DIR)/modobj.c \
@@ -60,13 +65,18 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/format/aot/section.c \
 	$(WASMMOD_DIR)/format/elf/section.c
 
+# Public API glue (mirrors include/). Wildcard keeps mk in sync with tree.
+SRC_WASMMOD_GLUE := $(shell find $(TOP)/$(WASMMOD_DIR)/glue -name '*.c' 2>/dev/null | sed 's|^$(TOP)/||')
+SRC_WASMMOD += $(SRC_WASMMOD_GLUE)
+
 ifeq ($(MICROPY_PY_WASM_ELF),1)
 SRC_WASMMOD += $(WASMMOD_DIR)/format/elf/load.c
 endif
 
 # Included after extmod.mk's PY_O += SRC_EXTMOD_C, so append objects here.
 PY_O += $(addprefix $(BUILD)/, $(SRC_WASMMOD:.c=.o))
-SRC_QSTR += $(SRC_WASMMOD)
+# Glue has no MP_QSTR_* tables — keep qstr scan on core wasmmod sources only.
+SRC_QSTR += $(filter-out $(WASMMOD_DIR)/glue/%,$(SRC_WASMMOD))
 QSTR_DEFS += $(TOP)/$(WASMMOD_DIR)/qstrdefs.wasmmod
 
 # Nested WAMR: top-level `make submodules` is not recursive by default.

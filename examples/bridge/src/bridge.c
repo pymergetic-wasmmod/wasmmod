@@ -35,7 +35,7 @@
  */
 
 
-#include "../../guest.h"
+#include "pm_guest.h"
 
 /* Guest→guest (loader forwarders; peers must already be loaded). */
 MP_WASM_IMPORT("hello", int, hello, void);

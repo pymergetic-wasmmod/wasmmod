@@ -9,7 +9,7 @@ OUT = ../packs/bridge.wasm
 
 all: $(OUT)
 
-$(OUT): src/bridge.c src/lib.rs src/__init__.py pack.toml ../guest.h $(WASM_PACK)
+$(OUT): src/bridge.c src/lib.rs src/__init__.py pack.toml $(WASMMOD_INCLUDE)/pm_guest.h $(WASM_PACK)
 	mkdir -p ../packs
 	python3 $(WASM_PACK) pack . -o $(OUT)
 	rm -f $(OUT).zlib

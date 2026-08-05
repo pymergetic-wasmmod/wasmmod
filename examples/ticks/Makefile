@@ -6,7 +6,7 @@ OUT = ../packs/ticks.wasm
 
 all: $(OUT)
 
-$(OUT): src/ticks.c pack.toml ../guest.h $(WASM_PACK)
+$(OUT): src/ticks.c pack.toml $(WASMMOD_INCLUDE)/pm_guest.h $(WASM_PACK)
 	mkdir -p ../packs
 	python3 $(WASM_PACK) pack . -o $(OUT)
 	rm -f $(OUT).zlib

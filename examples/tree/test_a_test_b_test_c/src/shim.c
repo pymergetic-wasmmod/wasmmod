@@ -1,6 +1,6 @@
 /* test_a.test_b.test_c: imports d_value from sibling test_a.test_d. */
 
-#include "../../../guest.h"
+#include "pm_guest.h"
 
 MP_WASM_IMPORT("test_a.test_d", int, d_value, void);
 

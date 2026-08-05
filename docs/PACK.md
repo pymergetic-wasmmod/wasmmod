@@ -731,7 +731,7 @@ linear offsets: `call_buf(slot, ptr, len)`, `call_py(mod,mod_len,attr,attr_len[,
 `mem_copy_*(cookie, ptr, n)`, loader `version(buf, maxlen)` / `call_i32(…, args*)`.
 
 **Pointers:** never pass raw host pointers. Guest `char*` is an `i32` linear
-offset (`MP_WASM_PTR(p)` in `guest.h`). Durable buffers → **cookies**
+offset (`MP_WASM_PTR(p)` in `pm_guest.h`). Durable buffers → **cookies**
 (`mem_alloc` + `mem_copy_*`); opaque Python values → **handles**
 (`wasm.handle_register` / `resolve` / `free`). From Python,
 `PackModule.memory_read/write/alloc/free` touch linear memory directly;

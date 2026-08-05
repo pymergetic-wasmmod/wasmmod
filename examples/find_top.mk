@@ -30,3 +30,7 @@ TOP ?= $(METALPYTHON_TOP)
 WASMMOD ?= $(WASMMOD_ROOT)/tools/wasmmod.py
 WASM_PACK ?= $(WASMMOD)
 WASM_SIGN ?= $(WASMMOD)
+# Public compile surface (pm_guest.h, pm_upy/*, pm_wasmmod/*).
+WASMMOD_INCLUDE ?= $(WASMMOD_ROOT)/include
+# ELF guests: no __wasm__ — force guest import prototypes.
+GUEST_CFLAGS ?= -I$(WASMMOD_INCLUDE) -DPM_WASMMOD_GUEST=1
