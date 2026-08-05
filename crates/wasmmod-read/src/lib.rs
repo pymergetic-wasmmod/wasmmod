@@ -11,6 +11,8 @@ use thiserror::Error;
 pub const SOURCE_SECTION: &str = "wasmmod.source";
 pub const SOURCE_MAGIC: &[u8; 4] = b"MPSR";
 pub const SOURCE_VERSION: u16 = 1;
+pub const PACK_SECTION: &str = "wasmmod.pack";
+pub const PACK_MAGIC: &[u8; 4] = b"MPWP";
 pub const FILE_FLAG_ZLIB: u8 = 1 << 0;
 
 pub const SIG_SECTION: &str = "wasmmod.sig";
@@ -1139,28 +1141,137 @@ fn source_def_hits(path: &str, text: &str, name: &str) -> Vec<(i32, &'static str
     hits
 }
 
-fn append_embedded_source_locations(buf: &[u8], name: &str, out: &mut Vec<Location>) {
-    let Ok(view) = SourceView::open_bytes(buf) else {
+fn inflate_pack_blob(data: &[u8], zlib: bool, raw_len: u32) -> Result<Vec<u8>> {
+    if !zlib {
+        return Ok(data.to_vec());
+    }
+    let mut dec = ZlibDecoder::new(data);
+    let mut out = Vec::with_capacity(raw_len as usize);
+    dec.read_to_end(&mut out).map_err(|_| Error::Inflate("pack".into()))?;
+    if out.len() != raw_len as usize {
+        return Err(Error::Inflate("pack".into()));
+    }
+    Ok(out)
+}
+
+/// Yield (path, utf-8 text) for code-like pack files (v1–v3 MPWP).
+fn for_each_pack_code_text(buf: &[u8], mut visit: impl FnMut(&str, &str)) {
+    let Ok(Some(payload)) = extract_custom_section(buf, PACK_SECTION) else {
         return;
     };
-    for f in &view.files {
-        if !is_code_source_path(&f.path) {
+    if payload.len() < 12 || &payload[0..4] != PACK_MAGIC {
+        return;
+    }
+    let mut i = 4usize;
+    let Ok(version) = read_u16(payload, &mut i) else {
+        return;
+    };
+    let _flags = match read_u16(payload, &mut i) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let Ok(name_len) = read_u16(payload, &mut i) else {
+        return;
+    };
+    if read_bytes(payload, &mut i, name_len as usize).is_err() {
+        return;
+    }
+    let Ok(n_files) = read_u32(payload, &mut i) else {
+        return;
+    };
+    for _ in 0..n_files {
+        let Ok(pl) = read_u16(payload, &mut i) else {
+            return;
+        };
+        let Ok(path_b) = read_bytes(payload, &mut i, pl as usize) else {
+            return;
+        };
+        let path = String::from_utf8_lossy(path_b).into_owned();
+        if i >= payload.len() {
+            return;
+        }
+        let kind = payload[i];
+        i += 1;
+        let (zlib, raw_len, blob) = if version >= 3 {
+            if i >= payload.len() {
+                return;
+            }
+            let fflags = payload[i];
+            i += 1;
+            let Ok(raw_len) = read_u32(payload, &mut i) else {
+                return;
+            };
+            let Ok(data_len) = read_u32(payload, &mut i) else {
+                return;
+            };
+            let Ok(data) = read_bytes(payload, &mut i, data_len as usize) else {
+                return;
+            };
+            (fflags & FILE_FLAG_ZLIB != 0, raw_len, data)
+        } else {
+            let Ok(data_len) = read_u32(payload, &mut i) else {
+                return;
+            };
+            let Ok(data) = read_bytes(payload, &mut i, data_len as usize) else {
+                return;
+            };
+            (false, data_len, data)
+        };
+        // kind 1=.py, 3=raw (may be .c/.h/.rs text); skip mpy/pyc.
+        if kind != 1 && kind != 3 {
             continue;
         }
-        let Ok(bytes) = f.bytes() else {
+        if !is_code_source_path(&path) {
+            continue;
+        }
+        let Ok(bytes) = inflate_pack_blob(blob, zlib, raw_len) else {
             continue;
         };
         let Ok(text) = std::str::from_utf8(&bytes) else {
             continue;
         };
-        for (line, role) in source_def_hits(&f.path, text, name) {
+        if text.contains('\0') {
+            continue;
+        }
+        visit(&path, text);
+    }
+}
+
+fn append_embedded_source_locations(buf: &[u8], name: &str, out: &mut Vec<Location>) {
+    let mut seen_paths = std::collections::HashSet::new();
+    if let Ok(view) = SourceView::open_bytes(buf) {
+        for f in &view.files {
+            if !is_code_source_path(&f.path) {
+                continue;
+            }
+            let Ok(bytes) = f.bytes() else {
+                continue;
+            };
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                continue;
+            };
+            seen_paths.insert(f.path.clone());
+            for (line, role) in source_def_hits(&f.path, text, name) {
+                out.push(Location {
+                    path: f.path.clone(),
+                    line: Some(line),
+                    role: role.into(),
+                });
+            }
+        }
+    }
+    for_each_pack_code_text(buf, |path, text| {
+        if seen_paths.contains(path) {
+            return;
+        }
+        for (line, role) in source_def_hits(path, text, name) {
             out.push(Location {
-                path: f.path.clone(),
+                path: path.into(),
                 line: Some(line),
                 role: role.into(),
             });
         }
-    }
+    });
 }
 
 /// Locations for a symbol name (addr2line at func start + `role=sym` + source defs).
@@ -1891,5 +2002,41 @@ int hello(void)\n\
             l.path == "src/hello.c" && l.line == Some(2) && l.role == "def"
         }));
         assert!(!locs.iter().any(|l| l.path == "src/hello.c" && l.line == Some(1)));
+    }
+
+    #[test]
+    fn locations_scan_pack_py_twin() {
+        let body = b"def hello():\n    return 1\n";
+        let mut mpwp = Vec::new();
+        mpwp.extend_from_slice(b"MPWP");
+        mpwp.extend_from_slice(&3u16.to_le_bytes());
+        mpwp.extend_from_slice(&0u16.to_le_bytes());
+        let name = b"hello";
+        mpwp.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        mpwp.extend_from_slice(name);
+        mpwp.extend_from_slice(&1u32.to_le_bytes());
+        let path = b"__init__.py";
+        mpwp.extend_from_slice(&(path.len() as u16).to_le_bytes());
+        mpwp.extend_from_slice(path);
+        mpwp.push(1);
+        mpwp.push(0);
+        mpwp.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        mpwp.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        mpwp.extend_from_slice(body);
+
+        let mut wasm = b"\0asm\x01\x00\x00\x00".to_vec();
+        let mut custom = Vec::new();
+        let sec_name = b"wasmmod.pack";
+        custom.extend(uleb(sec_name.len() as u32));
+        custom.extend_from_slice(sec_name);
+        custom.extend_from_slice(&mpwp);
+        wasm.push(0);
+        wasm.extend(uleb(custom.len() as u32));
+        wasm.extend(custom);
+
+        let locs = locations_for_symbol(&wasm, "hello").unwrap();
+        assert!(locs.iter().any(|l| {
+            l.path == "__init__.py" && l.line == Some(1) && l.role == "twin"
+        }));
     }
 }
