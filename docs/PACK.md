@@ -1091,6 +1091,7 @@ system `addr2line` (binutils) on `-g` ELF → `role=dwarf` file:line; else enclo
 FUNC as `role=sym`. In-tree MicroPython `wasm.addr2line` stays the lightweight
 sym/dwarf-stub path (no process spawn). `locations` also scans embedded
 `wasmmod.source` / pack text for `def`/`decl`/`twin` (ELF packs use `[source] embed`).
+Same basename:line chips collapse (`dwarf` > `def` > `decl` > …; longest path wins).
 
 ```sh
 # Pack/source/sig summary (CDN client when installed; else offline MPZL-aware dump):
