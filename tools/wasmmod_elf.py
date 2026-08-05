@@ -7,7 +7,6 @@ lets strip restore the exact pre-append bytes for stable sign digests.
 from __future__ import annotations
 
 import struct
-from typing import Optional
 
 EI_NIDENT = 16
 ELFCLASS64 = 2
@@ -38,17 +37,17 @@ def _parse_ehdr(buf: bytes) -> dict:
     if not is_elf64_le(buf):
         raise SystemExit("not ELF64 LE")
     (
-        e_ident,
-        e_type,
-        e_machine,
-        e_version,
-        e_entry,
-        e_phoff,
+        _e_ident,
+        _e_type,
+        _e_machine,
+        _e_version,
+        _e_entry,
+        _e_phoff,
         e_shoff,
-        e_flags,
-        e_ehsize,
-        e_phentsize,
-        e_phnum,
+        _e_flags,
+        _e_ehsize,
+        _e_phentsize,
+        _e_phnum,
         e_shentsize,
         e_shnum,
         e_shstrndx,
@@ -94,7 +93,7 @@ def _shdr(buf: bytes, eh: dict, i: int) -> dict:
     }
 
 
-def _sh_name(buf: bytes, eh: dict, shstr: dict, name_off: int) -> Optional[str]:
+def _sh_name(buf: bytes, eh: dict, shstr: dict, name_off: int) -> str | None:
     if shstr["sh_type"] != SHT_STRTAB:
         return None
     base = shstr["sh_offset"] + name_off
@@ -106,19 +105,17 @@ def _sh_name(buf: bytes, eh: dict, shstr: dict, name_off: int) -> Optional[str]:
     return buf[base:end].decode("utf-8", errors="replace")
 
 
-def _name_matches(sec: Optional[str], want: str) -> bool:
+def _name_matches(sec: str | None, want: str) -> bool:
     if sec is None:
         return False
     if sec == want:
         return True
     if want[:1] != "." and sec[:1] == "." and sec[1:] == want:
         return True
-    if want[:1] == "." and sec[:1] != "." and sec == want[1:]:
-        return True
-    return False
+    return want[:1] == "." and sec[:1] != "." and sec == want[1:]
 
 
-def _read_cookie(buf: bytes) -> Optional[dict]:
+def _read_cookie(buf: bytes) -> dict | None:
     if len(buf) < WPSE.size:
         return None
     magic, old_len, old_shoff, old_shnum, old_shstrndx, _pad = WPSE.unpack_from(
@@ -136,7 +133,7 @@ def _read_cookie(buf: bytes) -> Optional[dict]:
     }
 
 
-def find_section(buf: bytes, name: str) -> Optional[bytes]:
+def find_section(buf: bytes, name: str) -> bytes | None:
     if not is_elf64_le(buf):
         return None
     # Ignore trailing cookie for shdr bounds

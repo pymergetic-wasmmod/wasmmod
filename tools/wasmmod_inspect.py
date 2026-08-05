@@ -14,10 +14,11 @@ import struct
 import subprocess
 import sys
 import zlib
-from dataclasses import dataclass, field
+from collections.abc import Iterable
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 TOOLS = Path(__file__).resolve().parent
 TOOLS_DIR = TOOLS
@@ -825,7 +826,7 @@ def _offline_inspect(path: Path) -> dict[str, Any]:
             ]
         else:
             out["source_files"] = []
-    except Exception as exc:  # noqa: BLE001 — offline best-effort
+    except Exception as exc:
         out["source_error"] = str(exc)
 
     try:
@@ -841,7 +842,7 @@ def _offline_inspect(path: Path) -> dict[str, Any]:
             ]
         else:
             out["deps"] = []
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         out["deps_error"] = str(exc)
 
     try:
@@ -850,7 +851,7 @@ def _offline_inspect(path: Path) -> dict[str, Any]:
             {"name": s.name, "kind": s.kind, "offset": s.offset, "size": s.size}
             for s in list_symbols(data)[:32]
         ]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         out["symbols_error"] = str(exc)
 
     sign_py = TOOLS_DIR / "wasmmod_sign.py"

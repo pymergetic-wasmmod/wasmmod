@@ -1,0 +1,36 @@
+[project]
+name = "pymergetic-wasmmod"
+dynamic = ["version"]
+description = "wasmmod — signed Wasm/AOT/ELF packs for MicroPython (host marker / future bindings)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Rouven Raudzus", email = "raudzus@pymergetic.com" }]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/pymergetic/wasmmod"
+Documentation = "https://github.com/pymergetic/wasmmod#readme"
+
+[project.optional-dependencies]
+tools = ["pymergetic-wasmmod-tools>=0.1.0a1"]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+raw-options = { search_parent_directories = false }
+fallback-version = "0.1.0a1"
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/pymergetic"]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+  "python",
+  "README.md",
+  "LICENSE",
+  "pyproject.toml",
+]

@@ -22,3 +22,9 @@ build/
 /target/
 crates/*/target/
 genhdr
+
+# PyPI / hatch
+dist/
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
