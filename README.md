@@ -8,6 +8,17 @@
 > until a non-alpha release. Engine matrix and demos are exercised often, but the
 > surface is still moving fast.
 
+| Component | Role | Repo |
+|-----------|------|------|
+| **wasmmod** | **This repo** — runtime + pack tree (`pymergetic-wasmmod`) | [pymergetic/wasmmod](https://github.com/pymergetic/wasmmod) · `main` |
+| wasmmod-tools | Host CLI (`pymergetic-wasmmod-tools`) | [pymergetic/wasmmod-tools](https://github.com/pymergetic/wasmmod-tools) · `main` |
+| wasmmod-test | External pack/CDN consumer sample | [pymergetic/wasmmod-test](https://github.com/pymergetic/wasmmod-test) · `main` |
+| metal-cdn | CDN server + client | [pymergetic/metal-cdn](https://github.com/pymergetic/metal-cdn) · `main` |
+| metalpython `wasmmod` | Clean upy host + submodule (upstream-shaped) | [metalpython/tree/wasmmod](https://github.com/pymergetic/metalpython/tree/wasmmod) |
+| metalpython `master` | Metal product µPy; **base = `wasmmod` tip** | [metalpython/tree/master](https://github.com/pymergetic/metalpython/tree/master) |
+
+Host branch layout: [BRANCHES.md](BRANCHES.md). (**Not** the same as this repo’s `main`.)
+
 One pack file can ship **C + Rust + embedded Python**, talk to peer packs, and call back into the host. **Wasm/AOT** run on [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime); **ELF** (`.elf` / `.<arch>.elf`, ET_REL) uses an in-tree reloc loader (no `dlopen`). Same MicroPython `wasm` module either way (CPython path planned). Opt-in only (`MICROPY_PY_WASM=0` by default); host trees stay unchanged unless they include the submodule and turn the flag on.
 
 Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
@@ -180,17 +191,20 @@ Pack sections are named `wasmmod.pack` / `wasmmod.imports` / `wasmmod.host` / `w
 CDN / channel publish (lead + `@version` pins, index schema, browser µPy shell): separate repo
 [metal-cdn](https://github.com/pymergetic/metal-cdn).
 
-One-shot release (pack → AOT → sign → zlib → upload):
+One-shot release (pack → AOT → sign → zlib → upload; AOT on by default,
+auto-attaches `packs/<pkg>.elf` when present):
 
 ```sh
 pip install --pre pymergetic-wasmmod
+# Build ELF twin first when you want it on the CDN:
+make -C examples/hello_elf
 wasmmod publish examples/hello --version 0.1.0 \
   --key .keys/sign/leaf.key.pem --chain .keys/sign/chain.der \
-  --cdn-url https://cdn.example/cdn --token "$METAL_CDN_TOKEN" --claim
+  --cdn-url https://cdn.example/cdn --token "$METAL_CDN_TOKEN" --claim \
+  --arch "$(uname -m)"
 
-# Also upload a prebuilt ELF twin (staged under -o; --arch inserts CDN infix):
-wasmmod publish examples/hello --version 0.1.0 \
-  --elf examples/packs/hello.elf --arch x86_64 \
+# Closer loop (skip AOT / ELF):
+wasmmod publish examples/hello --version 0.1.0 --no-aot --no-elf \
   --key .keys/sign/leaf.key.pem --chain .keys/sign/chain.der \
   --cdn-url https://cdn.example/cdn --token "$METAL_CDN_TOKEN"
 ```
@@ -205,7 +219,7 @@ python3 tools/wasmmod.py cdn get hello -o ./packs --unwrap
 ```
 
 CI: [`.github/workflows/publish-pack.yml`](.github/workflows/publish-pack.yml)
-(optional `elf` / `arch` inputs). Offline ELF section tests:
+(defaults AOT on; builds sibling `*_elf` when present). Offline ELF section tests:
 `pytest tools/test_wasmmod_elf.py`; device smoke: `make -C examples test-elf`.
 
 ```mermaid

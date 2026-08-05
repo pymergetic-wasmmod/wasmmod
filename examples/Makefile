@@ -57,10 +57,12 @@ AOT_EXT := .aot$(AOT_VER)
 LLVM_CMAKE_DIR ?= $(shell llvm-config-18 --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null)
 
 .PHONY: all clean test test-aot test-fast-jit test-jit test-engines test-http test-http-verify \
-	test-verify test-signed test-tree test-tree-cdn test-tree-cdn-versions test-elf packs tree-packs aot-packs sign-packs sign-key wamrc \
+	test-verify test-signed test-tree test-tree-cdn test-tree-cdn-versions test-elf \
+	packs packs-wasm aot-compile tree-packs aot-packs sign-packs sign-key wamrc \
 	host host-aot host-fast-jit host-jit host-verify demo repl
 
-packs:
+# Fast loop: wasm + elf only (no wamrc). Dev smoke targets use this.
+packs-wasm:
 	$(MAKE) -C hello
 	$(MAKE) -C hello_elf
 	$(MAKE) -C client
@@ -71,6 +73,9 @@ packs:
 	$(MAKE) -C mixed
 	$(MAKE) -C bridge
 	$(MAKE) -C tree
+
+# Default build: all container formats (wasm + elf + AOT). Prefer for upload/CI.
+packs: packs-wasm aot-compile
 
 tree-packs:
 	$(MAKE) -C tree
@@ -85,7 +90,7 @@ $(SIGN_ROOT) $(SIGN_LEAF_KEY) $(SIGN_CHAIN):
 
 # Detached .sig + .crt (leaf||sub) next to each pack. Device trusts SIGN_ROOT only.
 # After sign, refresh MPZL .zlib twins — fetch_artifact prefers path.zlib over naked.
-sign-packs: packs sign-key
+sign-packs: packs-wasm sign-key
 	@$(MAKE) -C hello_elf aarch64 || true
 	@wrap() { \
 		f="$$1"; \
@@ -149,12 +154,16 @@ wamrc:
 		-DLLVM_DIR=$(LLVM_CMAKE_DIR)
 	cmake --build $(WAMRC_BUILD) -j$$(nproc)
 
-aot-packs: packs wamrc
+# Compile .aotN beside each .wasm (requires matching wamrc).
+aot-compile: wamrc
 	@for w in $(PACK_WASMS); do \
 		aot=$${w%.wasm}$(AOT_EXT); \
 		echo "AOT $$w -> $$aot"; \
 		$(WAMRC) --emit-custom-sections=wasmmod.pack,wasmmod.imports,wasmmod.source -o $$aot $$w; \
 	done
+
+# Full packs + sign (CDN / verify / AOT smoke).
+aot-packs: packs
 	$(MAKE) sign-packs
 
 host:
@@ -186,22 +195,22 @@ host-jit:
 	$(MAKE) -C $(UNIX) $(HOST_COMMON) MICROPY_PY_WASM_JIT=1 BUILD=build-wasm-jit
 
 # Real unix MicroPython REPL, stdin = demo_readme.py (not a faked >>> printer).
-demo: packs host
+demo: packs-wasm host
 	@cd $(CURDIR) && $(MPY_INTERP) -i < $(CURDIR)/demo_readme.py
 
 # Interactive unix MicroPython in this directory (type it yourself).
 # Hint: help('modules')  →  import wasm  →  wasm.load_pack(...)
-repl: packs host
+repl: packs-wasm host
 	@echo "MicroPython REPL — cwd=$(CURDIR)"
 	@echo "Try:  help('modules')   import wasm   wasm.install_hook()"
 	@cd $(CURDIR) && $(MPY_INTERP) -i
 
-# Default smoke: interpreter (no AOT/JIT).
-test: packs host
+# Default smoke: interpreter (no AOT/JIT). Fast packs-wasm loop.
+test: packs-wasm host
 	$(MPY_INTERP) $(CURDIR)/run_matrix.py
 
 # ELF container smoke (preference elf,aot,wasm — default when MICROPY_PY_WASM_ELF=1).
-test-elf: packs host
+test-elf: packs-wasm host
 	@$(MAKE) -C hello_elf aarch64
 	@$(MAKE) -C bad_upy_elf
 	@cd $(CURDIR)/packs && $(MPY_INTERP) $(CURDIR)/run_elf.py
@@ -310,7 +319,7 @@ test-verify: sign-packs host-verify
 	$(MPY_VERIFY) $(CURDIR)/run_verify.py
 
 # Static HTTP pack root (native C fetch). Serves packs/ as document root.
-test-http: packs host
+test-http: packs-wasm host
 	@set -e; \
 	portfile=$$(mktemp); \
 	python3 -u $(WASMMOD_ROOT)/tools/wasmmod.py httpd --dir $(CURDIR)/packs --port 0 --write-port $$portfile & \
@@ -345,11 +354,11 @@ test-signed: test-verify test-http-verify
 test-aot: aot-packs host-aot
 	$(MPY_AOT) $(CURDIR)/run_matrix.py
 
-test-fast-jit: packs host-fast-jit
+test-fast-jit: packs-wasm host-fast-jit
 	$(MPY_FJIT) $(CURDIR)/run_matrix.py
 
 # Soft-skip when system LLVM cmake is incomplete (common on minimal llvm-*-dev).
-test-jit: packs
+test-jit: packs-wasm
 	@if $(MAKE) host-jit; then \
 		$(MPY_JIT) $(CURDIR)/run_matrix.py; \
 	else \
@@ -361,7 +370,7 @@ test-jit: packs
 
 # Full engine sweep with a final summary table (continues after a failing round).
 ENGINE_SUMMARY ?= $(CURDIR)/.engine-summary
-test-engines: packs
+test-engines: packs-wasm
 	@rm -f $(ENGINE_SUMMARY); \
 	ec=0; \
 	record() { printf '%s|%s|%s\n' "$$1" "$$2" "$$3" >> $(ENGINE_SUMMARY); }; \

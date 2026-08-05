@@ -1,4 +1,5 @@
 # Build a wasmmod pack and publish to metal-cdn (one-shot CLI).
+# Default: wasm + AOT + ELF (when a sibling *_elf demo exists). Use aot=false for wasm-only.
 name: publish-pack
 
 on:
@@ -16,16 +17,21 @@ on:
         required: false
         default: ""
       aot:
-        description: Run wamrc AOT
+        description: Compile AOT via wamrc (default on)
+        required: false
+        type: boolean
+        default: true
+      elf:
+        description: Extra .elf path (default auto / sibling *_elf make)
+        required: false
+        default: ""
+      no_elf:
+        description: Skip ELF twins
         required: false
         type: boolean
         default: false
-      elf:
-        description: Extra .elf path to upload beside Wasm (relative to wasmmod root)
-        required: false
-        default: ""
       arch:
-        description: Arch infix for AOT/ELF CDN names (e.g. x86_64)
+        description: Arch infix for AOT/ELF CDN names (e.g. x86_64; default host)
         required: false
         default: ""
       cdn_url:
@@ -65,7 +71,10 @@ jobs:
             echo "package=${{ inputs.package }}" >> "$GITHUB_OUTPUT"
             echo "aot=${{ inputs.aot }}" >> "$GITHUB_OUTPUT"
             echo "elf=${{ inputs.elf }}" >> "$GITHUB_OUTPUT"
-            echo "arch=${{ inputs.arch }}" >> "$GITHUB_OUTPUT"
+            echo "no_elf=${{ inputs.no_elf }}" >> "$GITHUB_OUTPUT"
+            arch="${{ inputs.arch }}"
+            if [ -z "$arch" ]; then arch="$(uname -m)"; fi
+            echo "arch=$arch" >> "$GITHUB_OUTPUT"
             echo "cdn_url=${{ inputs.cdn_url }}" >> "$GITHUB_OUTPUT"
           else
             # tag pack-<name>-<version> e.g. pack-hello-0.1.0
@@ -75,9 +84,10 @@ jobs:
             echo "pack=examples/${name}" >> "$GITHUB_OUTPUT"
             echo "version=${ver}" >> "$GITHUB_OUTPUT"
             echo "package=${name}" >> "$GITHUB_OUTPUT"
-            echo "aot=false" >> "$GITHUB_OUTPUT"
+            echo "aot=true" >> "$GITHUB_OUTPUT"
             echo "elf=" >> "$GITHUB_OUTPUT"
-            echo "arch=" >> "$GITHUB_OUTPUT"
+            echo "no_elf=false" >> "$GITHUB_OUTPUT"
+            echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
             echo "cdn_url=${{ vars.METAL_CDN_URL }}" >> "$GITHUB_OUTPUT"
           fi
 
@@ -91,12 +101,39 @@ jobs:
           printf '%s\n' "$WASMMOD_SIGN_CHAIN" | base64 -d > .keys/sign/chain.der
           chmod 600 .keys/sign/leaf.key.pem
 
+      - name: Build matching wamrc
+        if: steps.meta.outputs.aot == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y cmake g++ llvm-dev liblld-dev
+          LLVM_DIR="$(llvm-config --cmakedir)"
+          cmake -S third_party/wamr/wamr-compiler -B build-wamrc \
+            -DWAMR_BUILD_WITH_CUSTOM_LLVM=1 \
+            -DLLVM_DIR="$LLVM_DIR"
+          cmake --build build-wamrc -j"$(nproc)"
+          echo "WAMRC=${GITHUB_WORKSPACE}/build-wamrc/wamrc" >> "$GITHUB_ENV"
+
+      - name: Build ELF twin (sibling *_elf)
+        if: steps.meta.outputs.no_elf != 'true' && steps.meta.outputs.elf == ''
+        run: |
+          set -euo pipefail
+          pack="${{ steps.meta.outputs.pack }}"
+          base="$(basename "$pack")"
+          elf_dir="examples/${base}_elf"
+          if [ -d "$elf_dir" ]; then
+            echo "Building ELF twin via $elf_dir"
+            make -C "$elf_dir"
+          else
+            echo "No $elf_dir — publish will skip auto-elf if none under packs/"
+          fi
+
       - name: Publish
         env:
           METAL_CDN_URL: ${{ steps.meta.outputs.cdn_url }}
           METAL_CDN_TOKEN: ${{ secrets.METAL_CDN_TOKEN }}
         run: |
           set -euo pipefail
+          mkdir -p packs
           args=(
             tools/wasmmod.py publish "${{ steps.meta.outputs.pack }}"
             --version "${{ steps.meta.outputs.version }}"
@@ -110,10 +147,12 @@ jobs:
           if [ -n "${{ steps.meta.outputs.package }}" ]; then
             args+=(--package "${{ steps.meta.outputs.package }}")
           fi
-          if [ "${{ steps.meta.outputs.aot }}" = "true" ]; then
-            args+=(--aot)
+          if [ "${{ steps.meta.outputs.aot }}" != "true" ]; then
+            args+=(--no-aot)
           fi
-          if [ -n "${{ steps.meta.outputs.elf }}" ]; then
+          if [ "${{ steps.meta.outputs.no_elf }}" = "true" ]; then
+            args+=(--no-elf)
+          elif [ -n "${{ steps.meta.outputs.elf }}" ]; then
             args+=(--elf "${{ steps.meta.outputs.elf }}")
           fi
           if [ -n "${{ steps.meta.outputs.arch }}" ]; then

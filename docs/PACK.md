@@ -423,8 +423,8 @@ ELF packs are interchangeable containers beside `.wasm` / `.aot`:
   a low-32-bit image map (`MAP_32BIT` on Linux x86_64) for `R_X86_64_32`.
   `pack-elf` embeds the same `[python]` mount tree as Wasm packs
   (examples/hello_elf freezes `.mpy` like the Wasm hello pack).
-- Publish: `wasmmod.py publish … --elf packs/hello.elf [--arch x86_64]`
-  stages/sign/zlib beside the Wasm build (sources under `--out-dir`).
+- Publish: `wasmmod.py publish …` defaults to AOT + auto-ELF under `-o`
+  (`--no-aot` / `--no-elf` for a faster loop; `--elf PATH` / `--arch x86_64`)
 - Enable: `MICROPY_PY_WASM_ELF=1`; preference via `MICROPY_WASM_CONTAINERS`
 - Browser: wasm-only (no ELF execute)
 

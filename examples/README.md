@@ -12,6 +12,9 @@ in-tree ET_REL loader (`MICROPY_PY_WASM_ELF=1`, unix default).
 symlink) — mixed C/C++/Rust + Python tree, `sys.modules` registration,
 load/unload, host↔guest / guest↔guest.
 
+**Sources:** every sample `pack.toml` sets `[source] embed = true` so artifacts
+carry a `wasmmod.source` section (CDN Inspect / `wasm.source*` / `locations`).
+
 Commands below are run from the **host** tree root (MicroPython / metalpython)
 with this repo checked out as `extmod/wasmmod` (metalpython may also symlink
 `examples/wasmmod` → here).
@@ -33,7 +36,10 @@ not leak into the mpy-cross output path.
 
 ```sh
 # Packs + unix host (build-wasm) + explained smoke (interpreter)
+# test/demo use packs-wasm (wasm+elf, no wamrc) for a closer loop.
 make -C extmod/wasmmod/examples test
+# Full artifacts (wasm + elf + AOT) — default `make all` / `make packs`:
+# make -C extmod/wasmmod/examples packs
 # equivalent if symlink exists:
 # make -C examples/wasmmod test
 
@@ -92,7 +98,9 @@ assert test_c2.c2_answer() == 42
 
 | Target | Host `BUILD=` | Needs |
 |--------|---------------|--------|
-| `test` | `build-wasm` | — |
+| `packs` / `all` | — | wasm + elf + AOT (`wamrc`) |
+| `packs-wasm` | — | wasm + elf only (dev / `test`) |
+| `test` | `build-wasm` | `packs-wasm` |
 | `test-elf` | `build-wasm` | `hello.elf` / `client.elf` / `hostcall.elf` + `hello.aarch64.elf` (arch reject); `run_elf.py` |
 | `test-tree` | `build-wasm` | tree packs (offline path) |
 | `test-tree-cdn` | `build-wasm` | running metal-cdn (dotted names) |
