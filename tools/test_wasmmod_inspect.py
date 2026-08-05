@@ -34,6 +34,19 @@ def test_locations_source_scan() -> None:
     assert any(l.path == "src/hello.c" and l.line == 1 for l in locs)
 
 
+def test_locations_py_twin_requires_def() -> None:
+    data = ELF.read_bytes()
+    src = {
+        "__init__.py": "def hello():\n    return 42\n\ndef other():\n    return hello()\n",
+        "call_only.py": "x = hello()\n",
+    }
+    locs = insp.locations_for_symbol(data, "hello", source_files=src)
+    twins = [l for l in locs if l.role == "twin"]
+    assert any(l.path == "__init__.py" and l.line == 1 for l in twins)
+    assert not any(l.path == "call_only.py" for l in twins)
+    assert not any(l.path == "__init__.py" and l.line == 4 for l in twins)
+
+
 def test_disasm_text_nonempty() -> None:
     data = ELF.read_bytes()
     # Find .text index

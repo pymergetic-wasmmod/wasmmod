@@ -397,14 +397,24 @@ def locations_for_symbol(
         locs.append(Location(path=s.name, line=None, role="sym"))
         break
     if source_files:
-        pat = re.compile(rf"\b{re.escape(name)}\s*\(")
+        # .py twin: only ``def name(`` / ``async def name(`` — not call sites.
+        py_def = re.compile(rf"^\s*(?:async\s+)?def\s+{re.escape(name)}\s*\(")
+        c_pat = re.compile(rf"\b{re.escape(name)}\s*\(")
         for path, text in source_files.items():
             for i, line in enumerate(text.splitlines(), 1):
-                if pat.search(line):
-                    role = "twin" if path.endswith(".py") else "def"
-                    if path.endswith(".h"):
-                        role = "decl"
-                    locs.append(Location(path=path, line=i, role=role))
+                if path.endswith((".py", ".pyi")):
+                    if not py_def.search(line):
+                        continue
+                    role = "twin"
+                elif path.endswith(".h") or path.endswith(".hpp"):
+                    if not c_pat.search(line):
+                        continue
+                    role = "decl"
+                else:
+                    if not c_pat.search(line):
+                        continue
+                    role = "def"
+                locs.append(Location(path=path, line=i, role=role))
     # dedupe (path, line, role)
     seen: set[tuple[str, int | None, str]] = set()
     uniq: list[Location] = []
