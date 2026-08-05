@@ -383,11 +383,19 @@ def _addr2line_dwarf(buf: bytes, addr: int) -> list[Location]:
 
 
 def _line_is_commentish(line: str) -> bool:
-    """True for //, /* … */, or block-comment continuation lines."""
+    """True for //, /* … */, or ``* …`` / ``*/`` block-comment continuations.
+
+    Bare ``*ptr`` lines are not treated as comments (second char is not
+    whitespace or ``/``).
+    """
     s = line.strip()
     if not s:
         return False
-    return s.startswith("//") or s.startswith("/*") or s.startswith("*")
+    if s.startswith("//") or s.startswith("/*"):
+        return True
+    if s.startswith("*"):
+        return len(s) == 1 or s[1] in " \t/"
+    return False
 
 
 def _source_def_hits(path: str, text: str, name: str) -> list[tuple[int, str]]:

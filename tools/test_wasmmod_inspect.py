@@ -71,6 +71,23 @@ def test_locations_c_def_not_call_or_proto() -> None:
     assert not any(l.path == "src/hello.h" and l.line == 2 for l in decls)
 
 
+def test_locations_skips_block_comment_star_lines() -> None:
+    data = ELF.read_bytes()
+    src = {
+        "src/hello.c": (
+            "/*\n"
+            " * int hello(void) { return 0; }\n"
+            " */\n"
+            "int *out;\n"
+            "int hello(void) { return 42; }\n"
+        ),
+    }
+    locs = insp.locations_for_symbol(data, "hello", source_files=src)
+    defs = [l for l in locs if l.role == "def"]
+    assert any(l.path == "src/hello.c" and l.line == 5 for l in defs)
+    assert not any(l.path == "src/hello.c" and l.line == 2 for l in defs)
+
+
 def test_disasm_text_nonempty() -> None:
     data = ELF.read_bytes()
     # Find .text index
