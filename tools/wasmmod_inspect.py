@@ -382,6 +382,53 @@ def _addr2line_dwarf(buf: bytes, addr: int) -> list[Location]:
     return []
 
 
+def _source_def_hits(path: str, text: str, name: str) -> list[tuple[int, str]]:
+    """Return (1-based line, role) for definition-like hits — not bare call sites."""
+    hits: list[tuple[int, str]] = []
+    lines = text.splitlines()
+    if path.endswith((".py", ".pyi")):
+        py_def = re.compile(rf"^\s*(?:async\s+)?def\s+{re.escape(name)}\s*\(")
+        for i, line in enumerate(lines, 1):
+            if py_def.search(line):
+                hits.append((i, "twin"))
+        return hits
+    if path.endswith(".rs"):
+        rs_fn = re.compile(rf"^\s*(?:pub\s+)?(?:async\s+)?fn\s+{re.escape(name)}\s*[<(]")
+        for i, line in enumerate(lines, 1):
+            if rs_fn.search(line):
+                hits.append((i, "def"))
+        return hits
+    # C/C++: def needs a body `{`; headers keep prototypes (often `;`).
+    # Also accept ``name(...)`` on one line and ``{`` on the next.
+    name_paren = re.compile(rf"\b{re.escape(name)}\s*\(")
+    same_line_def = re.compile(rf"\b{re.escape(name)}\s*\([^;{{}}]*\)\s*\{{")
+    proto = re.compile(rf"\b{re.escape(name)}\s*\([^;{{}}]*\)\s*;")
+    open_sig = re.compile(rf"\b{re.escape(name)}\s*\([^;{{}}]*\)\s*$")
+    is_header = path.endswith((".h", ".hpp", ".hh"))
+    for i, line in enumerate(lines):
+        lineno = i + 1
+        if same_line_def.search(line):
+            hits.append((lineno, "decl" if is_header else "def"))
+            continue
+        if is_header and proto.search(line):
+            hits.append((lineno, "decl"))
+            continue
+        if open_sig.search(line) and not is_header:
+            # Look ahead for a line that is only `{` (K&R / split signature).
+            for j in range(i + 1, min(i + 4, len(lines))):
+                nxt = lines[j].strip()
+                if not nxt:
+                    continue
+                if nxt.startswith("{"):
+                    hits.append((lineno, "def"))
+                break
+            continue
+        if is_header and name_paren.search(line) and ";" not in line and "{" not in line:
+            # Unusual header form without trailing `;` on the same line.
+            hits.append((lineno, "decl"))
+    return hits
+
+
 def locations_for_symbol(
     buf: bytes,
     name: str,
@@ -397,24 +444,9 @@ def locations_for_symbol(
         locs.append(Location(path=s.name, line=None, role="sym"))
         break
     if source_files:
-        # .py twin: only ``def name(`` / ``async def name(`` — not call sites.
-        py_def = re.compile(rf"^\s*(?:async\s+)?def\s+{re.escape(name)}\s*\(")
-        c_pat = re.compile(rf"\b{re.escape(name)}\s*\(")
         for path, text in source_files.items():
-            for i, line in enumerate(text.splitlines(), 1):
-                if path.endswith((".py", ".pyi")):
-                    if not py_def.search(line):
-                        continue
-                    role = "twin"
-                elif path.endswith(".h") or path.endswith(".hpp"):
-                    if not c_pat.search(line):
-                        continue
-                    role = "decl"
-                else:
-                    if not c_pat.search(line):
-                        continue
-                    role = "def"
-                locs.append(Location(path=path, line=i, role=role))
+            for line_no, role in _source_def_hits(path, text, name):
+                locs.append(Location(path=path, line=line_no, role=role))
     # dedupe (path, line, role)
     seen: set[tuple[str, int | None, str]] = set()
     uniq: list[Location] = []
