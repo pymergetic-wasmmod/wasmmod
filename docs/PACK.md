@@ -1095,6 +1095,7 @@ tools/wasmmod.py inspect addr2line hello.elf 0x10
 wasmmod-read symbols hello.elf
 wasmmod-read has-dwarf hello.elf
 wasmmod-read disasm hello.elf INDEX [OFFSET [LIMIT]]
+wasmmod-read disasm hello.wasm 0 [OFFSET [LIMIT]]   # Wasm: index ignored; code section
 # CDN: GET …/artifacts/lead/hello.elf/{symbols,addr2line,locations,disasm}
 # CDN: GET …/artifacts/lead/hello.elf/files/mpy-disasm?path=…
 ```

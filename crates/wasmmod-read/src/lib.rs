@@ -770,6 +770,82 @@ pub fn disasm_db(data: &[u8], base: u64) -> Vec<DisasmLine> {
     out
 }
 
+fn wasm_op_name(op: u8) -> String {
+    match op {
+        0x0b => "end".into(),
+        0x10 => "call".into(),
+        0x20 => "local.get".into(),
+        0x21 => "local.set".into(),
+        0x41 => "i32.const".into(),
+        0x42 => "i64.const".into(),
+        0x6a => "i32.add".into(),
+        _ => format!("op_{op:02x}"),
+    }
+}
+
+fn wasm_code_window(wasm: &[u8], offset: usize, limit: usize) -> Result<&[u8]> {
+    if wasm.len() < 8 {
+        return Ok(&[]);
+    }
+    let mut i = 8usize;
+    while i < wasm.len() {
+        let sid = wasm[i];
+        i += 1;
+        let slen = read_uleb(wasm, &mut i)? as usize;
+        let start = i;
+        let end = i + slen;
+        if end > wasm.len() {
+            return Err(Error::Truncated);
+        }
+        if sid == 10 {
+            if offset >= slen {
+                return Ok(&[]);
+            }
+            let avail = (slen - offset).min(if limit == 0 { slen - offset } else { limit });
+            return Ok(&wasm[start + offset..start + offset + avail]);
+        }
+        i = end;
+    }
+    Ok(&[])
+}
+
+/// Disassemble a section window. ELF: `section_index` is shndx + hex `db` lines.
+/// Wasm: `section_index` is ignored; windows the code section with `op_*` lines
+/// (same semantics as C/`tools/wasmmod_inspect.py`).
+pub fn disasm(
+    buf: &[u8],
+    section_index: u32,
+    offset: u64,
+    limit: usize,
+) -> Result<Vec<DisasmLine>> {
+    let lim = if limit == 0 { 64 } else { limit };
+    let off = offset as usize;
+    if is_elf64_le(buf) {
+        let payload = section_payload(buf, section_index)?;
+        if off >= payload.len() {
+            return Ok(Vec::new());
+        }
+        let end = payload.len().min(off.saturating_add(lim));
+        return Ok(disasm_db(&payload[off..end], offset));
+    }
+    if buf.len() >= 4 && &buf[0..4] == b"\0asm" {
+        let chunk = wasm_code_window(buf, off, lim)?;
+        let mut out = Vec::new();
+        for (j, &op) in chunk.iter().enumerate() {
+            out.push(DisasmLine {
+                addr: offset + j as u64,
+                raw: vec![op],
+                text: wasm_op_name(op),
+            });
+            if out.len() >= 64 {
+                break;
+            }
+        }
+        return Ok(out);
+    }
+    Ok(Vec::new())
+}
+
 /// Locations for a symbol name (addr2line at func start + `role=sym`).
 pub fn locations_for_symbol(buf: &[u8], name: &str) -> Result<Vec<Location>> {
     let mut out = Vec::new();
@@ -1365,6 +1441,21 @@ open(r'{signed}', 'wb').write(out)\n",
         let syms = list_symbols(&wasm).unwrap();
         assert_eq!(syms.len(), 1);
         assert_eq!(syms[0].name, "a".repeat(130));
+    }
+
+    #[test]
+    fn wasm_disasm_ignores_index_uses_code() {
+        // code section: one function body bytes 0x41 0x2a 0x0b (i32.const / end)
+        let code_body = b"\x01\x04\x00\x41\x2a\x0b";
+        let mut code = vec![10u8];
+        code.extend(uleb(code_body.len() as u32));
+        code.extend_from_slice(code_body);
+        let mut wasm = b"\0asm\x01\0\0\0".to_vec();
+        wasm.extend(code);
+        // index 99 must still window code (parity with C/Python).
+        let lines = disasm(&wasm, 99, 0, 16).unwrap();
+        assert!(!lines.is_empty());
+        assert!(lines.iter().any(|l| l.text == "i32.const" || l.text.starts_with("op_")));
     }
 
     #[test]

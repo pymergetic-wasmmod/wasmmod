@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 use wasmmod_read::{
-    addr2line, disasm_db, has_dwarf, list_sections, list_symbols, locations_for_symbol,
-    mpy_disasm, section_payload, without_sig_section, SigView, SourceView,
+    addr2line, disasm, has_dwarf, list_sections, list_symbols, locations_for_symbol, mpy_disasm,
+    section_payload, without_sig_section, SigView, SourceView,
 };
 
 fn usage() -> ! {
@@ -517,16 +517,12 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             };
-            let offset: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let offset: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
             let limit: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(64);
             match std::fs::read(&path)
                 .map_err(wasmmod_read::Error::from)
-                .and_then(|data| {
-                    let payload = section_payload(&data, index)?;
-                    let end = payload.len().min(offset.saturating_add(limit));
-                    let start = offset.min(payload.len());
-                    Ok(disasm_db(&payload[start..end], start as u64))
-                }) {
+                .and_then(|data| disasm(&data, index, offset, limit))
+            {
                 Ok(lines) => {
                     for line in lines {
                         let hx: String = line
