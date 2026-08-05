@@ -125,7 +125,8 @@ If:
 CompileFlags:
   CompilationDatabase: None
   Remove:
-    - -DMICROPY_PY_WASM_ELF=1
+    # Drop host unix ELF=1 (and any other value) before forcing browser ELF=0.
+    - -DMICROPY_PY_WASM_ELF=*
   Add:
     - -xc
     - -std=gnu99

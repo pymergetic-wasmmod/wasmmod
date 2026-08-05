@@ -1078,7 +1078,7 @@ wasm.has_dwarf("hello.elf")            # True when .debug_line or .debug_info pr
 wasm.addr2line("hello.elf", 0x10)      # [{path, line, role}]  # multi-loc OK
 wasm.locations("hello.elf", "hello")
 wasm.disasm("hello.elf", section_index, 0, 64)   # ELF shndx / Wasm code window
-wasm.mpy_disasm("__init__.upy.mpy6.sib31.mpy", 32)
+wasm.mpy_disasm(mpy_bytes_or_vfs_path, 32)       # raw .mpy bytes or host file path
 ```
 
 ELF section list indexes are **real `shndx`** values (same as `Symbol.section_index`),
@@ -1096,6 +1096,7 @@ wasmmod-read symbols hello.elf
 wasmmod-read has-dwarf hello.elf
 wasmmod-read disasm hello.elf INDEX [OFFSET [LIMIT]]
 # CDN: GET …/artifacts/lead/hello.elf/{symbols,addr2line,locations,disasm}
+# CDN: GET …/artifacts/lead/hello.elf/files/mpy-disasm?path=…
 ```
 
 `micropython.*` catalog (minimal): `micropython.runtime.ticks_ms` →
