@@ -16,7 +16,8 @@ $(error cannot find wasmmod root (ports/micropython/micropython.mk + tools/wasmm
 endif
 
 # When examples live under metalpython/extmod/wasmmod/…, TOP is metalpython.
-# Standalone wasmmod clone: no metalpython parent — leave empty; host builds need TOP.
+# Standalone wasmmod clone / pip share tree: TOP empty — host pack/sign still work;
+# firmware / test-engines need a MicroPython tree (set TOP=…).
 METALPYTHON_TOP := $(shell \
 	p="$(WASMMOD_ROOT)"; \
 	if [ "$$(basename "$$p")" = wasmmod ] && [ "$$(basename "$$(dirname "$$p")")" = extmod ]; then \
@@ -24,6 +25,8 @@ METALPYTHON_TOP := $(shell \
 	fi)
 
 TOP ?= $(METALPYTHON_TOP)
+# Host CLI: tools/wasmmod.py → pymergetic-wasmmod-tools (pip install --pre pymergetic-wasmmod).
+# Keep these as a *single path* — Make treats spaces in prereqs as extra targets.
 WASMMOD ?= $(WASMMOD_ROOT)/tools/wasmmod.py
-WASM_PACK ?= $(WASMMOD_ROOT)/tools/wasmmod_pack.py
-WASM_SIGN ?= $(WASMMOD_ROOT)/tools/wasmmod_sign.py
+WASM_PACK ?= $(WASMMOD)
+WASM_SIGN ?= $(WASMMOD)

@@ -117,7 +117,7 @@ WASM_TRUST_CA_O = $(BUILD)/wasm_trust_ca.o
 PY_O += $(WASM_TRUST_CA_O)
 CFLAGS_EXTMOD += -DMICROPY_WASM_TRUST_INFLATE=1
 
-$(WASM_TRUST_CA_C): $(MICROPY_WASM_TRUST_CA) $(TOP)/$(WASMMOD_DIR)/tools/wasmmod_embed_ca.py
+$(WASM_TRUST_CA_C): $(MICROPY_WASM_TRUST_CA) $(TOP)/$(WASMMOD_DIR)/tools/wasmmod.py
 	$(Q)$(MKDIR) -p $(dir $@)
 	$(Q)python3 $(TOP)/$(WASMMOD_DIR)/tools/wasmmod.py embed-ca -o $@ $(MICROPY_WASM_TRUST_CA)
 

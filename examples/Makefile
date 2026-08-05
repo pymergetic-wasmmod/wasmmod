@@ -81,7 +81,7 @@ sign-key: $(SIGN_ROOT)
 
 $(SIGN_ROOT) $(SIGN_LEAF_KEY) $(SIGN_CHAIN):
 	mkdir -p $(SIGN_KEY_DIR)
-	python3 $(WASM_SIGN) gen-pki --sub-ca -o $(SIGN_KEY_DIR)
+	python3 $(WASM_SIGN) sign gen-pki --sub-ca -o $(SIGN_KEY_DIR)
 
 # Detached .sig + .crt (leaf||sub) next to each pack. Device trusts SIGN_ROOT only.
 # After sign, refresh MPZL .zlib twins — fetch_artifact prefers path.zlib over naked.
@@ -95,18 +95,18 @@ sign-packs: packs sign-key
 	}; \
 	for w in $(PACK_WASMS); do \
 		echo "SIGN $$w"; \
-		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$w; \
+		python3 $(WASM_SIGN) sign sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$w; \
 		wrap $$w; \
 		aot=$${w%.wasm}$(AOT_EXT); \
 		if [ -f "$$aot" ]; then \
 			echo "SIGN $$aot"; \
-			python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$aot; \
+			python3 $(WASM_SIGN) sign sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$aot; \
 			wrap $$aot; \
 		fi; \
 		aot_legacy=$${w%.wasm}.aot; \
 		if [ "$$aot" != "$$aot_legacy" ] && [ -f "$$aot_legacy" ]; then \
 			echo "SIGN $$aot_legacy"; \
-			python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$aot_legacy; \
+			python3 $(WASM_SIGN) sign sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$aot_legacy; \
 			wrap $$aot_legacy; \
 		fi; \
 	done
@@ -118,13 +118,13 @@ sign-packs: packs sign-key
 	}; \
 	if [ -f packs/hello.elf ]; then \
 		echo "SIGN packs/hello.elf"; \
-		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) packs/hello.elf; \
+		python3 $(WASM_SIGN) sign sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) packs/hello.elf; \
 		wrap packs/hello.elf; \
 	fi; \
 	for f in packs/client.elf packs/hostcall.elf packs/ticks.elf packs/hello.aarch64.elf; do \
 		[ -f "$$f" ] || continue; \
 		echo "SIGN $$f"; \
-		python3 $(WASM_SIGN) sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$f; \
+		python3 $(WASM_SIGN) sign sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$f; \
 		wrap $$f; \
 	done; \
 	for base in hello client hostcall ticks; do \

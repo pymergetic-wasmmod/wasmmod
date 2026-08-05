@@ -1949,11 +1949,6 @@ mod tests {
 
     #[test]
     fn elf_without_sig_wpse_roundtrip() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .expect("wasmmod root");
-        let tools = root.join("tools");
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1980,10 +1975,9 @@ mod tests {
             .unwrap()
             .success());
         let py = format!(
-            "import sys\nsys.path.insert(0, r'{tools}')\nimport wasmmod_elf as elf\n\
+            "from pymergetic.wasmmod.tools import elf\n\
 raw = open(r'{obj}', 'rb').read()\nout = elf.append_section(raw, 'wasmmod.sig', b'FAKE_SIG_BYTES')\n\
 open(r'{signed}', 'wb').write(out)\n",
-            tools = tools.display(),
             obj = obj.display(),
             signed = signed.display(),
         );

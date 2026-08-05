@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
-"""Shim: host CLI moved to ``pymergetic-wasmmod-tools``.
+"""Shim → ``pymergetic-wasmmod-tools`` (``wasmmod`` on PATH after pip install).
 
-  pip install pymergetic-wasmmod-tools
-  wasmmod <command> …
+  pip install --pre pymergetic-wasmmod   # tools + bundled source tree
+  wasmmod pack|sign|inspect|cdn|publish …
 """
 from __future__ import annotations
-
-import sys
 
 try:
     from pymergetic.wasmmod.tools.__main__ import main
 except ImportError as exc:
     raise SystemExit(
-        "wasmmod tools moved to PyPI package pymergetic-wasmmod-tools.\n"
-        "  pip install -e ../../../../wasmmod-tools   # os-sdk layout\n"
-        "  # or: pip install pymergetic-wasmmod-tools\n"
+        "Install the host package:\n"
+        "  pip install --pre pymergetic-wasmmod\n"
+        "  # or editable: pip install -e ../../../../wasmmod-tools\n"
         f"Import error: {exc}"
     ) from exc
 

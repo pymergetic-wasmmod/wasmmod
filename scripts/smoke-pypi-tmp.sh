@@ -100,10 +100,8 @@ echo "==> wasmmod requirements-publish.txt (must resolve to >= floor, got $EXPEC
 python -m pip install --index-url https://pypi.org/simple \
   -r "$WASMMOD_DIR/requirements-publish.txt" -q
 python - <<PY
-import sys
-sys.path.insert(0, "$WASMMOD_DIR/tools")
 from importlib.metadata import version
-from wasmmod_cliutil import CLIENT_MIN_VERSION, client_version_ok, require_cdn_client
+from pymergetic.wasmmod.tools.cliutil import CLIENT_MIN_VERSION, client_version_ok, require_cdn_client
 inst = version("pymergetic-metal-cdn-client")
 print("CLIENT_MIN_VERSION", CLIENT_MIN_VERSION)
 print("installed", inst)

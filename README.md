@@ -12,6 +12,22 @@ One pack file can ship **C + Rust + embedded Python**, talk to peer packs, and c
 
 Drop-in submodule: `extmod/wasmmod` → `#include "extmod/wasmmod/..."`.
 
+## Install (two ways)
+
+| Role | How |
+|------|-----|
+| **In MicroPython / metalpython** | Git submodule at `extmod/wasmmod` (upstream-compatible layout). Firmware via `ports/micropython/micropython.mk`. |
+| **Standalone host** | `pip install --pre pymergetic-wasmmod` — ships a trimmed source tree + pulls `pymergetic-wasmmod-tools` (`wasmmod` CLI). No µPy checkout required for pack/sign/inspect/cdn. |
+
+```sh
+pip install --pre pymergetic-wasmmod
+# optional: upy pack targets need mpy-cross on PATH (or MPY_CROSS=…)
+wasmmod pack path/to/example -o hello.wasm
+python -c "from pymergetic.wasmmod.rt import require_root; print(require_root())"
+```
+
+Override tree discovery with `WASMMOD_ROOT=` if you keep a git checkout beside the wheel.
+
 <p align="center">
   <img src="screenshots/repl-demo.png" alt="Real MicroPython REPL — wasm builtin, load packs" width="780" />
 </p>
@@ -128,7 +144,7 @@ Explicit: `wasm.load_pack("packs/foo.wasm", "foo")` or `…/foo.elf`.
 Browser builds stay wasm-only (`MICROPY_PY_WASM_ELF=0`).
 
 **Inspect (offline):** `wasm.symbols` / `addr2line` / `locations` / `disasm` / `mpy_disasm`
-(and `tools/wasmmod_inspect.py`, `wasmmod-read symbols|…`). CDN Inspect UI talks HTTP
+(and `wasmmod inspect`, `wasmmod-read symbols|…`). CDN Inspect UI talks HTTP
 only. See [docs/PACK.md](docs/PACK.md#pack-inspect-symbols--addr2line--disasm).
 
 ```bash
@@ -147,14 +163,16 @@ wasmmod/
 ├── fetch.*  io.h  wasmmod.c  finder.*  host.*  MicroPython host
 ├── ports/                                   make / cmake / mpconfig / PORT.md
 │   └── micropython/webassembly/             browser: js.fetch I/O + Emscripten WAMR
-├── tools/wasmmod.py                         unified CLI (pack / pack-elf / sign / …)
+├── tools/wasmmod.py                         shim → pymergetic-wasmmod-tools (`wasmmod` CLI)
+├── python/pymergetic/wasmmod/rt/            PyPI package (bundles share/ on build)
+├── hatch_build.py                           stages cleaned share/ into the wheel
 ├── examples/                                sources + packs/ + call matrix
 │   └── packs/                               built <name>.{wasm,elf,aotN} artifacts
 ├── screenshots/                             README eye-catchers
 ├── docs/PACK.md                             section format
 ├── BRANCHES.md                              MetalPython host branch layout
 ├── VERSION                                  → wasm.version (always when built)
-└── third_party/wamr                         WAMR (Apache-2.0)
+└── third_party/wamr                         WAMR (Apache-2.0; not on PyPI — firmware only)
 ```
 
 Pack sections are named `wasmmod.pack` / `wasmmod.imports` / `wasmmod.host` / `wasmmod.sig` — see [docs/PACK.md](docs/PACK.md). Host I/O replaceability (Metal async, browser `js.fetch`): [ports/PORT.md](ports/PORT.md).
@@ -165,13 +183,13 @@ CDN / channel publish (lead + `@version` pins, index schema, browser µPy shell)
 One-shot release (pack → AOT → sign → zlib → upload):
 
 ```sh
-pip install -r requirements-publish.txt
-python3 tools/wasmmod.py publish examples/hello --version 0.1.0 \
+pip install --pre pymergetic-wasmmod
+wasmmod publish examples/hello --version 0.1.0 \
   --key .keys/sign/leaf.key.pem --chain .keys/sign/chain.der \
   --cdn-url https://cdn.example/cdn --token "$METAL_CDN_TOKEN" --claim
 
 # Also upload a prebuilt ELF twin (staged under -o; --arch inserts CDN infix):
-python3 tools/wasmmod.py publish examples/hello --version 0.1.0 \
+wasmmod publish examples/hello --version 0.1.0 \
   --elf examples/packs/hello.elf --arch x86_64 \
   --key .keys/sign/leaf.key.pem --chain .keys/sign/chain.der \
   --cdn-url https://cdn.example/cdn --token "$METAL_CDN_TOKEN"

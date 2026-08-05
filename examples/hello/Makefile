@@ -13,7 +13,7 @@ all: $(OUT)
 
 $(OUT): src/hello.c src/__init__.py src/util/__init__.py src/util/extra.py pack.toml $(WASM_PACK)
 	mkdir -p ../packs
-	python3 $(WASM_PACK) . -o $(OUT)
+	python3 $(WASM_PACK) pack . -o $(OUT)
 	rm -f $(OUT).zlib
 
 clean:
