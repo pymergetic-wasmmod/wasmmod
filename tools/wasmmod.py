@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 try:
-    from pymergetic.wasmmod.tools.__main__ import main
+    from pymergetic.wasmmod.tools.__main__ import main  # type: ignore
 except ImportError as exc:
     raise SystemExit(
         "Install the host package:\n"
