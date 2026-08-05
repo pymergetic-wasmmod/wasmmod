@@ -28,5 +28,10 @@ targets = [
   "upy:mpy6:sib63",
 ]
 
+# Embed C/Python tree into wasmmod.source (Inspect locations without DWARF tools).
+[source]
+embed = true
+compress = true
+
 [pack]
 compress = true

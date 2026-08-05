@@ -20,3 +20,7 @@ sig = "i32"
 [[imports]]
 module = "hello"
 func = "hello"
+
+[source]
+embed = true
+compress = true

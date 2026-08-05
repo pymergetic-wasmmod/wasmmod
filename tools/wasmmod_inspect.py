@@ -13,6 +13,7 @@ import re
 import struct
 import subprocess
 import sys
+import zlib
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -446,6 +447,106 @@ def _source_def_hits(path: str, text: str, name: str) -> list[tuple[int, str]]:
     return hits
 
 
+def _is_code_source_path(path: str) -> bool:
+    """True for paths worth scanning for symbol defs (not README.md / docs/)."""
+    if not path or path.endswith(".mpy"):
+        return False
+    norm = path.replace("\\", "/").lstrip("./").lower()
+    if norm.startswith("docs/") or "/docs/" in f"/{norm}":
+        return False
+    return norm.endswith(
+        (".py", ".pyi", ".c", ".h", ".cc", ".cpp", ".hpp", ".hh", ".rs")
+    )
+
+
+def _inflate_blob(data: bytes, *, zlib_flag: bool, raw_len: int) -> bytes | None:
+    if not zlib_flag:
+        return data
+    try:
+        out = zlib.decompress(data)
+    except zlib.error:
+        return None
+    if len(out) != raw_len:
+        return None
+    return out
+
+
+def _embedded_code_sources(buf: bytes) -> dict[str, str]:
+    """path→text from wasmmod.source (preferred) then wasmmod.pack text files."""
+    out: dict[str, str] = {}
+    source = _load("wasmmod_source")
+    try:
+        payload = source.extract_custom_section(buf, "wasmmod.source")
+    except Exception:
+        payload = None
+    if payload:
+        try:
+            meta = source.parse_source_payload(payload)
+            for entry in meta.get("files") or []:
+                path = entry.get("path") or ""
+                if not _is_code_source_path(path):
+                    continue
+                try:
+                    raw = source.read_file_entry(entry)
+                    text = raw.decode("utf-8")
+                except Exception:
+                    continue
+                if "\x00" in text:
+                    continue
+                out[path] = text
+        except Exception:
+            pass
+    try:
+        pack_payload = source.extract_custom_section(buf, "wasmmod.pack")
+    except Exception:
+        pack_payload = None
+    if not pack_payload or len(pack_payload) < 12 or pack_payload[:4] != b"MPWP":
+        return out
+    try:
+        version = struct.unpack_from("<H", pack_payload, 4)[0]
+        name_len = struct.unpack_from("<H", pack_payload, 8)[0]
+        i = 10 + name_len
+        n_files = struct.unpack_from("<I", pack_payload, i)[0]
+        i += 4
+        for _ in range(n_files):
+            pl = struct.unpack_from("<H", pack_payload, i)[0]
+            i += 2
+            path = pack_payload[i : i + pl].decode("utf-8", errors="replace")
+            i += pl
+            kind = pack_payload[i]
+            i += 1
+            if version >= 3:
+                fflags = pack_payload[i]
+                i += 1
+                raw_len, data_len = struct.unpack_from("<II", pack_payload, i)
+                i += 8
+                blob = pack_payload[i : i + data_len]
+                i += data_len
+                if path in out or kind not in (1, 3) or not _is_code_source_path(path):
+                    continue
+                raw = _inflate_blob(blob, zlib_flag=bool(fflags & 1), raw_len=raw_len)
+            else:
+                data_len = struct.unpack_from("<I", pack_payload, i)[0]
+                i += 4
+                blob = pack_payload[i : i + data_len]
+                i += data_len
+                if path in out or kind not in (1, 3) or not _is_code_source_path(path):
+                    continue
+                raw = blob
+            if raw is None:
+                continue
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            if "\x00" in text:
+                continue
+            out[path] = text
+    except (struct.error, IndexError, ValueError):
+        pass
+    return out
+
+
 def locations_for_symbol(
     buf: bytes,
     name: str,
@@ -460,8 +561,9 @@ def locations_for_symbol(
             locs.extend(addr2line(buf, s.offset))
         locs.append(Location(path=s.name, line=None, role="sym"))
         break
-    if source_files:
-        for path, text in source_files.items():
+    sources = source_files if source_files is not None else _embedded_code_sources(buf)
+    if sources:
+        for path, text in sources.items():
             for line_no, role in _source_def_hits(path, text, name):
                 locs.append(Location(path=path, line=line_no, role=role))
     # dedupe (path, line, role)

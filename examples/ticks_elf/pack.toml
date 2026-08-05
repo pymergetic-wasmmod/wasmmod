@@ -13,3 +13,7 @@ sig = "i32"
 [[imports]]
 module = "micropython.runtime"
 func = "ticks_ms"
+
+[source]
+embed = true
+compress = true

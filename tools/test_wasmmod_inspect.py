@@ -71,6 +71,22 @@ def test_locations_c_def_not_call_or_proto() -> None:
     assert not any(l.path == "src/hello.h" and l.line == 2 for l in decls)
 
 
+def test_locations_auto_load_embedded_source() -> None:
+    """Wasm pack embeds MPSR; locations_for_symbol finds defs without source_files=."""
+    assert WASM.is_file(), f"missing {WASM}"
+    data = WASM.read_bytes()
+    locs = insp.locations_for_symbol(data, "hello")
+    assert any(l.role == "def" and l.path.endswith("hello.c") for l in locs)
+
+
+def test_locations_auto_load_elf_source() -> None:
+    """ELF packs with [source] embed also expose C defs via locations_for_symbol."""
+    assert ELF.is_file(), f"missing {ELF}"
+    data = ELF.read_bytes()
+    locs = insp.locations_for_symbol(data, "hello")
+    assert any(l.role == "def" and l.path.endswith("hello.c") for l in locs)
+
+
 def test_locations_skips_block_comment_star_lines() -> None:
     data = ELF.read_bytes()
     src = {

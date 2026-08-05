@@ -14,3 +14,7 @@ sig = "i32"
 [[imports]]
 module = "micropython.runtime"
 func = "sched"
+
+[source]
+embed = true
+compress = true
