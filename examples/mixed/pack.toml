@@ -13,3 +13,9 @@ export = "mixed_answer"
 
 [[exports]]
 func = "mixed_i64"
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+

@@ -23,3 +23,9 @@ func = "use_hello"
 [[imports]]
 module = "hello"
 func = "hello"
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+

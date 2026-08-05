@@ -20,3 +20,9 @@ func = "a_ping"
 
 [[exports]]
 func = "a_rs_ping"
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+

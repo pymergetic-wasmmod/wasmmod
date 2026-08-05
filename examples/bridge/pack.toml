@@ -210,3 +210,9 @@ func = "mixed_answer"
 [[imports]]
 module = "mixed"
 func = "mixed_i64"
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+

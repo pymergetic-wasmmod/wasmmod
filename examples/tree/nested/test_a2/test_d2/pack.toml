@@ -20,3 +20,9 @@ func = "d2_value"
 
 [[exports]]
 func = "d2_rs_value"
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+

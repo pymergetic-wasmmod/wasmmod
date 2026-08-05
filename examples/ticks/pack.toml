@@ -13,3 +13,9 @@ sig = "i32"
 [[imports]]
 module = "micropython.runtime"
 func = "ticks_ms"
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+
