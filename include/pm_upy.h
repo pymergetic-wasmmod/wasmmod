@@ -57,6 +57,10 @@
 #include "pm_upy/lib/deflate.h" // IWYU pragma: export
 #include "pm_upy/lib/select.h" // IWYU pragma: export
 #include "pm_upy/lib/socket.h" // IWYU pragma: export
+#include "pm_upy/lib/network.h" // IWYU pragma: export
+#include "pm_upy/lib/lwip.h" // IWYU pragma: export
+#include "pm_upy/lib/bluetooth.h" // IWYU pragma: export
+#include "pm_upy/lib/websocket.h" // IWYU pragma: export
 #include "pm_upy/lib/asyncio.h" // IWYU pragma: export
 #include "pm_upy/lib/ssl.h" // IWYU pragma: export
 #include "pm_upy/lib/hw.h" // IWYU pragma: export

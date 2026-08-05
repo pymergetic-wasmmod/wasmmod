@@ -25,7 +25,9 @@ inside `pm_wasmmod_runtime_init()` → `mp_wasm_host_register` /
 | run / pyexec / parse_compile_execute | `exec/run.c`, `exec/pyexec.c` |
 | embed_exec_str | `exec/embed.c` (init/deinit stay feature-fail on non-embed) |
 | vfs open/stat | `vfs/vfs.c` (needs `MICROPY_VFS`) |
-| `*_available` lib/util probes | `lib/probe.c` (honest `MICROPY_PY_*` / config) |
+| network hostname | `lib/network.c` (`MICROPY_PY_NETWORK`) |
+| lwIP init/poll | `lib/lwip.c` (`MICROPY_PY_LWIP`) |
+| `*_available` lib/util probes | `lib/probe.c` + network/lwip/bluetooth/websocket |
 
 **Still stubs** (`stubs_feature.c` / embed gaps):
 

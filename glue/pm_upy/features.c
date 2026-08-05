@@ -37,6 +37,18 @@
 #ifndef MICROPY_PY_SOCKET
 #define MICROPY_PY_SOCKET 0
 #endif
+#ifndef MICROPY_PY_NETWORK
+#define MICROPY_PY_NETWORK 0
+#endif
+#ifndef MICROPY_PY_LWIP
+#define MICROPY_PY_LWIP 0
+#endif
+#ifndef MICROPY_PY_BLUETOOTH
+#define MICROPY_PY_BLUETOOTH 0
+#endif
+#ifndef MICROPY_PY_WEBSOCKET
+#define MICROPY_PY_WEBSOCKET 0
+#endif
 
 #undef PM_UPY_HAS_GC
 #define PM_UPY_HAS_GC (MICROPY_ENABLE_GC)
@@ -83,6 +95,18 @@ uint32_t pm_upy_features(void) {
 #endif
 #if MICROPY_PY_SOCKET
     f |= PM_UPY_FEAT_SOCKET;
+#endif
+#if MICROPY_PY_NETWORK
+    f |= PM_UPY_FEAT_NETWORK;
+#endif
+#if MICROPY_PY_LWIP
+    f |= PM_UPY_FEAT_LWIP;
+#endif
+#if MICROPY_PY_BLUETOOTH
+    f |= PM_UPY_FEAT_BLUETOOTH;
+#endif
+#if MICROPY_PY_WEBSOCKET
+    f |= PM_UPY_FEAT_WEBSOCKET;
 #endif
 #if PM_UPY_HAS_EMBED
     f |= PM_UPY_FEAT_EMBED;

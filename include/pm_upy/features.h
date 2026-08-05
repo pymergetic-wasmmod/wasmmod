@@ -31,6 +31,10 @@ typedef enum {
     PM_UPY_FEAT_EMBED = 1u << 10,
     PM_UPY_FEAT_NLR = 1u << 11,
     PM_UPY_FEAT_READY = 1u << 12,
+    PM_UPY_FEAT_NETWORK = 1u << 13,
+    PM_UPY_FEAT_LWIP = 1u << 14,
+    PM_UPY_FEAT_BLUETOOTH = 1u << 15,
+    PM_UPY_FEAT_WEBSOCKET = 1u << 16,
 } pm_upy_feat_t;
 
 

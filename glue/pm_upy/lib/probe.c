@@ -24,6 +24,18 @@
 #ifndef MICROPY_PY_SOCKET
 #define MICROPY_PY_SOCKET 0
 #endif
+#ifndef MICROPY_PY_NETWORK
+#define MICROPY_PY_NETWORK 0
+#endif
+#ifndef MICROPY_PY_LWIP
+#define MICROPY_PY_LWIP 0
+#endif
+#ifndef MICROPY_PY_BLUETOOTH
+#define MICROPY_PY_BLUETOOTH 0
+#endif
+#ifndef MICROPY_PY_WEBSOCKET
+#define MICROPY_PY_WEBSOCKET 0
+#endif
 #ifndef MICROPY_PY_ASYNCIO
 #define MICROPY_PY_ASYNCIO 0
 #endif
@@ -114,6 +126,14 @@ int pm_upy_select_available(void) {
 
 int pm_upy_socket_available(void) {
     return MICROPY_PY_SOCKET ? 1 : 0;
+}
+
+int pm_upy_bluetooth_available(void) {
+    return MICROPY_PY_BLUETOOTH ? 1 : 0;
+}
+
+int pm_upy_websocket_available(void) {
+    return MICROPY_PY_WEBSOCKET ? 1 : 0;
 }
 
 int pm_upy_asyncio_available(void) {
