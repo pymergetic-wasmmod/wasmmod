@@ -652,13 +652,59 @@ fn list_symbols_elf(elf: &[u8]) -> Result<Vec<Symbol>> {
     Ok(out)
 }
 
+fn skip_importdesc(wasm: &[u8], j: &mut usize, end: usize) -> Result<()> {
+    if *j >= end {
+        return Err(Error::Truncated);
+    }
+    let kind = wasm[*j];
+    *j += 1;
+    match kind {
+        0 => {
+            let _ = read_uleb(wasm, j)?;
+            Ok(())
+        }
+        1 => {
+            if *j >= end {
+                return Err(Error::Truncated);
+            }
+            *j += 1; // reftype
+            let flags = read_uleb(wasm, j)?;
+            let _ = read_uleb(wasm, j)?;
+            if flags & 1 != 0 {
+                let _ = read_uleb(wasm, j)?;
+            }
+            Ok(())
+        }
+        2 => {
+            let flags = read_uleb(wasm, j)?;
+            let _ = read_uleb(wasm, j)?;
+            if flags & 1 != 0 {
+                let _ = read_uleb(wasm, j)?;
+            }
+            Ok(())
+        }
+        3 => {
+            if *j + 2 > end {
+                return Err(Error::Truncated);
+            }
+            *j += 2;
+            Ok(())
+        }
+        _ => Err(Error::Truncated),
+    }
+}
+
 fn list_symbols_wasm(wasm: &[u8]) -> Result<Vec<Symbol>> {
     if wasm.len() < 8 {
         return Ok(Vec::new());
     }
-    let mut out = Vec::new();
+    let mut n_func_imports = 0u32;
+    let mut code_sec_index: Option<u32> = None;
+    let mut code_entries: Vec<(u64, u64)> = Vec::new();
+    let mut export_range: Option<(usize, usize)> = None;
     let mut i = 8usize;
-    // Best-effort like Python: malformed tails yield symbols gathered so far.
+    let mut sec_list_i = 0u32;
+    // Best-effort: gather what we can, then parse exports.
     let walk = (|| -> Result<()> {
         while i < wasm.len() {
             let sid = wasm[i];
@@ -669,44 +715,98 @@ fn list_symbols_wasm(wasm: &[u8]) -> Result<Vec<Symbol>> {
             if end > wasm.len() {
                 return Err(Error::Truncated);
             }
-            if sid == 7 {
+            if sid == 2 {
                 let mut j = start;
-                let nexp = read_uleb(wasm, &mut j)? as usize;
-                for _ in 0..nexp {
+                let nimp = read_uleb(wasm, &mut j)? as usize;
+                for _ in 0..nimp {
+                    let mlen = read_uleb(wasm, &mut j)? as usize;
+                    j += mlen;
+                    let flen = read_uleb(wasm, &mut j)? as usize;
+                    j += flen;
                     if j >= end {
                         break;
                     }
-                    let nlen = read_uleb(wasm, &mut j)? as usize;
-                    if j + nlen > end {
-                        break;
+                    if wasm[j] == 0 {
+                        n_func_imports += 1;
                     }
-                    let name = String::from_utf8_lossy(&wasm[j..j + nlen]).into_owned();
-                    j += nlen;
-                    if j >= end {
-                        break;
-                    }
-                    let kind = wasm[j];
-                    j += 1;
-                    let _ = read_uleb(wasm, &mut j)?;
-                    out.push(Symbol {
-                        name,
-                        section_index: None,
-                        offset: 0,
-                        size: 0,
-                        kind: if kind == 0 {
-                            "export".into()
-                        } else {
-                            "other".into()
-                        },
-                        binding: "export".into(),
-                    });
+                    skip_importdesc(wasm, &mut j, end)?;
                 }
+            } else if sid == 10 {
+                code_sec_index = Some(sec_list_i);
+                let mut j = start;
+                let ncode = read_uleb(wasm, &mut j)? as usize;
+                for _ in 0..ncode {
+                    let entry = j;
+                    let size = read_uleb(wasm, &mut j)? as usize;
+                    if j + size > end {
+                        break;
+                    }
+                    j += size;
+                    code_entries.push(((entry - start) as u64, (j - entry) as u64));
+                }
+            } else if sid == 7 {
+                export_range = Some((start, end));
             }
             i = end;
+            sec_list_i += 1;
         }
         Ok(())
     })();
     let _ = walk;
+
+    let mut out = Vec::new();
+    let Some((start, end)) = export_range else {
+        return Ok(out);
+    };
+    let parse = (|| -> Result<()> {
+        let mut j = start;
+        let nexp = read_uleb(wasm, &mut j)? as usize;
+        for _ in 0..nexp {
+            if j >= end {
+                break;
+            }
+            let nlen = read_uleb(wasm, &mut j)? as usize;
+            if j + nlen > end {
+                break;
+            }
+            let name = String::from_utf8_lossy(&wasm[j..j + nlen]).into_owned();
+            j += nlen;
+            if j >= end {
+                break;
+            }
+            let kind = wasm[j];
+            j += 1;
+            let idx = read_uleb(wasm, &mut j)? as u32;
+            let mut offset = 0u64;
+            let mut size = 0u64;
+            let mut section_index = code_sec_index;
+            if kind == 0 {
+                if idx >= n_func_imports {
+                    let local = (idx - n_func_imports) as usize;
+                    if local < code_entries.len() {
+                        offset = code_entries[local].0;
+                        size = code_entries[local].1;
+                    }
+                }
+            } else {
+                section_index = None;
+            }
+            out.push(Symbol {
+                name,
+                section_index,
+                offset,
+                size,
+                kind: if kind == 0 {
+                    "export".into()
+                } else {
+                    "other".into()
+                },
+                binding: "export".into(),
+            });
+        }
+        Ok(())
+    })();
+    let _ = parse;
     Ok(out)
 }
 
@@ -1456,6 +1556,51 @@ open(r'{signed}', 'wb').write(out)\n",
         let lines = disasm(&wasm, 99, 0, 16).unwrap();
         assert!(!lines.is_empty());
         assert!(lines.iter().any(|l| l.text == "i32.const" || l.text.starts_with("op_")));
+    }
+
+    #[test]
+    fn wasm_func_export_code_offsets() {
+        // type + function + export hello/add + two code bodies
+        let mut wasm = b"\0asm\x01\0\0\0".to_vec();
+        // type: 1 func type ()->i32
+        let typ = b"\x01\x60\x00\x01\x7f";
+        wasm.push(1);
+        wasm.extend(uleb(typ.len() as u32));
+        wasm.extend_from_slice(typ);
+        // function: 2 funcs, both type 0
+        let func = b"\x02\x00\x00";
+        wasm.push(3);
+        wasm.extend(uleb(func.len() as u32));
+        wasm.extend_from_slice(func);
+        // export: hello → func 0, add → func 1
+        let mut exp = vec![2u8];
+        for (name, idx) in [(b"hello".as_slice(), 0u8), (b"add".as_slice(), 1u8)] {
+            exp.extend(uleb(name.len() as u32));
+            exp.extend_from_slice(name);
+            exp.push(0); // func
+            exp.push(idx);
+        }
+        wasm.push(7);
+        wasm.extend(uleb(exp.len() as u32));
+        wasm.extend(exp);
+        // code: two entries
+        let mut code = vec![2u8];
+        let b0 = b"\x00\x41\x2a\x0b"; // size-prefixed via outer
+        code.extend(uleb(b0.len() as u32));
+        code.extend_from_slice(b0);
+        let b1 = b"\x00\x20\x00\x20\x01\x6a\x0b";
+        code.extend(uleb(b1.len() as u32));
+        code.extend_from_slice(b1);
+        wasm.push(10);
+        wasm.extend(uleb(code.len() as u32));
+        wasm.extend(code);
+
+        let syms = list_symbols(&wasm).unwrap();
+        let hello = syms.iter().find(|s| s.name == "hello").unwrap();
+        let add = syms.iter().find(|s| s.name == "add").unwrap();
+        assert!(hello.size > 0 && add.size > 0);
+        assert_ne!(hello.offset, add.offset);
+        assert_eq!(hello.section_index, add.section_index);
     }
 
     #[test]

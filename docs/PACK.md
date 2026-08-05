@@ -1096,6 +1096,7 @@ wasmmod-read symbols hello.elf
 wasmmod-read has-dwarf hello.elf
 wasmmod-read disasm hello.elf INDEX [OFFSET [LIMIT]]
 wasmmod-read disasm hello.wasm 0 [OFFSET [LIMIT]]   # Wasm: index ignored; code section
+# Func exports carry code-payload offset/size so Inspect hex/asm differ per export.
 # CDN: GET …/artifacts/lead/hello.elf/{symbols,addr2line,locations,disasm}
 # CDN: GET …/artifacts/lead/hello.elf/files/mpy-disasm?path=…
 ```

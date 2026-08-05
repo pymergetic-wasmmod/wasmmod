@@ -187,91 +187,142 @@ def _list_symbols_elf(buf: bytes) -> list[Symbol]:
     return out
 
 
-def _list_symbols_wasm(buf: bytes) -> list[Symbol]:
-    """Export names from Wasm export section (best-effort)."""
-    out: list[Symbol] = []
-    if len(buf) < 8:
-        return out
-    # skip magic+version
-    i = 8
+def _read_uleb_at(buf: bytes, pos: list[int], end: int | None = None) -> int:
+    """Read LEB128 u32; ``pos`` is a one-element mutable index."""
+    limit = len(buf) if end is None else end
+    v = 0
+    shift = 0
+    while pos[0] < limit:
+        b = buf[pos[0]]
+        pos[0] += 1
+        v |= (b & 0x7F) << shift
+        if (b & 0x80) == 0:
+            return v
+        shift += 7
+        if shift > 35:
+            raise ValueError("leb overflow")
+    raise ValueError("truncated")
 
-    def read_u32() -> int:
-        nonlocal i
-        v = 0
-        shift = 0
-        while i < len(buf):
-            b = buf[i]
-            i += 1
-            v |= (b & 0x7F) << shift
-            if (b & 0x80) == 0:
-                return v
-            shift += 7
-            if shift > 35:
-                raise ValueError("leb overflow")
+
+def _wasm_skip_importdesc(buf: bytes, pos: list[int], end: int) -> None:
+    """Advance ``pos`` past one importdesc (kind + payload)."""
+    if pos[0] >= end:
         raise ValueError("truncated")
+    kind = buf[pos[0]]
+    pos[0] += 1
+    if kind == 0:  # func → typeidx
+        _read_uleb_at(buf, pos, end)
+    elif kind == 1:  # table → reftype + limits
+        if pos[0] >= end:
+            raise ValueError("truncated")
+        pos[0] += 1
+        flags = _read_uleb_at(buf, pos, end)
+        _read_uleb_at(buf, pos, end)  # min
+        if flags & 1:
+            _read_uleb_at(buf, pos, end)  # max
+    elif kind == 2:  # mem → limits
+        flags = _read_uleb_at(buf, pos, end)
+        _read_uleb_at(buf, pos, end)
+        if flags & 1:
+            _read_uleb_at(buf, pos, end)
+    elif kind == 3:  # global → valtype + mut
+        if pos[0] + 2 > end:
+            raise ValueError("truncated")
+        pos[0] += 2
+    else:
+        raise ValueError("bad import kind")
 
+
+def _list_symbols_wasm(buf: bytes) -> list[Symbol]:
+    """Wasm exports; func exports carry code-section payload offset/size."""
+    out: list[Symbol] = []
+    if len(buf) < 8 or buf[:4] != b"\x00asm":
+        return out
+
+    n_func_imports = 0
+    code_sec_index: int | None = None
+    # (offset_in_code_payload, entry_nbytes) for each defined function
+    code_entries: list[tuple[int, int]] = []
+    export_payload: bytes | None = None
+
+    i = 8
+    sec_list_i = 0
     try:
         while i < len(buf):
             sid = buf[i]
             i += 1
-            slen = read_u32()
+            pos = [i]
+            slen = _read_uleb_at(buf, pos)
+            i = pos[0]
             start = i
             end = i + slen
             if end > len(buf):
                 break
-            if sid == 7:  # export
-                j = start
-                nexp = 0
-                # read count
-                v = 0
-                shift = 0
-                while j < end:
-                    b = buf[j]
-                    j += 1
-                    v |= (b & 0x7F) << shift
-                    if (b & 0x80) == 0:
-                        nexp = v
+            if sid == 2:  # import — count func imports (index space base)
+                j = [start]
+                nimp = _read_uleb_at(buf, j, end)
+                for _ in range(nimp):
+                    mlen = _read_uleb_at(buf, j, end)
+                    j[0] += mlen
+                    flen = _read_uleb_at(buf, j, end)
+                    j[0] += flen
+                    if j[0] >= end:
                         break
-                    shift += 7
-                for _ in range(nexp):
-                    if j >= end:
+                    if buf[j[0]] == 0:
+                        n_func_imports += 1
+                    _wasm_skip_importdesc(buf, j, end)
+            elif sid == 10:  # code
+                code_sec_index = sec_list_i
+                j = [start]
+                ncode = _read_uleb_at(buf, j, end)
+                for _ in range(ncode):
+                    entry_off = j[0] - start
+                    size = _read_uleb_at(buf, j, end)
+                    if j[0] + size > end:
                         break
-                    # name length is LEB128 (not a single byte)
-                    nlen = 0
-                    shift = 0
-                    while j < end:
-                        b = buf[j]
-                        j += 1
-                        nlen |= (b & 0x7F) << shift
-                        if (b & 0x80) == 0:
-                            break
-                        shift += 7
-                        if shift > 35:
-                            return out
-                    if j + nlen > end:
-                        break
-                    name = buf[j : j + nlen].decode("utf-8", errors="replace")
-                    j += nlen
-                    if j >= end:
-                        break
-                    kind = buf[j]
-                    j += 1
-                    # skip index leb
-                    while j < end and buf[j] & 0x80:
-                        j += 1
-                    if j < end:
-                        j += 1
-                    out.append(
-                        Symbol(
-                            name=name,
-                            section_index=None,
-                            offset=0,
-                            size=0,
-                            kind="export" if kind == 0 else "other",
-                            binding="export",
-                        )
-                    )
+                    entry_end = j[0] + size
+                    code_entries.append((entry_off, entry_end - (start + entry_off)))
+                    j[0] = entry_end
+            elif sid == 7:  # export
+                export_payload = buf[start:end]
             i = end
+            sec_list_i += 1
+    except ValueError:
+        pass
+
+    if not export_payload:
+        return out
+    try:
+        j = [0]
+        nexp = _read_uleb_at(export_payload, j)
+        for _ in range(nexp):
+            nlen = _read_uleb_at(export_payload, j)
+            name = export_payload[j[0] : j[0] + nlen].decode("utf-8", errors="replace")
+            j[0] += nlen
+            if j[0] >= len(export_payload):
+                break
+            kind = export_payload[j[0]]
+            j[0] += 1
+            idx = _read_uleb_at(export_payload, j)
+            off = 0
+            sz = 0
+            sec_i = code_sec_index
+            if kind == 0:  # func
+                local = idx - n_func_imports
+                if 0 <= local < len(code_entries):
+                    off, sz = code_entries[local]
+            else:
+                sec_i = None
+            out.append(
+                Symbol(
+                    name=name,
+                    section_index=sec_i,
+                    offset=off,
+                    size=sz,
+                    kind="export" if kind == 0 else "other",
+                    binding="export",
+                )
+            )
     except ValueError:
         return out
     return out

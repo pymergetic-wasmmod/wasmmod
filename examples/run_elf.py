@@ -64,8 +64,12 @@ hello = next(s for s in syms if s["name"] == "hello")
 locs = wasm.addr2line("hello.elf", hello["offset"])
 assert locs and locs[0]["role"] in ("sym", "dwarf"), locs
 # Wasm export listing (shared with host tools / CDN)
-wnames = {s["name"] for s in wasm.symbols("hello.wasm")}
+wsyms = wasm.symbols("hello.wasm")
+wnames = {s["name"] for s in wsyms}
 assert "hello" in wnames and "add" in wnames, wnames
+wh = next(s for s in wsyms if s["name"] == "hello")
+wa = next(s for s in wsyms if s["name"] == "add")
+assert wh["size"] and wa["size"] and wh["offset"] != wa["offset"], (wh, wa)
 mpy_lines = wasm.mpy_disasm(b"MP\x06\x00" + bytes(range(8)), 8)
 assert mpy_lines and "mpy" in mpy_lines[0]["text"], mpy_lines
 print("OK elf hello(+py)/client/hostcall/ticks+badupy+arch+inspect")

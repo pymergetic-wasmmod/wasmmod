@@ -58,9 +58,20 @@ def test_mpy_disasm_header() -> None:
 
 def test_hello_wasm_exports() -> None:
     assert WASM.is_file(), f"missing {WASM}; make -C examples/hello"
-    names = {s.name for s in insp.list_symbols(WASM.read_bytes())}
+    syms = insp.list_symbols(WASM.read_bytes())
+    names = {s.name for s in syms}
     assert "hello" in names
     assert "add" in names
+    hello = next(s for s in syms if s.name == "hello")
+    add = next(s for s in syms if s.name == "add")
+    assert hello.kind == "export" and add.kind == "export"
+    assert hello.size > 0 and add.size > 0
+    assert hello.offset != add.offset
+    assert hello.section_index is not None
+    assert hello.section_index == add.section_index
+    h = [ln.text for ln in insp.disasm(WASM.read_bytes(), hello.section_index, hello.offset, 8)]
+    a = [ln.text for ln in insp.disasm(WASM.read_bytes(), add.section_index, add.offset, 8)]
+    assert h != a
 
 
 def _uleb(n: int) -> bytes:

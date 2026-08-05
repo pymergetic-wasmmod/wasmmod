@@ -79,21 +79,140 @@ bool mp_wasm_inspect_has_dwarf(const uint8_t *buf, uint32_t len) {
     return false;
 }
 
-static bool inspect_symbols_wasm(const uint8_t *buf, uint32_t len,
-    mp_wasm_sym_t *out, size_t cap, size_t *n_out) {
-    const uint8_t *payload = NULL;
-    uint32_t plen = 0;
-    if (!mp_wasm_find_section_id(buf, len, 7, &payload, &plen) || payload == NULL) {
+// Skip one importdesc; returns false on truncate.
+static bool wasm_skip_importdesc(const uint8_t **p, const uint8_t *end) {
+    if (*p >= end) {
+        return false;
+    }
+    uint8_t kind = *(*p)++;
+    uint32_t u = 0;
+    if (kind == 0) {
+        return mp_wasm_read_uleb(p, end, &u);
+    }
+    if (kind == 1) {
+        if (*p >= end) {
+            return false;
+        }
+        (*p)++;
+        uint32_t flags = 0;
+        if (!mp_wasm_read_uleb(p, end, &flags) || !mp_wasm_read_uleb(p, end, &u)) {
+            return false;
+        }
+        if ((flags & 1) && !mp_wasm_read_uleb(p, end, &u)) {
+            return false;
+        }
         return true;
     }
-    const uint8_t *p = payload;
-    const uint8_t *end = payload + plen;
+    if (kind == 2) {
+        uint32_t flags = 0;
+        if (!mp_wasm_read_uleb(p, end, &flags) || !mp_wasm_read_uleb(p, end, &u)) {
+            return false;
+        }
+        if ((flags & 1) && !mp_wasm_read_uleb(p, end, &u)) {
+            return false;
+        }
+        return true;
+    }
+    if (kind == 3) {
+        if (*p + 2 > end) {
+            return false;
+        }
+        *p += 2;
+        return true;
+    }
+    return false;
+}
+
+static bool inspect_symbols_wasm(const uint8_t *buf, uint32_t len,
+    mp_wasm_sym_t *out, size_t cap, size_t *n_out) {
+    // First pass: func-import count, code-section list index + entry offsets.
+    uint32_t n_func_imports = 0;
+    int32_t code_sec_index = -1;
+    uint64_t code_off[64];
+    uint64_t code_sz[64];
+    uint32_t ncode = 0;
+    const uint8_t *exp_payload = NULL;
+    uint32_t exp_plen = 0;
+
+    if (len < 8 || buf[0] != 0 || buf[1] != 'a' || buf[2] != 's' || buf[3] != 'm') {
+        return true;
+    }
+    uint32_t i = 8;
+    uint32_t sec_list_i = 0;
+    while (i < len) {
+        uint8_t sid = buf[i++];
+        const uint8_t *p = buf + i;
+        const uint8_t *end_all = buf + len;
+        uint32_t slen = 0;
+        if (!mp_wasm_read_uleb(&p, end_all, &slen) || p + slen > end_all) {
+            break;
+        }
+        const uint8_t *start = p;
+        const uint8_t *end = p + slen;
+        i = (uint32_t)(end - buf);
+        if (sid == 2) {
+            const uint8_t *q = start;
+            uint32_t nimp = 0;
+            if (!mp_wasm_read_uleb(&q, end, &nimp)) {
+                break;
+            }
+            for (uint32_t k = 0; k < nimp; ++k) {
+                uint32_t mlen = 0, flen = 0;
+                if (!mp_wasm_read_uleb(&q, end, &mlen) || q + mlen > end) {
+                    break;
+                }
+                q += mlen;
+                if (!mp_wasm_read_uleb(&q, end, &flen) || q + flen > end) {
+                    break;
+                }
+                q += flen;
+                if (q >= end) {
+                    break;
+                }
+                if (*q == 0) {
+                    n_func_imports++;
+                }
+                if (!wasm_skip_importdesc(&q, end)) {
+                    break;
+                }
+            }
+        } else if (sid == 10) {
+            code_sec_index = (int32_t)sec_list_i;
+            const uint8_t *q = start;
+            uint32_t nc = 0;
+            if (!mp_wasm_read_uleb(&q, end, &nc)) {
+                break;
+            }
+            ncode = 0;
+            for (uint32_t k = 0; k < nc && ncode < 64; ++k) {
+                const uint8_t *entry = q;
+                uint32_t size = 0;
+                if (!mp_wasm_read_uleb(&q, end, &size) || q + size > end) {
+                    break;
+                }
+                q += size;
+                code_off[ncode] = (uint64_t)(entry - start);
+                code_sz[ncode] = (uint64_t)(q - entry);
+                ncode++;
+            }
+        } else if (sid == 7) {
+            exp_payload = start;
+            exp_plen = slen;
+        }
+        sec_list_i++;
+    }
+
+    if (exp_payload == NULL || cap == 0) {
+        return true;
+    }
+    const uint8_t *p = exp_payload;
+    const uint8_t *end = exp_payload + exp_plen;
     uint32_t nexp = 0;
     if (!mp_wasm_read_uleb(&p, end, &nexp)) {
         return true;
     }
     size_t n = 0;
-    for (uint32_t i = 0; i < nexp && n < cap; ++i) {
+    for (uint32_t ei = 0; ei < nexp && n < cap; ++ei) {
         uint32_t nlen = 0;
         if (!mp_wasm_read_uleb(&p, end, &nlen) || p + nlen > end) {
             break;
@@ -109,7 +228,7 @@ static bool inspect_symbols_wasm(const uint8_t *buf, uint32_t len,
         if (p >= end) {
             break;
         }
-        uint8_t kind = *p++;
+        uint8_t ekind = *p++;
         uint32_t idx = 0;
         if (!mp_wasm_read_uleb(&p, end, &idx)) {
             break;
@@ -117,12 +236,19 @@ static bool inspect_symbols_wasm(const uint8_t *buf, uint32_t len,
         mp_wasm_sym_t *o = &out[n++];
         memset(o, 0, sizeof(*o));
         copy_name(o->name, sizeof(o->name), namebuf);
-        o->section_index = -1;
-        o->offset = 0;
-        o->size = 0;
-        o->kind = (kind == 0) ? 3 : 0; // 3=export (see inspect.h)
-        o->binding = 3; // export
-        (void)idx;
+        o->binding = 3;
+        if (ekind == 0) {
+            o->kind = 3; // export
+            o->section_index = code_sec_index;
+            uint32_t local = idx - n_func_imports;
+            if (idx >= n_func_imports && local < ncode) {
+                o->offset = code_off[local];
+                o->size = code_sz[local];
+            }
+        } else {
+            o->kind = 0;
+            o->section_index = -1;
+        }
     }
     if (n_out) {
         *n_out = n;
