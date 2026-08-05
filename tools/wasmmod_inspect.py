@@ -382,6 +382,14 @@ def _addr2line_dwarf(buf: bytes, addr: int) -> list[Location]:
     return []
 
 
+def _line_is_commentish(line: str) -> bool:
+    """True for //, /* … */, or block-comment continuation lines."""
+    s = line.strip()
+    if not s:
+        return False
+    return s.startswith("//") or s.startswith("/*") or s.startswith("*")
+
+
 def _source_def_hits(path: str, text: str, name: str) -> list[tuple[int, str]]:
     """Return (1-based line, role) for definition-like hits — not bare call sites."""
     hits: list[tuple[int, str]] = []
@@ -389,24 +397,29 @@ def _source_def_hits(path: str, text: str, name: str) -> list[tuple[int, str]]:
     if path.endswith((".py", ".pyi")):
         py_def = re.compile(rf"^\s*(?:async\s+)?def\s+{re.escape(name)}\s*\(")
         for i, line in enumerate(lines, 1):
+            if line.lstrip().startswith("#"):
+                continue
             if py_def.search(line):
                 hits.append((i, "twin"))
         return hits
     if path.endswith(".rs"):
         rs_fn = re.compile(rf"^\s*(?:pub\s+)?(?:async\s+)?fn\s+{re.escape(name)}\s*[<(]")
         for i, line in enumerate(lines, 1):
+            if _line_is_commentish(line):
+                continue
             if rs_fn.search(line):
                 hits.append((i, "def"))
         return hits
-    # C/C++: def needs a body `{`; headers keep prototypes (often `;`).
+    # C/C++: def needs a body `{`; headers keep prototypes ending in `;`.
     # Also accept ``name(...)`` on one line and ``{`` on the next.
-    name_paren = re.compile(rf"\b{re.escape(name)}\s*\(")
     same_line_def = re.compile(rf"\b{re.escape(name)}\s*\([^;{{}}]*\)\s*\{{")
     proto = re.compile(rf"\b{re.escape(name)}\s*\([^;{{}}]*\)\s*;")
     open_sig = re.compile(rf"\b{re.escape(name)}\s*\([^;{{}}]*\)\s*$")
     is_header = path.endswith((".h", ".hpp", ".hh"))
     for i, line in enumerate(lines):
         lineno = i + 1
+        if _line_is_commentish(line):
+            continue
         if same_line_def.search(line):
             hits.append((lineno, "decl" if is_header else "def"))
             continue
@@ -417,15 +430,11 @@ def _source_def_hits(path: str, text: str, name: str) -> list[tuple[int, str]]:
             # Look ahead for a line that is only `{` (K&R / split signature).
             for j in range(i + 1, min(i + 4, len(lines))):
                 nxt = lines[j].strip()
-                if not nxt:
+                if not nxt or _line_is_commentish(lines[j]):
                     continue
                 if nxt.startswith("{"):
                     hits.append((lineno, "def"))
                 break
-            continue
-        if is_header and name_paren.search(line) and ";" not in line and "{" not in line:
-            # Unusual header form without trailing `;` on the same line.
-            hits.append((lineno, "decl"))
     return hits
 
 

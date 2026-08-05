@@ -53,19 +53,22 @@ def test_locations_c_def_not_call_or_proto() -> None:
         "src/hello.c": (
             "int hello(void);\n"
             "int helper(void) { return hello(); }\n"
+            "/* int hello(void) { */\n"
+            "// int hello(void) {\n"
             "int hello(void)\n"
             "{\n"
             "    return 42;\n"
             "}\n"
         ),
-        "src/hello.h": "int hello(void);\n",
+        "src/hello.h": "int hello(void);\n/* Call hello(x) from clients. */\n",
     }
     locs = insp.locations_for_symbol(data, "hello", source_files=src)
     defs = [l for l in locs if l.role == "def"]
     decls = [l for l in locs if l.role == "decl"]
-    assert any(l.path == "src/hello.c" and l.line == 3 for l in defs)
-    assert not any(l.path == "src/hello.c" and l.line in (1, 2) for l in defs)
+    assert any(l.path == "src/hello.c" and l.line == 5 for l in defs)
+    assert not any(l.path == "src/hello.c" and l.line in (1, 2, 3, 4) for l in defs)
     assert any(l.path == "src/hello.h" and l.line == 1 for l in decls)
+    assert not any(l.path == "src/hello.h" and l.line == 2 for l in decls)
 
 
 def test_disasm_text_nonempty() -> None:
