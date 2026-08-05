@@ -330,8 +330,15 @@ def _list_symbols_wasm(buf: bytes) -> list[Symbol]:
 
 
 def addr2line(buf: bytes, addr: int) -> list[Location]:
-    """Map address → locations. DWARF via optional pyelftools; else enclosing symbol."""
+    """Map address → locations.
+
+    Order: optional pyelftools DWARF → host ``addr2line`` (binutils) → enclosing
+    FUNC as ``role=sym``.
+    """
     locs = _addr2line_dwarf(buf, addr)
+    if locs:
+        return locs
+    locs = _addr2line_binutils(buf, addr)
     if locs:
         return locs
     if not elf.is_elf64_le(buf):
@@ -348,6 +355,61 @@ def addr2line(buf: bytes, addr: int) -> list[Location]:
     if best is None:
         return []
     return [Location(path=best.name, line=None, role="sym")]
+
+
+def _addr2line_binutils(buf: bytes, addr: int) -> list[Location]:
+    """Best-effort DWARF via system ``addr2line`` (no pyelftools required)."""
+    if not elf.is_elf64_le(buf) or not has_dwarf(buf):
+        return []
+    import shutil
+    import tempfile
+
+    if not shutil.which("addr2line"):
+        return []
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".elf", delete=True) as tmp:
+            tmp.write(buf)
+            tmp.flush()
+            proc = subprocess.run(
+                ["addr2line", "-e", tmp.name, "-C", f"{int(addr):x}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    text = (proc.stdout or "").strip().splitlines()[:1]
+    if not text:
+        return []
+    raw = text[0].strip()
+    if not raw or raw.startswith("??"):
+        return []
+    # ``path:line`` or ``path:line:column``
+    parts = raw.rsplit(":", 2)
+    if len(parts) == 3 and parts[-1].isdigit() and parts[-2].isdigit():
+        path_s, line_s = parts[0], parts[-2]
+    elif len(parts) >= 2 and parts[-1].isdigit():
+        path_s, line_s = parts[0], parts[-1]
+    else:
+        return []
+    try:
+        lineno = int(line_s)
+    except ValueError:
+        return []
+    if lineno <= 0 or not path_s:
+        return []
+    # Prefer pack-relative tails (``src/hello.c``) over absolute build paths.
+    path_s = path_s.strip()
+    for marker in ("/src/", "/examples/"):
+        idx = path_s.find(marker)
+        if idx >= 0:
+            path_s = path_s[idx + 1 :]
+            break
+    else:
+        if path_s.startswith("/"):
+            path_s = Path(path_s).name
+    return [Location(path=path_s, line=lineno, role="dwarf")]
 
 
 def _addr2line_dwarf(buf: bytes, addr: int) -> list[Location]:

@@ -823,10 +823,18 @@ pub fn list_symbols(buf: &[u8]) -> Result<Vec<Symbol>> {
     Ok(Vec::new())
 }
 
-/// Map address → locations. Overnight: enclosing FUNC as `role=sym` (DWARF stub empty).
+/// Map address → locations.
+///
+/// Prefer host ``addr2line`` (binutils) when `.debug_*` is present, else the
+/// enclosing FUNC as ``role=sym``.
 pub fn addr2line(buf: &[u8], addr: u64) -> Result<Vec<Location>> {
     if !is_elf64_le(buf) {
         return Ok(Vec::new());
+    }
+    if has_dwarf(buf) {
+        if let Some(loc) = addr2line_binutils(buf, addr) {
+            return Ok(vec![loc]);
+        }
     }
     let syms = list_symbols_elf(buf)?;
     let mut best: Option<&Symbol> = None;
@@ -849,6 +857,81 @@ pub fn addr2line(buf: &[u8], addr: u64) -> Result<Vec<Location>> {
         }],
         None => Vec::new(),
     })
+}
+
+fn addr2line_binutils(buf: &[u8], addr: u64) -> Option<Location> {
+    use std::process::Command;
+
+    let dir = tempfile_dir()?;
+    let path = dir.join("obj.elf");
+    std::fs::write(&path, buf).ok()?;
+    let out = Command::new("addr2line")
+        .args(["-e", path.to_str()?, "-C", &format!("{addr:x}")])
+        .output()
+        .ok()?;
+    let _ = std::fs::remove_dir_all(&dir);
+    if !out.status.success() && out.stdout.is_empty() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let raw = text.lines().next()?.trim();
+    if raw.is_empty() || raw.starts_with("??") {
+        return None;
+    }
+    let (path_s, line_s) = parse_addr2line_path_line(raw)?;
+    let lineno: i32 = line_s.parse().ok()?;
+    if lineno <= 0 {
+        return None;
+    }
+    Some(Location {
+        path: path_s,
+        line: Some(lineno),
+        role: "dwarf".into(),
+    })
+}
+
+fn parse_addr2line_path_line(raw: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = raw.rsplitn(3, ':').collect();
+    // rsplitn yields reverse pieces: ``a:b:c`` → [c, b, a]
+    let (mut path_s, line_s) = if parts.len() == 3
+        && !parts[0].is_empty()
+        && parts[0].chars().all(|c| c.is_ascii_digit())
+        && parts[1].chars().all(|c| c.is_ascii_digit())
+    {
+        (parts[2].to_string(), parts[1].to_string())
+    } else if parts.len() >= 2
+        && !parts[0].is_empty()
+        && parts[0].chars().all(|c| c.is_ascii_digit())
+    {
+        (parts[1].to_string(), parts[0].to_string())
+    } else {
+        return None;
+    };
+    if path_s.is_empty() {
+        return None;
+    }
+    if let Some(idx) = path_s.find("/src/") {
+        path_s = path_s[idx + 1..].to_string();
+    } else if let Some(idx) = path_s.find("/examples/") {
+        path_s = path_s[idx + 1..].to_string();
+    } else if path_s.starts_with('/') {
+        path_s = std::path::Path::new(&path_s)
+            .file_name()?
+            .to_string_lossy()
+            .into_owned();
+    }
+    Some((path_s, line_s))
+}
+
+fn tempfile_dir() -> Option<std::path::PathBuf> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("wasmmod-read-a2l-{n}"));
+    std::fs::create_dir(&dir).ok()?;
+    Some(dir)
 }
 
 /// Hex `db` lines for a byte window (Capstone-free fallback).

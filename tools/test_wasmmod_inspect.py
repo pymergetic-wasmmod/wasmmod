@@ -22,9 +22,27 @@ def test_hello_elf_symbols_and_dwarf() -> None:
     assert hello.kind == "func"
     locs = insp.addr2line(data, hello.offset)
     assert locs
-    # Without pyelftools: role=sym; with it: dwarf path.
+    # Prefer DWARF via pyelftools or host addr2line; else enclosing sym.
     assert locs[0].role in ("sym", "dwarf")
+    if locs[0].role == "dwarf":
+        assert locs[0].line and locs[0].line > 0
+        assert "hello" in locs[0].path
     assert insp.locations_for_symbol(data, "hello")
+
+
+def test_addr2line_binutils_hello_elf() -> None:
+    """When binutils addr2line exists, hello.elf offset 0 → hello.c:4."""
+    import shutil
+
+    if not shutil.which("addr2line"):
+        return
+    assert ELF.is_file()
+    data = ELF.read_bytes()
+    hello = next(s for s in insp.list_symbols(data) if s.name == "hello")
+    locs = insp.addr2line(data, hello.offset)
+    assert locs and locs[0].role == "dwarf"
+    assert locs[0].line == 4
+    assert locs[0].path.endswith("hello.c")
 
 
 def test_locations_source_scan() -> None:
