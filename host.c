@@ -547,6 +547,7 @@ static int32_t host_call0_i32(wasm_exec_env_t exec_env, int32_t slot) {
 }
 
 static int64_t host_call_i64(wasm_exec_env_t exec_env, int32_t slot, int64_t arg) {
+#if MICROPY_LONGINT_IMPL != MICROPY_LONGINT_IMPL_NONE
     (void)exec_env;
     mp_obj_t cb = slot_callable(slot);
     if (cb == MP_OBJ_NULL) {
@@ -560,9 +561,16 @@ static int64_t host_call_i64(wasm_exec_env_t exec_env, int32_t slot, int64_t arg
         return out;
     }
     return -1;
+#else
+    (void)exec_env;
+    (void)slot;
+    (void)arg;
+    return -1;
+#endif
 }
 
 static float host_call_f32(wasm_exec_env_t exec_env, int32_t slot, float arg) {
+#if MICROPY_FLOAT_IMPL != MICROPY_FLOAT_IMPL_NONE
     (void)exec_env;
     mp_obj_t cb = slot_callable(slot);
     if (cb == MP_OBJ_NULL) {
@@ -576,9 +584,16 @@ static float host_call_f32(wasm_exec_env_t exec_env, int32_t slot, float arg) {
         return out;
     }
     return -1.0f;
+#else
+    (void)exec_env;
+    (void)slot;
+    (void)arg;
+    return -1.0f;
+#endif
 }
 
 static double host_call_f64(wasm_exec_env_t exec_env, int32_t slot, double arg) {
+#if MICROPY_FLOAT_IMPL != MICROPY_FLOAT_IMPL_NONE
     (void)exec_env;
     mp_obj_t cb = slot_callable(slot);
     if (cb == MP_OBJ_NULL) {
@@ -592,6 +607,12 @@ static double host_call_f64(wasm_exec_env_t exec_env, int32_t slot, double arg) 
         return out;
     }
     return -1.0;
+#else
+    (void)exec_env;
+    (void)slot;
+    (void)arg;
+    return -1.0;
+#endif
 }
 
 // Guest linear [off,len] → Python bytes → callable(bytes) → i32.
@@ -805,6 +826,26 @@ bool mp_wasm_host_register(void) {
     if (host_registered) {
         return true;
     }
+    /* PE/UEFI: static fn-ptr initializers can be wrong; assign at runtime. */
+    host_symbols[0].func_ptr = (void *)host_call_i32;
+    host_symbols[1].func_ptr = (void *)host_call0_i32;
+    host_symbols[2].func_ptr = (void *)host_call_i64;
+    host_symbols[3].func_ptr = (void *)host_call_f32;
+    host_symbols[4].func_ptr = (void *)host_call_f64;
+    host_symbols[5].func_ptr = (void *)host_call_buf;
+    host_symbols[6].func_ptr = (void *)host_call_mem;
+    host_symbols[7].func_ptr = (void *)host_call_obj;
+    host_symbols[8].func_ptr = (void *)host_call0_py;
+    host_symbols[9].func_ptr = (void *)host_call_py;
+    host_symbols[10].func_ptr = (void *)host_mem_alloc;
+    host_symbols[11].func_ptr = (void *)host_mem_free;
+    host_symbols[12].func_ptr = (void *)host_mem_len;
+    host_symbols[13].func_ptr = (void *)host_mem_valid;
+    host_symbols[14].func_ptr = (void *)host_mem_set;
+    host_symbols[15].func_ptr = (void *)host_mem_copy_in;
+    host_symbols[16].func_ptr = (void *)host_mem_copy_out;
+    host_symbols[17].func_ptr = (void *)host_mem_copy_in_at;
+    host_symbols[18].func_ptr = (void *)host_mem_copy_out_at;
     host_slots_ensure();
     handles_ensure();
     if (!wasm_runtime_register_natives(MP_WASM_HOST_MODULE, host_symbols,

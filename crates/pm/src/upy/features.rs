@@ -1,29 +1,24 @@
-//! Feature / version probes (`pm_upy_features`, `pm_upy_has`, `pm_upy_version`).
+//! Thin wraps for `upy` / `features` (`pm_upy_*`).
+//!
+//! Auto-generated from bindgen; prefer these over [`super::ffi`].
 
-use std::ffi::CStr;
-use std::os::raw::c_char;
+use crate::upy::ffi::{self, *};
+use core::ffi::CStr;
 
-use crate::upy::ffi;
-
-/// Bitmask of host µPy capabilities (`pm_upy_features`).
+/// `pm_upy_features`.
 pub fn features() -> u32 {
     unsafe { ffi::pm_upy_features() }
 }
 
-/// Whether a feature bit is set (`pm_upy_has`).
-pub fn has(feat: u32) -> bool {
+/// `pm_upy_has`.
+pub fn has(feat: pm_upy_feat_t) -> bool {
     unsafe { ffi::pm_upy_has(feat) }
 }
 
-/// wasmmod / µPy version string (`pm_upy_version`).
+/// `pm_upy_version`.
 pub fn version() -> &'static str {
     unsafe {
         let p = ffi::pm_upy_version();
-        if p.is_null() {
-            return "";
-        }
-        CStr::from_ptr(p as *const c_char)
-            .to_str()
-            .unwrap_or("")
+        if p.is_null() { "" } else { CStr::from_ptr(p).to_str().unwrap_or("") }
     }
 }

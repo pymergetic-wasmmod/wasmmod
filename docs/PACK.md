@@ -1120,7 +1120,7 @@ sections as guest packs (inspect/document only — **not** loaded as a runnable 
 |--|--|
 | **Package name** | `pymergetic.wasmmod` (first-party `pymergetic.*` namespace; kernel later: `pymergetic.metal`) |
 | **Tags** | `role=host`, `product=wasmmod`, `org=pymergetic` |
-| **CDN sidebar** | Synthetic **Platform** group for `role=host\|kernel` (not only nested under `pymergetic.*`) |
+| **CDN sidebar** | Natural dotted tree (`pymergetic.wasmmod` under `pymergetic`); host/kernel = color + compact icon/tooltip; Play off |
 | **CDN Play** | **Disabled** for host/kernel artifacts (WAMR self-load OOMs) — use **Inspect** |
 | **Browser build** | `make -C extmod/wasmmod/ports/micropython/webassembly` post-link embeds into `micropython.wasm` and aliases `pymergetic.wasmmod.wasm` (`WASMMOD_EMBED_HOST_SOURCE=1`, default on) |
 | **Unix ELF** | `make MICROPY_PY_WASM=1 WASMMOD_EMBED_HOST_SOURCE=1 embed-host-desc` |

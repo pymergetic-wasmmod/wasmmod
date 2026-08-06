@@ -42,6 +42,7 @@
 #include "lib/uzlib/tinflate.c"
 #include "lib/uzlib/header.c"
 #include "lib/uzlib/adler32.c"
+#include "lib/uzlib/crc32.c"
 #endif
 
 bool mp_wasm_zlib_inflate(const uint8_t *src, uint32_t src_len, uint8_t *dst, uint32_t dst_len) {

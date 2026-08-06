@@ -122,6 +122,16 @@ bool mp_wasm_upy_catalog_register(void) {
     if (upy_catalog_registered) {
         return true;
     }
+    upy_runtime_symbols[0].func_ptr = (void *)upy_ticks_ms_wasm;
+    upy_runtime_symbols[1].func_ptr = (void *)upy_ticks_us_wasm;
+    upy_runtime_symbols[2].func_ptr = (void *)upy_time_ns_wasm;
+    upy_runtime_symbols[3].func_ptr = (void *)upy_delay_ms_wasm;
+    upy_runtime_symbols[4].func_ptr = (void *)upy_features_wasm;
+    upy_runtime_symbols[5].func_ptr = (void *)upy_has_wasm;
+    upy_runtime_symbols[6].func_ptr = (void *)upy_gc_collect_wasm;
+    upy_runtime_symbols[7].func_ptr = (void *)upy_handle_pending_wasm;
+    upy_runtime_symbols[8].func_ptr = (void *)upy_run_str_wasm;
+    upy_runtime_symbols[9].func_ptr = (void *)upy_sched_schedule_wasm;
     if (!wasm_runtime_register_natives("micropython.runtime", upy_runtime_symbols,
             sizeof(upy_runtime_symbols) / sizeof(upy_runtime_symbols[0]))) {
         return false;

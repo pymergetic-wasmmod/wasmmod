@@ -11,8 +11,8 @@
 #include "py/runtime.h"
 #include "shared/runtime/pyexec.h"
 
-#ifndef MICROPY_HELPER_REPL
-#define MICROPY_HELPER_REPL 0
+#ifndef MICROPY_REPL_EVENT_DRIVEN
+#define MICROPY_REPL_EVENT_DRIVEN 0
 #endif
 
 int pm_upy_handle_pending(void) {
@@ -25,7 +25,7 @@ int pm_upy_loop_step(void) {
 }
 
 int pm_upy_loop_feed(const uint8_t *ptr, size_t len) {
-#if MICROPY_HELPER_REPL
+#if MICROPY_REPL_EVENT_DRIVEN
     if (!ptr) {
         return PM_ERR_ARG;
     }
@@ -44,7 +44,7 @@ int pm_upy_loop_feed(const uint8_t *ptr, size_t len) {
 }
 
 int pm_upy_loop_reset(void) {
-#if MICROPY_HELPER_REPL
+#if MICROPY_REPL_EVENT_DRIVEN
     pyexec_event_repl_init();
     return PM_OK;
 #else

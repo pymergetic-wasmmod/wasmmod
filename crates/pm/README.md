@@ -1,19 +1,11 @@
-# `pm` — Rust FFI for `include/pm_*.h`
+Raw declarations: `pm::upy::ffi::*` / `pm::wasmmod::ffi::*` (bindgen dump). Thin wraps:
+`pm::upy::{…}` and `pm::wasmmod::{…}` modules covering every bindgen `pm_*` function
+(regen: parse `OUT_DIR/bindings.rs` — see agent notes / METAL_INTEGRATION Phase A).
 
-Bindgen over the public umbrellas:
+Status helpers: `pm::check_status` / `pm::FeatureError`.
 
-- `include/pm_upy.h`
-- `include/pm_wasmmod.h`
-- `include/pm_guest.h` (host: `PM_WASMMOD_GUEST=0`)
-
-```text
-cargo check -p pm
-```
-
-Raw declarations: `pm::upy::ffi::*` / `pm::wasmmod::ffi::*` (bindgen dump; prefer
-`pm_upy_*` / `pm_wasmmod_*` respectively). Thin wraps: `pm::upy::{mem,features,time,run,sched}`,
-`pm::wasmmod::host`, `pm::wasmmod::version`. Status helpers: `pm::check_status` /
-`pm::FeatureError`.
+**NLR:** `pm_upy_nlr_push/pop/jump*` are C macros (setjmp); use from C with `py/nlr.h`,
+not from Rust wraps.
 
 **Linking:** this crate does not compile or link MicroPython/wasmmod glue. Host binaries
 must link the µPy port + `glue/` objects. Guest import attrs are a later `cfg` path.

@@ -86,6 +86,6 @@
  * |------|------|
  * | `ports/micropython/` | Shared make fragment + optional `mpconfig_wasm.h` |
  * | `ports/micropython/webassembly/` | Browser: `js.fetch` I/O + Emscripten WAMR (`WASMMOD_EMSCRIPTEN=1`) |
- * | `ports/metal/` | (planned) Metal async→sync I/O ops |
+ * | `ports/metal/` | Metal async→sync I/O ops (`io_ops.c` stub DECLINEs; fill fetch/probe/yield) |
  * | `ports/cpython/` | CPython tooling helpers |
  */

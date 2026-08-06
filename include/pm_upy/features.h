@@ -68,8 +68,9 @@ bool pm_upy_has(pm_upy_feat_t feat);
 const char *pm_upy_version(void);
 
 /* Guest imports (micropython.runtime) — same header as host API.
- * pm_guest.h defines PM_WASMMOD_GUEST (do not -D it away on the host). */
-#include "pm_guest.h"
+ * pm_guest.h defines PM_WASMMOD_GUEST (do not -D it away on the host).
+ * Relative include: keeps this header parseable when -Iinclude is absent. */
+#include "../pm_guest.h"
 #if PM_WASMMOD_GUEST
 MP_WASM_IMPORT("micropython.runtime", uint32_t, features, void);
 MP_WASM_IMPORT("micropython.runtime", int32_t, has, int32_t feat);

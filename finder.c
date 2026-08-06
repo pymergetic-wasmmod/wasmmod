@@ -36,6 +36,7 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/nlr.h"
+#include "py/builtin.h"
 
 #include "extmod/wasmmod/fetch.h"
 #include "extmod/wasmmod/finder.h"

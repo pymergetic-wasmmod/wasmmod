@@ -52,14 +52,29 @@ static bool py_to_wasm_val(mp_obj_t o, wasm_valkind_t kind, wasm_val_t *out) {
             out->of.i32 = (int32_t)mp_obj_get_int(o);
             return true;
         case WASM_I64:
+#if MICROPY_LONGINT_IMPL != MICROPY_LONGINT_IMPL_NONE
             out->of.i64 = mp_obj_get_ll(o);
             return true;
+#else
+            (void)o;
+            return false;
+#endif
         case WASM_F32:
+#if MICROPY_FLOAT_IMPL != MICROPY_FLOAT_IMPL_NONE
             out->of.f32 = mp_obj_get_float_to_f(o);
             return true;
+#else
+            (void)o;
+            return false;
+#endif
         case WASM_F64:
+#if MICROPY_FLOAT_IMPL != MICROPY_FLOAT_IMPL_NONE
             out->of.f64 = mp_obj_get_float_to_d(o);
             return true;
+#else
+            (void)o;
+            return false;
+#endif
         default:
             return false;
     }
@@ -70,11 +85,25 @@ static mp_obj_t wasm_val_to_py(const wasm_val_t *v) {
         case WASM_I32:
             return mp_obj_new_int(v->of.i32);
         case WASM_I64:
+#if MICROPY_LONGINT_IMPL != MICROPY_LONGINT_IMPL_NONE
             return mp_obj_new_int_from_ll(v->of.i64);
+#else
+            return mp_obj_new_int((mp_int_t)v->of.i64);
+#endif
         case WASM_F32:
+#if MICROPY_FLOAT_IMPL != MICROPY_FLOAT_IMPL_NONE
             return mp_obj_new_float((mp_float_t)v->of.f32);
+#else
+            (void)v;
+            return mp_const_none;
+#endif
         case WASM_F64:
+#if MICROPY_FLOAT_IMPL != MICROPY_FLOAT_IMPL_NONE
             return mp_obj_new_float((mp_float_t)v->of.f64);
+#else
+            (void)v;
+            return mp_const_none;
+#endif
         default:
             return mp_const_none;
     }
@@ -317,5 +346,13 @@ static mp_obj_t mod_wasm_load(mp_obj_t data_in) {
     return mp_wasm_wrap_loaded(mod);
 }
 MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_load_obj, mod_wasm_load);
+
+void mp_wasm_fixup_modobj_fun_objs(void)
+{
+	mp_obj_fun_builtin_fixed_t *f1 =
+		(mp_obj_fun_builtin_fixed_t *)&mod_wasm_load_obj;
+	f1->base.type = &mp_type_fun_builtin_1;
+	f1->fun._1 = mod_wasm_load;
+}
 
 #endif // MICROPY_PY_WASM

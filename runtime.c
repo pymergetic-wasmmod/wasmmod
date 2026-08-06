@@ -40,14 +40,20 @@
 #include "extmod/wasmmod/forward.h"
 #include "extmod/wasmmod/runtime.h"
 #include "extmod/wasmmod/verify.h"
+#include "wasm_export.h"
+
+#ifndef MICROPY_WASM_HOST_FACES
+#define MICROPY_WASM_HOST_FACES (1)
+#endif
+#if MICROPY_WASM_HOST_FACES
 #include "pm_upy/obj/module.h"
 #include "pm_wasmmod/module.h"
-#include "wasm_export.h"
 
 // Defined in host.c / upy_catalog.c (need the full MicroPython include path).
 bool mp_wasm_host_register(void);
 bool mp_wasm_loader_register(void);
 bool mp_wasm_upy_catalog_register(void);
+#endif
 
 #ifndef MICROPY_PY_WASM_AOT
 #define MICROPY_PY_WASM_AOT (0)
@@ -179,7 +185,12 @@ bool mp_wasm_runtime_init(void) {
     if (!wasm_runtime_full_init(&init)) {
         return false;
     }
-    // Guest imports (wasmmod.* / wasmmod.host.*) before any module instantiate.
+    /*
+     * Guest imports (wasmmod.* / wasmmod.host.*) before instantiate.
+     * Metal first pack_load gate may set MICROPY_WASM_HOST_FACES=0 for
+     * import-free demos and attach to an already-initialized WAMR (refcount).
+     */
+#if MICROPY_WASM_HOST_FACES
     if (!mp_wasm_host_register() || !mp_wasm_loader_register()
         || !mp_wasm_upy_catalog_register()) {
         wasm_runtime_destroy();
@@ -188,6 +199,7 @@ bool mp_wasm_runtime_init(void) {
     /* Host faces: Python `import pymergetic.wasmmod` / `pymergetic.upy`. */
     (void)pm_wasmmod_module_install("pymergetic.wasmmod");
     (void)pm_upy_module_install_face("pymergetic.upy", (void *)1);
+#endif
     runtime_ready = 1;
     return true;
 }

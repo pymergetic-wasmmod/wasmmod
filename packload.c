@@ -1336,4 +1336,46 @@ static mp_obj_t mod_wasm_uninstall_hook(void) {
 }
 MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_uninstall_hook_obj, mod_wasm_uninstall_hook);
 
+/*
+ * PE/COFF (UEFI): const fun-obj initializers can carry bad absolute fn addrs
+ * when linked via rust-lld staticlibs. Rewrite from this TU (lea-relative).
+ */
+void mp_wasm_fixup_packload_fun_objs(void)
+{
+	mp_obj_fun_builtin_fixed_t *f1;
+	mp_obj_fun_builtin_var_t *fv;
+
+	f1 = (mp_obj_fun_builtin_fixed_t *)&mod_wasm_import_wasm_obj;
+	f1->base.type = &mp_type_fun_builtin_1;
+	f1->fun._1 = mod_wasm_import_wasm;
+
+	f1 = (mp_obj_fun_builtin_fixed_t *)&mod_wasm_unload_obj;
+	f1->base.type = &mp_type_fun_builtin_1;
+	f1->fun._1 = mod_wasm_unload;
+
+	fv = (mp_obj_fun_builtin_var_t *)&mod_wasm_load_pack_obj;
+	fv->base.type = &mp_type_fun_builtin_var;
+	fv->sig = MP_OBJ_FUN_MAKE_SIG(1, 2, false);
+	fv->fun.var = mod_wasm_load_pack;
+
+	fv = (mp_obj_fun_builtin_var_t *)&mod_wasm_import_hook_obj;
+	fv->base.type = &mp_type_fun_builtin_var;
+	fv->sig = MP_OBJ_FUN_MAKE_SIG(1, 5, false);
+	fv->fun.var = mod_wasm_import_hook;
+
+	fv = (mp_obj_fun_builtin_var_t *)&mod_wasm_install_hook_obj;
+	fv->base.type = &mp_type_fun_builtin_var;
+	fv->sig = MP_OBJ_FUN_MAKE_SIG(0, MP_OBJ_FUN_ARGS_MAX, true);
+	fv->fun.kw = mod_wasm_install_hook;
+
+	f1 = (mp_obj_fun_builtin_fixed_t *)&mod_wasm_uninstall_hook_obj;
+	f1->base.type = &mp_type_fun_builtin_0;
+	f1->fun._0 = mod_wasm_uninstall_hook;
+
+	fv = (mp_obj_fun_builtin_var_t *)&mod_wasm_cdn_obj;
+	fv->base.type = &mp_type_fun_builtin_var;
+	fv->sig = MP_OBJ_FUN_MAKE_SIG(1, 2, false);
+	fv->fun.var = mod_wasm_cdn;
+}
+
 #endif // MICROPY_PY_WASM

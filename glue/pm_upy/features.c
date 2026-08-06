@@ -7,11 +7,16 @@
  */
 
 
-#include "pm_upy/features.h"
-#include "version.h"
+/* Prefer package-relative path so clangd still sees pm_upy_feat_t when -Iinclude
+ * is missing (otherwise PM_UPY_FEAT_* look undeclared after a failed include). */
+#include "../../include/pm_upy/features.h"
+#include "../../version.h"
 
-/* Host builds compile glue with the port include path — pick up real feature macros. */
-#if defined(MICROPY_PY_WASM) && __has_include("py/mpconfig.h")
+/* Host builds compile glue with the port include path — pick up real feature macros.
+ * Require mpconfigport.h too; a bare py/mpconfig.h include fatals and poisons the TU. */
+#if defined(MICROPY_PY_WASM) \
+    && __has_include("py/mpconfig.h") \
+    && __has_include("mpconfigport.h")
 #include "py/mpconfig.h"
 #endif
 
@@ -26,6 +31,9 @@
 #endif
 #ifndef MICROPY_HELPER_REPL
 #define MICROPY_HELPER_REPL 0
+#endif
+#ifndef MICROPY_REPL_EVENT_DRIVEN
+#define MICROPY_REPL_EVENT_DRIVEN 0
 #endif
 #ifndef MICROPY_FLOAT_IMPL
 #define MICROPY_FLOAT_IMPL 0

@@ -67,5 +67,15 @@
 #include "pm_upy/util/warning.h" // IWYU pragma: export
 #include "pm_upy/util/mperrno.h" // IWYU pragma: export
 #include "pm_upy/util/libc_policy.h" // IWYU pragma: export
+#include "pm_upy/util/mpz.h" // IWYU pragma: export
+#include "pm_upy/util/pairheap.h" // IWYU pragma: export
+#include "pm_upy/util/ringbuf.h" // IWYU pragma: export
+#include "pm_upy/util/formatfloat.h" // IWYU pragma: export
+#include "pm_upy/util/parsenum.h" // IWYU pragma: export
+#include "pm_upy/util/scope.h" // IWYU pragma: export
+#include "pm_upy/util/asm.h" // IWYU pragma: export
+#include "pm_upy/util/stackalt.h" // IWYU pragma: export
+#include "pm_upy/util/autoload.h" // IWYU pragma: export
+#include "pm_upy/util/persistentcode.h" // IWYU pragma: export
 
 #endif /* PM_PM_UPY_H_ */

@@ -16,6 +16,9 @@
 #ifndef MICROPY_HELPER_REPL
 #define MICROPY_HELPER_REPL 0
 #endif
+#ifndef MICROPY_REPL_EVENT_DRIVEN
+#define MICROPY_REPL_EVENT_DRIVEN 0
+#endif
 
 #if MICROPY_HELPER_REPL
 /* Avoid pulling py/repl.h (sys mutable PS1/PS2) into this TU. */
@@ -24,7 +27,7 @@ size_t mp_repl_autocomplete(const char *str, size_t len, const mp_print_t *print
 #endif
 
 int pm_upy_repl_start(void) {
-#if MICROPY_HELPER_REPL
+#if MICROPY_REPL_EVENT_DRIVEN
     pyexec_event_repl_init();
     return PM_OK;
 #else
@@ -37,7 +40,7 @@ void pm_upy_repl_stop(void) {
 }
 
 int pm_upy_repl_active(void) {
-#if MICROPY_HELPER_REPL
+#if MICROPY_REPL_EVENT_DRIVEN
     return pyexec_repl_active ? 1 : 0;
 #else
     return 0;
@@ -45,7 +48,7 @@ int pm_upy_repl_active(void) {
 }
 
 int pm_upy_repl_feed_line(const char *line, size_t len) {
-#if MICROPY_HELPER_REPL
+#if MICROPY_REPL_EVENT_DRIVEN
     if (!line) {
         return PM_ERR_ARG;
     }

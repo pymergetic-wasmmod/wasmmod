@@ -156,6 +156,11 @@ bool mp_wasm_loader_register(void) {
     if (loader_registered) {
         return true;
     }
+    loader_symbols[0].func_ptr = (void *)loader_version;
+    loader_symbols[1].func_ptr = (void *)loader_mode;
+    loader_symbols[2].func_ptr = (void *)loader_verify;
+    loader_symbols[3].func_ptr = (void *)loader_trust_count;
+    loader_symbols[4].func_ptr = (void *)loader_call_i32;
     if (!wasm_runtime_register_natives(MP_WASM_MODULE, loader_symbols,
             sizeof(loader_symbols) / sizeof(loader_symbols[0]))) {
         return false;

@@ -95,6 +95,10 @@ MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_import_wasm_obj);
 MP_DECLARE_CONST_FUN_OBJ_KW(mod_wasm_install_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_uninstall_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_cdn_obj);
+
+/* PE/UEFI: rewrite const fun-obj fn ptrs before first Python call. */
+void mp_wasm_fixup_packload_fun_objs(void);
+void mp_wasm_fixup_modobj_fun_objs(void);
 MP_DECLARE_CONST_FUN_OBJ_KW(mod_wasm_catalog_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_session_id_obj);
 MP_DECLARE_CONST_FUN_OBJ_KW(mod_wasm_publish_obj);
