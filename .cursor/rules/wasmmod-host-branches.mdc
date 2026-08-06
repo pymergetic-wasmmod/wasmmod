@@ -1,0 +1,27 @@
+---
+description: metalpython wasmmod must stay ancestor of master; bump submodule on wasmmod first
+alwaysApply: true
+---
+
+# Host branches (`wasmmod` vs `master`)
+
+`wasmmod` = clean upy-shaped integration + `extmod/wasmmod` submodule (upstream PR track).
+`master` = Metal product tree; **must keep `wasmmod` as a git ancestor**.
+
+Canonical write-up: [`BRANCHES.md`](../../BRANCHES.md) (this package repo root).
+
+## Invariant
+
+```sh
+git merge-base --is-ancestor origin/wasmmod origin/master && echo OK
+```
+
+If that fails, merge (or rebase) `wasmmod` into `master` before more product work.
+
+## Submodule bumps
+
+1. Land changes in `pymergetic/wasmmod` `main` first.
+2. Bump `extmod/wasmmod` on metalpython **`wasmmod`** (µPy commit style + `Signed-off-by` last — feeds upstream PR CI).
+3. Fast-forward / merge **`master`** onto that tip; do **not** dual-commit the same bump on both branches in parallel.
+
+`wasmmod` (package repo default branch) ≠ metalpython host branch `wasmmod`.

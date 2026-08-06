@@ -1,0 +1,13 @@
+---
+description: After new wasmmod QSTRs, rebuild build-wasm genhdr; avoid build-standard compile_commands
+alwaysApply: true
+---
+
+# QSTR / clangd for wasmmod faces
+
+False `Use of undeclared identifier 'MP_QSTR_pymergetic_dot_…'` usually means:
+
+1. New `Q(pymergetic….…)` in `qstrdefs.wasmmod` but **genhdr not rebuilt**, or
+2. `compile_commands.json` analyzes wasmmod `.c` with **`build-standard`** (no wasm QSTRs) instead of **`build-wasm`**.
+
+**Fix:** add `Q(…)` lines → rebuild unix `BUILD=build-wasm` → keep `extmod/wasmmod/.clangd` on `build-wasm` includes only.

@@ -1,0 +1,12 @@
+---
+description: Never git push wasmmod/metalpython remotes unless the user explicitly asks
+alwaysApply: true
+---
+
+# No automatic pushes
+
+Same constellation rule as monorepo root: **no** `git push` / remote publish unless the user explicitly asks in this turn.
+
+Overnight handoff, SYMBOLS grind, and “continue” mean **local** work only. Leave commits (if requested) on the local branch; wait for an explicit push before touching `origin`.
+
+Submodule bumps on metalpython `wasmmod`/`master` also stay local until the user asks to push.

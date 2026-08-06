@@ -1,0 +1,12 @@
+---
+description: Constellation agents must open the os-sdk monorepo, not metalpython alone
+alwaysApply: true
+---
+
+# Workspace: use the monorepo
+
+For wasmmod / metal-cdn / wasmmod-tools / metalpython **together**, open Cursor on:
+
+`/home/ladmin/Devel/os-sdk`
+
+Do **not** run long agents from `packages/metalpython` alone — sibling-package edits trigger allow-access spam.
