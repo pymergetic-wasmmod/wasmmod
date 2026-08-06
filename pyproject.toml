@@ -28,7 +28,7 @@ fallback-version = "0.1.0a1"
 
 [tool.hatch.build.targets.wheel]
 packages = ["python/pymergetic"]
-# Dev-only symlink → sibling wasmmod-tools (IDE / PYTHONPATH=python). Not shipped.
+# Dev-only symlink → nested submodule dev/tools (IDE / PYTHONPATH=python). Not shipped.
 exclude = ["python/pymergetic/wasmmod/tools"]
 
 # hatch_build.py stages python/pymergetic/wasmmod/rt/share/ (cleaned checkout).

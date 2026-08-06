@@ -2,7 +2,7 @@
   "include": ["scripts", "python", "tools", "examples"],
   "exclude": ["**/.venv", "**/__pycache__", "build", "dist", "third_party", "target", ".clangd-include"],
   "extraPaths": [
-    "../wasmmod-tools/src",
+    "dev/tools/src",
     "python"
   ],
   "pythonVersion": "3.12",

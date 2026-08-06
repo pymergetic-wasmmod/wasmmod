@@ -12,7 +12,7 @@ except ImportError as exc:
     raise SystemExit(
         "Install the host package:\n"
         "  pip install --pre pymergetic-wasmmod\n"
-        "  # or editable: pip install -e ../../../../wasmmod-tools\n"
+        "  # or editable: pip install -e ../dev/tools\n"
         f"Import error: {exc}"
     ) from exc
 

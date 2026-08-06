@@ -115,15 +115,18 @@ packages/metal/src/pymergetic/metal/
 ### wasmmod — host ABI + Metal port
 
 ```text
-packages/wasmmod/
+extmod/wasmmod/                    # submodule of metalpython (sole checkout)
 ├── include/pm_{upy,wasmmod,guest}.h
 ├── glue/pm_{upy,wasmmod}/
-├── crates/pm/src/{upy,wasmmod}/   # thin wraps (Phase A)
+├── crates/pm/src/{upy,wasmmod}/
 ├── ports/
-│   ├── micropython/               # unix / existing
-│   └── metal/                     # Phase B — io ops park async
-├── docs/METAL_INTEGRATION.md      # this plan
-└── wasmmod.c                      # pymergetic.upy / .wasmmod faces
+│   ├── micropython/
+│   └── metal/                     # freestanding WAMR + io_ops / register_upy
+├── dev/
+│   ├── tools/                     # submodule → wasmmod-tools
+│   └── test/                      # submodule → wasmmod-test
+├── docs/METAL_INTEGRATION.md
+└── wasmmod.c
 ```
 
 ### metalpython — clean host track

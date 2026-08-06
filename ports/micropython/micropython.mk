@@ -205,7 +205,7 @@ endif
 
 # Optional: embed pymergetic.wasmmod self-desc into the linked unix PROG (ELF).
 #   make MICROPY_PY_WASM=1 embed-host-desc
-# Requires: pip install pymergetic-wasmmod-tools (or editable sibling wasmmod-tools).
+# Requires: pip install pymergetic-wasmmod-tools (or editable: pip install -e ../../dev/tools).
 WASMMOD_EMBED_HOST_SOURCE ?= 0
 .PHONY: embed-host-desc
 embed-host-desc:
