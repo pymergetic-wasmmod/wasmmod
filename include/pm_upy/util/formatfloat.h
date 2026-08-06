@@ -15,6 +15,9 @@ extern "C" {
 
 int pm_upy_formatfloat_available(void);
 
+#include <stddef.h>
+int pm_upy_format_float(double v, char *buf, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

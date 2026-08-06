@@ -3,7 +3,7 @@
 #   make -C extmod/wasmmod/examples/bridge
 
 include ../find_top.mk
-OUT = ../packs/bridge.wasm
+OUT = ../packs/pymergetic.wasmmod_examples.bridge.wasm
 
 .PHONY: all clean
 

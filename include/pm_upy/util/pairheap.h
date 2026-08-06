@@ -15,6 +15,8 @@ extern "C" {
 
 int pm_upy_pairheap_available(void);
 
+int pm_upy_pairheap_init(void *heap);
+
 #ifdef __cplusplus
 }
 #endif

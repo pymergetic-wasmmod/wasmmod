@@ -2,7 +2,7 @@
 # Built only for test-elf; not published to packs/.
 
 type = "package"
-name = "badupy"
+name = "pymergetic.wasmmod_examples.badupy"
 version = "0.0.1"
 impl = ["c"]
 comment = "Expect load failure: micropython.* not supported"

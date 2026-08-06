@@ -31,6 +31,11 @@
 
 #include "py/obj.h"
 
+// True for host/kernel face FQNs that must never WAMR-load as guest packs
+// (pymergetic.wasmmod, pymergetic.upy, pymergetic.metal, and their children).
+// Does not match pymergetic.wasmmod_examples.* (underscore after wasmmod).
+bool mp_wasm_is_host_face(const char *dotted_name);
+
 // Search wasm.path then sys.path for a pack matching the dotted import name.
 // Path form: a/b/c/__init__.wasm | a/b/c.wasm
 // Flat form: a.b.c.wasm  (when name has dots; handy under packs/)

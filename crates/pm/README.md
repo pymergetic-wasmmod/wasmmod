@@ -10,7 +10,10 @@ Bindgen over the public umbrellas:
 cargo check -p pm
 ```
 
-Raw declarations: `pm::sys::*`. Status helpers: `pm::check_status` / `pm::FeatureError`.
+Raw declarations: `pm::upy::ffi::*` / `pm::wasmmod::ffi::*` (bindgen dump; prefer
+`pm_upy_*` / `pm_wasmmod_*` respectively). Thin wraps: `pm::upy::{mem,features,time,run,sched}`,
+`pm::wasmmod::host`, `pm::wasmmod::version`. Status helpers: `pm::check_status` /
+`pm::FeatureError`.
 
 **Linking:** this crate does not compile or link MicroPython/wasmmod glue. Host binaries
 must link the µPy port + `glue/` objects. Guest import attrs are a later `cfg` path.

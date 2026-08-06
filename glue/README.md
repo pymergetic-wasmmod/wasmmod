@@ -18,7 +18,7 @@ inside `pm_wasmmod_runtime_init()` → `mp_wasm_host_register` /
 
 | Area | Glue |
 |------|------|
-| `pm_wasmmod_*` | `glue/pm_wasmmod/**` |
+| `pm_wasmmod_*` | `glue/pm_wasmmod/**` (incl. inspect + source) |
 | features / init / mem / obj / hal / nlr | matching `glue/pm_upy/**` |
 | sched / handle_pending / loop step | `loop/sched.c`, `loop/step.c` |
 | REPL event helpers | `loop/repl.c` (needs `MICROPY_HELPER_REPL`) |

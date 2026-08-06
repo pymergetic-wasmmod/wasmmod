@@ -189,7 +189,7 @@ int pm_upy_stackalt_available(void) {
 }
 
 int pm_upy_autoload_available(void) {
-    return 0;
+    return 1;
 }
 
 int pm_upy_persistentcode_available(void) {

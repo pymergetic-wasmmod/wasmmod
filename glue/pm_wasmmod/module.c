@@ -16,7 +16,7 @@ static int installed;
 
 bool pm_wasmmod_module_install(const char *full_name) {
     if (!full_name || !full_name[0]) {
-        full_name = "wasm";
+        full_name = "pymergetic.wasmmod";
     }
     if (pm_upy_module_install_face(full_name, (void *)1) != 0) {
         return false;

@@ -15,6 +15,10 @@ extern "C" {
 
 int pm_upy_ringbuf_available(void);
 
+#include <stdint.h>
+int pm_upy_ringbuf_put(void *rb, uint8_t v);
+int pm_upy_ringbuf_get(void *rb, uint8_t *v);
+
 #ifdef __cplusplus
 }
 #endif

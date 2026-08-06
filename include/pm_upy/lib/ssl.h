@@ -15,6 +15,9 @@ extern "C" {
 
 int pm_upy_ssl_available(void);
 
+#include "pm_upy/obj/core.h"
+pm_upy_obj_t pm_upy_ssl_wrap_socket(pm_upy_obj_t sock);
+
 #ifdef __cplusplus
 }
 #endif

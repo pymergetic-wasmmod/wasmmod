@@ -1,6 +1,6 @@
 # Root package for dotted-tree e2e (C + Rust + Python).
 type = "package"
-name = "test_a"
+name = "pymergetic.wasmmod_examples.test_a"
 version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Dotted-tree root pack."

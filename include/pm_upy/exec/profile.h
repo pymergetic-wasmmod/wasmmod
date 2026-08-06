@@ -15,6 +15,8 @@ extern "C" {
 
 int pm_upy_profile_settrace(void *cb);
 
+void pm_upy_prof_instr_tick(void);
+
 #ifdef __cplusplus
 }
 #endif

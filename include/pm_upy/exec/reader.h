@@ -15,6 +15,11 @@ extern "C" {
 
 int pm_upy_reader_available(void);
 
+#include <stddef.h>
+#include <stdint.h>
+void *pm_upy_reader_new_mem(const uint8_t *data, size_t len);
+void *pm_upy_reader_new_file(const char *path);
+
 #ifdef __cplusplus
 }
 #endif

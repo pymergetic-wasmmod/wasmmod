@@ -13,7 +13,11 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+#include "pm_upy/obj/core.h"
+
 int pm_upy_mpz_available(void);
+pm_upy_obj_t pm_upy_mpz_from_int(int64_t v);
 
 #ifdef __cplusplus
 }

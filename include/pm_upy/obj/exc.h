@@ -17,6 +17,10 @@ extern "C" {
 void pm_upy_raise_msg(const char *type_name, const char *msg);
 void pm_upy_raise_feature(const char *api_name);
 
+void pm_upy_raise_OSError(int errno_val);
+pm_upy_obj_t pm_upy_obj_new_exception(const char *type_name, const char *msg);
+void pm_upy_obj_print_exception(pm_upy_obj_t exc);
+
 #ifdef __cplusplus
 }
 #endif

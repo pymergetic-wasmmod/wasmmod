@@ -19,6 +19,9 @@ void pm_upy_repl_stop(void);
 int pm_upy_repl_active(void);
 int pm_upy_repl_feed_line(const char *line, size_t len);
 const char *pm_upy_repl_prompt(void);
+int pm_upy_repl_continue(const char *src);
+int pm_upy_repl_autocomplete(const char *src, char *out, size_t out_len);
+const char *pm_upy_repl_banner(void);
 
 #ifdef __cplusplus
 }

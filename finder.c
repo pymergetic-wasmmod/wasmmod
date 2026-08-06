@@ -399,8 +399,29 @@ static bool find_in_list(mp_obj_t list_obj, const char *dotted_name, const char 
     return false;
 }
 
-bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out) {
+bool mp_wasm_is_host_face(const char *dotted_name) {
     if (dotted_name == NULL || dotted_name[0] == '\0') {
+        return false;
+    }
+    // Exact host faces + dotted children. Underscore after the stem
+    // (wasmmod_examples) is intentionally not a match.
+    static const char *const faces[] = {
+        "pymergetic.wasmmod",
+        "pymergetic.upy",
+        "pymergetic.metal",
+    };
+    for (size_t i = 0; i < MP_ARRAY_SIZE(faces); ++i) {
+        size_t n = strlen(faces[i]);
+        if (strncmp(dotted_name, faces[i], n) == 0
+            && (dotted_name[n] == '\0' || dotted_name[n] == '.')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out) {
+    if (dotted_name == NULL || dotted_name[0] == '\0' || mp_wasm_is_host_face(dotted_name)) {
         return false;
     }
     vstr_t slash;
@@ -425,7 +446,7 @@ bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out) {
 // Import-hook prefer-path: wasm.path only (VFS + HTTP). Packs beat a
 // same-named empty dir on cwd/sys.path; sys.path pack roots stay on ImportError.
 bool mp_wasm_find_pack_on_wasm_path(const char *dotted_name, vstr_t *path_out) {
-    if (dotted_name == NULL || dotted_name[0] == '\0') {
+    if (dotted_name == NULL || dotted_name[0] == '\0' || mp_wasm_is_host_face(dotted_name)) {
         return false;
     }
     vstr_t slash;
@@ -734,6 +755,9 @@ bool mp_wasm_has_descendants(const char *prefix) {
 }
 
 bool mp_wasm_query_import(const char *dotted_name) {
+    if (mp_wasm_is_host_face(dotted_name)) {
+        return false;
+    }
     vstr_t path;
     if (mp_wasm_find_pack(dotted_name, &path)) {
         vstr_clear(&path);
@@ -792,6 +816,12 @@ mp_obj_t mp_wasm_import_wasm_at(const char *dotted_name, const char *known_path)
     mp_obj_t existing = lookup_loaded(dotted_name);
     if (existing != MP_OBJ_NULL) {
         return existing;
+    }
+
+    // Host/kernel faces are builtin modules — never fetch/instantiate the engine.
+    if (mp_wasm_is_host_face(dotted_name)) {
+        mp_raise_msg_varg(&mp_type_ImportError,
+            MP_ERROR_TEXT("host face '%s' is not a guest pack"), dotted_name);
     }
 
     // Metal CDN first: /artifacts/lead|pin (prefer .zlib). Skip flat wasm.path

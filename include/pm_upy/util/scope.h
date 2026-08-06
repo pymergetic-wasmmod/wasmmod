@@ -15,6 +15,8 @@ extern "C" {
 
 int pm_upy_scope_available(void);
 
+void *pm_upy_scope_new(void);
+
 #ifdef __cplusplus
 }
 #endif

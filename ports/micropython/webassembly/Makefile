@@ -20,7 +20,12 @@ SIGN_ROOT ?= $(WASMMOD_DIR)/examples/.keys/trust/root.crt.der
 MICROPY_WASM_VERIFY ?= 1
 MICROPY_WASM_TRUST_CA ?= $(SIGN_ROOT)
 
-.PHONY: all clean sync-help ensure-trust
+# Embed pymergetic.wasmmod pack meta + curated wasmmod.source into micropython.wasm
+# (self-describing host for Inspect / wasm.source_*). Set 0 for tiny CI builds.
+WASMMOD_EMBED_HOST_SOURCE ?= 1
+HOST_ALIAS := $(BUILD)/pymergetic.wasmmod.wasm
+
+.PHONY: all clean sync-help ensure-trust embed-host-desc
 .DEFAULT_GOAL := all
 
 ensure-trust:
@@ -39,9 +44,22 @@ all: ensure-trust
 		MICROPY_WASM_VERIFY=$(MICROPY_WASM_VERIFY) \
 		MICROPY_WASM_TRUST_CA="$(MICROPY_WASM_TRUST_CA)" \
 		-j$(shell nproc 2>/dev/null || echo 4)
+	@$(MAKE) embed-host-desc
+
+embed-host-desc:
+ifeq ($(WASMMOD_EMBED_HOST_SOURCE),1)
+	@test -f "$(BUILD)/micropython.wasm" || { echo "FAIL: missing $(BUILD)/micropython.wasm"; exit 1; }
+	@echo "==> embed host self-desc (pymergetic.wasmmod) into micropython.wasm"
+	python3 -m pymergetic.wasmmod.tools embed-host "$(BUILD)/micropython.wasm" \
+		--wasmmod-root "$(WASMMOD_DIR)" \
+		--alias "$(HOST_ALIAS)"
+else
+	@echo "==> WASMMOD_EMBED_HOST_SOURCE=0 — skip host source embed"
+endif
 
 clean:
 	$(MAKE) -C $(WEBASSEMBLY_PORT) VARIANT_DIR=$(VARIANT_DIR) BUILD=$(BUILD) clean
+	rm -f "$(HOST_ALIAS)"
 
 sync-help:
 	@echo "Sync into metal-cdn:"

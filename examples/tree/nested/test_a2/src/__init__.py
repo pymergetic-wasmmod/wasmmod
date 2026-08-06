@@ -2,4 +2,4 @@
 
 
 def a2_py():
-    return "test_a2"
+    return "pymergetic.wasmmod_examples.test_a2"

@@ -2,7 +2,7 @@
 # Python tree is shared with examples/hello (same package name).
 
 type = "package"
-name = "hello"
+name = "pymergetic.wasmmod_examples.hello"
 version = "0.1.0"
 impl = ["c"]
 comment = "ELF64 ET_REL twin of hello.wasm — same register/connect, no WAMR."

@@ -15,6 +15,10 @@ extern "C" {
 
 int pm_upy_re_available(void);
 
+#include "pm_upy/obj/core.h"
+pm_upy_obj_t pm_upy_re_compile(const char *pat);
+pm_upy_obj_t pm_upy_re_match(pm_upy_obj_t regex, const char *s);
+
 #ifdef __cplusplus
 }
 #endif

@@ -18,6 +18,9 @@ extern "C" {
 int pm_upy_raw_code_load_mem(const uint8_t *data, size_t len);
 int pm_upy_raw_code_save(void); /* stub */
 
+int pm_upy_raw_code_load_file(const char *path, void **raw_out);
+int pm_upy_find_frozen(const char *name, void **out);
+
 #ifdef __cplusplus
 }
 #endif

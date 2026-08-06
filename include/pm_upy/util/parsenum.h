@@ -15,6 +15,9 @@ extern "C" {
 
 int pm_upy_parsenum_available(void);
 
+#include <stdint.h>
+int pm_upy_parse_num(const char *s, int64_t *out);
+
 #ifdef __cplusplus
 }
 #endif

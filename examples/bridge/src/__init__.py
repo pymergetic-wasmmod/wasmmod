@@ -35,13 +35,13 @@ def ping_code():
 
 def via_native(x):
     """Python in the pack calling this pack's native export."""
-    import bridge  # type: ignore[import-not-found]
+    import pymergetic.wasmmod_examples.bridge  # type: ignore[import-not-found]
     return bridge.via_rs(x)
 
 
 def via_native_rich(x):
     """Pack Python exercising richer numeric native exports."""
-    import bridge  # type: ignore[import-not-found]
+    import pymergetic.wasmmod_examples.bridge  # type: ignore[import-not-found]
     i = bridge.via_i64(x)
     f = bridge.via_f32(1.5)
     d = bridge.scale_add_f64(2.0, 3.0, 0.5)
@@ -51,13 +51,13 @@ def via_native_rich(x):
 
 def via_peer_hello():
     """Pack Python → peer pack C (sys.modules guest→guest)."""
-    import hello  # type: ignore[import-not-found]
+    import pymergetic.wasmmod_examples.hello as hello  # type: ignore[import-not-found]
     return hello.hello()
 
 
 def via_peer_mixed_i64(x):
     """Pack Python → peer pack mixed (C→RS) export."""
-    import mixed  # type: ignore[import-not-found]
+    import pymergetic.wasmmod_examples.mixed as mixed  # type: ignore[import-not-found]
     return mixed.mixed_i64(x)
 
 
@@ -68,8 +68,8 @@ def via_py_self():
 
 def via_peer_util():
     """Guest→guest Py → Py (peer pack embedded python)."""
-    import hello.util  # type: ignore[import-not-found]
-    return hello.util.ping()
+    import pymergetic.wasmmod_examples.hello.util as hello_util  # type: ignore[import-not-found]
+    return hello_util.ping()
 
 
 def via_host_api(x):

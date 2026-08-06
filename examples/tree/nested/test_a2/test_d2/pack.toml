@@ -1,6 +1,6 @@
 # Sibling of test_b2 under test_a2/ (nested monorepo layout).
 type = "package"
-name = "test_a2.test_d2"
+name = "pymergetic.wasmmod_examples.test_a2.test_d2"
 version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Nested sibling dep of test_c2."

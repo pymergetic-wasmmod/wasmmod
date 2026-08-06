@@ -8,10 +8,19 @@
 
 #include "pm_upy/loop/repl.h"
 #include "pm_common.h"
+#include "py/mpprint.h"
 #include "shared/runtime/pyexec.h"
+
+#include <string.h>
 
 #ifndef MICROPY_HELPER_REPL
 #define MICROPY_HELPER_REPL 0
+#endif
+
+#if MICROPY_HELPER_REPL
+/* Avoid pulling py/repl.h (sys mutable PS1/PS2) into this TU. */
+bool mp_repl_continue_with_input(const char *input);
+size_t mp_repl_autocomplete(const char *str, size_t len, const mp_print_t *print, const char **compl_str);
 #endif
 
 int pm_upy_repl_start(void) {
@@ -62,4 +71,45 @@ int pm_upy_repl_feed_line(const char *line, size_t len) {
 
 const char *pm_upy_repl_prompt(void) {
     return pyexec_mode_kind == PYEXEC_MODE_RAW_REPL ? "" : ">>> ";
+}
+
+int pm_upy_repl_continue(const char *src) {
+#if MICROPY_HELPER_REPL
+    if (!src) {
+        return PM_ERR_ARG;
+    }
+    return mp_repl_continue_with_input(src) ? 1 : 0;
+#else
+    (void)src;
+    return PM_ERR_FEATURE;
+#endif
+}
+
+int pm_upy_repl_autocomplete(const char *src, char *out, size_t out_len) {
+#if MICROPY_HELPER_REPL
+    if (!src) {
+        return PM_ERR_ARG;
+    }
+    const char *compl = NULL;
+    size_t n = mp_repl_autocomplete(src, strlen(src), &mp_plat_print, &compl);
+    if (out && out_len) {
+        out[0] = '\0';
+        if (compl && n > 0) {
+            size_t copy = n < out_len - 1 ? n : out_len - 1;
+            memcpy(out, compl, copy);
+            out[copy] = '\0';
+        }
+    }
+    return (int)n;
+#else
+    (void)src;
+    if (out && out_len) {
+        out[0] = '\0';
+    }
+    return PM_ERR_FEATURE;
+#endif
+}
+
+const char *pm_upy_repl_banner(void) {
+    return "MicroPython";
 }

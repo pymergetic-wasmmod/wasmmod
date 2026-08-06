@@ -40,6 +40,7 @@
 #include "extmod/wasmmod/forward.h"
 #include "extmod/wasmmod/runtime.h"
 #include "extmod/wasmmod/verify.h"
+#include "pm_upy/obj/module.h"
 #include "pm_wasmmod/module.h"
 #include "wasm_export.h"
 
@@ -184,8 +185,9 @@ bool mp_wasm_runtime_init(void) {
         wasm_runtime_destroy();
         return false;
     }
-    /* Gut-exposure module face: same name as Python `import wasm`. */
-    (void)pm_wasmmod_module_install("wasm");
+    /* Host faces: Python `import pymergetic.wasmmod` / `pymergetic.upy`. */
+    (void)pm_wasmmod_module_install("pymergetic.wasmmod");
+    (void)pm_upy_module_install_face("pymergetic.upy", (void *)1);
     runtime_ready = 1;
     return true;
 }

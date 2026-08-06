@@ -19,6 +19,24 @@ pm_upy_obj_t pm_upy_call_function_1(pm_upy_obj_t fun, pm_upy_obj_t arg) {
         (mp_obj_t)(uintptr_t)fun, (mp_obj_t)(uintptr_t)arg);
 }
 
+pm_upy_obj_t pm_upy_call_function_n(pm_upy_obj_t fun, size_t n, pm_upy_obj_t *args) {
+    return (pm_upy_obj_t)(uintptr_t)mp_call_function_n_kw(
+        (mp_obj_t)(uintptr_t)fun, n, 0, (const mp_obj_t *)args);
+}
+
+pm_upy_obj_t pm_upy_call_method(pm_upy_obj_t obj, const char *name, size_t n, pm_upy_obj_t *args) {
+    if (!name) {
+        return (pm_upy_obj_t)(uintptr_t)mp_const_none;
+    }
+    mp_obj_t meth = mp_load_attr((mp_obj_t)(uintptr_t)obj, qstr_from_str(name));
+    return (pm_upy_obj_t)(uintptr_t)mp_call_function_n_kw(meth, n, 0, (const mp_obj_t *)args);
+}
+
+pm_upy_obj_t pm_upy_fn_call_async(pm_upy_obj_t fun, size_t n, pm_upy_obj_t *args) {
+    /* Async scheduling is host-specific; call sync for now. */
+    return pm_upy_call_function_n(fun, n, args);
+}
+
 uint32_t pm_upy_fn_resolve(const char *dotted) {
     (void)dotted;
     return 0;

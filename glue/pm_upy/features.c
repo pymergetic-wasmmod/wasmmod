@@ -10,6 +10,11 @@
 #include "pm_upy/features.h"
 #include "version.h"
 
+/* Host builds compile glue with the port include path — pick up real feature macros. */
+#if defined(MICROPY_PY_WASM) && __has_include("py/mpconfig.h")
+#include "py/mpconfig.h"
+#endif
+
 #ifndef MICROPY_ENABLE_GC
 #define MICROPY_ENABLE_GC 0
 #endif

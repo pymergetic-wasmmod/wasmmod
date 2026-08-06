@@ -1,6 +1,6 @@
 # Build ticks.wasm — positive micropython.runtime.ticks_ms catalog smoke.
 include ../find_top.mk
-OUT = ../packs/ticks.wasm
+OUT = ../packs/pymergetic.wasmmod_examples.ticks.wasm
 
 .PHONY: all clean
 

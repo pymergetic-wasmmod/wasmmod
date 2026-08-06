@@ -15,6 +15,10 @@ extern "C" {
 
 int pm_upy_asyncio_available(void);
 
+#include "pm_upy/obj/core.h"
+int pm_upy_asyncio_run(pm_upy_obj_t coro);
+pm_upy_obj_t pm_upy_asyncio_create_task(pm_upy_obj_t coro);
+
 #ifdef __cplusplus
 }
 #endif

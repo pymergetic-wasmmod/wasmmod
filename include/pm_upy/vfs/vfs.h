@@ -21,6 +21,11 @@ int pm_upy_vfs_open(const char *path, const char *mode, pm_upy_obj_t *out);
 /** Stat path; on success *out is the stat tuple/obj from VFS. */
 int pm_upy_vfs_stat(const char *path, pm_upy_obj_t *out);
 
+int pm_upy_vfs_mount(pm_upy_obj_t vfs, const char *mount_point);
+pm_upy_obj_t pm_upy_vfs_listdir(const char *path);
+int pm_upy_vfs_import_stat(const char *path);
+pm_upy_obj_t pm_upy_builtin_open(const char *path, const char *mode);
+
 #ifdef __cplusplus
 }
 #endif

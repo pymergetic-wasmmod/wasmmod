@@ -28,7 +28,7 @@
 
 #include "pm_guest.h"
 
-MP_WASM_IMPORT("hello", int, hello, void);
+MP_WASM_IMPORT("pymergetic.wasmmod_examples.hello", int, hello, void);
 
 int use_hello(void) {
     return hello();

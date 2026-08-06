@@ -21,11 +21,15 @@
 #include "pm_wasmmod/host/cookie.h" // IWYU pragma: export
 #include "pm_wasmmod/host/handle.h" // IWYU pragma: export
 #include "pm_wasmmod/host/call.h" // IWYU pragma: export
+#include "pm_wasmmod/host/self.h" // IWYU pragma: export
+
 #include "pm_wasmmod/path/io.h" // IWYU pragma: export
 #include "pm_wasmmod/path/cdn.h" // IWYU pragma: export
 #include "pm_wasmmod/path/verify.h" // IWYU pragma: export
 #include "pm_wasmmod/path/fetch.h" // IWYU pragma: export
 #include "pm_wasmmod/path/zlib.h" // IWYU pragma: export
+#include "pm_wasmmod/inspect/inspect.h" // IWYU pragma: export
+#include "pm_wasmmod/inspect/source.h" // IWYU pragma: export
 #include "pm_wasmmod/module.h" // IWYU pragma: export
 
 #endif /* PM_PM_WASMMOD_H_ */

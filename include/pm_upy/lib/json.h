@@ -15,6 +15,10 @@ extern "C" {
 
 int pm_upy_json_available(void);
 
+#include "pm_upy/obj/core.h"
+pm_upy_obj_t pm_upy_json_loads(const char *s);
+pm_upy_obj_t pm_upy_json_dumps(pm_upy_obj_t o);
+
 #ifdef __cplusplus
 }
 #endif

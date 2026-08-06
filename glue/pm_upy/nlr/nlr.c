@@ -6,7 +6,8 @@
  * Copyright (c) 2026 Rouven Raudzus <raudzus@pymergetic.com>
  */
 
-
 #include "pm_upy/nlr/nlr.h"
-int pm_upy_nlr_available(void) { return 1; }
 
+int pm_upy_nlr_available(void) {
+    return 1;
+}

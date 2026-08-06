@@ -15,6 +15,10 @@ extern "C" {
 
 int pm_upy_uctypes_available(void);
 
+#include <stdint.h>
+#include "pm_upy/obj/core.h"
+pm_upy_obj_t pm_upy_uctypes_struct(uint32_t addr, pm_upy_obj_t desc, int flags);
+
 #ifdef __cplusplus
 }
 #endif

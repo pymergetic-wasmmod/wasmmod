@@ -1,6 +1,6 @@
 # Tiny mixed C + Rust pack (C ABI at the Wasm boundary).
 type = "package"
-name = "mixed"
+name = "pymergetic.wasmmod_examples.mixed"
 version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Smoke for multi-language native link in wasm_pack."

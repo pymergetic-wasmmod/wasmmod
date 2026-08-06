@@ -47,7 +47,7 @@ int via_mem(void) {
 
 int via_py(int x) {
     /* Host sets hello._elf_abs before calling (pack Python module is writable). */
-    static const char mod[] = "hello";
+    static const char mod[] = "pymergetic.wasmmod_examples.hello";
     static const char attr[] = "_elf_abs";
     return call_py(mod, (int)sizeof(mod) - 1, attr, (int)sizeof(attr) - 1, x);
 }

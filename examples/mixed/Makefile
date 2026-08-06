@@ -1,5 +1,5 @@
 include ../find_top.mk
-OUT = ../packs/mixed.wasm
+OUT = ../packs/pymergetic.wasmmod_examples.mixed.wasm
 
 .PHONY: all clean
 

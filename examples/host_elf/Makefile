@@ -3,9 +3,9 @@
 #   make -C extmod/wasmmod/examples/host_elf
 
 include ../find_top.mk
-OUT = ../packs/hostcall.elf
+OUT = ../packs/pymergetic.wasmmod_examples.hostcall.elf
 ARCH ?= $(shell uname -m)
-OUT_ARCH = ../packs/hostcall.$(ARCH).elf
+OUT_ARCH = ../packs/pymergetic.wasmmod_examples.hostcall.$(ARCH).elf
 
 CC ?= gcc
 CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -g -c

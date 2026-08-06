@@ -32,7 +32,7 @@
 import sys
 
 try:
-    import wasm  # type: ignore[import-not-found]
+    import pymergetic.wasmmod as wasm  # type: ignore[import-not-found]
 except ImportError:
     print("FAIL: wasm module missing — rebuild with MICROPY_PY_WASM=1")
     sys.exit(1)
@@ -178,8 +178,8 @@ print(
 )
 
 print("Load peer packs (guest→guest needs them registered first)")
-h = wasm.load_pack(p("packs/hello.wasm"))
-m = wasm.load_pack(p("packs/mixed.wasm"))
+h = wasm.load_pack(p("packs/pymergetic.wasmmod_examples.hello.wasm"))
+m = wasm.load_pack(p("packs/pymergetic.wasmmod_examples.mixed.wasm"))
 print("  sys.modules: hello, mixed")
 
 
@@ -252,12 +252,12 @@ sys.modules["hostc"] = _HostC()  # type: ignore[assignment]
 sys.modules["hostrs"] = _HostRS()  # type: ignore[assignment]
 print("  sys.modules: hostapi, hostc, hostrs")
 
-b = wasm.load_pack(p("packs/bridge.wasm"))
+b = wasm.load_pack(p("packs/pymergetic.wasmmod_examples.bridge.wasm"))
 print("  sys.modules: bridge")
 
 # pack-embedded Python (runtime import)
-import hello.util  # type: ignore[import-not-found]
-import hello.util.extra  # type: ignore[import-not-found]
+import pymergetic.wasmmod_examples.hello.util  # type: ignore[import-not-found]
+import pymergetic.wasmmod_examples.hello.util.extra  # type: ignore[import-not-found]
 
 # ---------------------------------------------------------------------------
 # H — Host → Guest  (Python / pack-Py calls into C / RS / pack-Py)
@@ -602,7 +602,7 @@ case(
     "G",
     "C",
     "C",
-    "bridge.via_hello() → import hello.hello → C peer",
+    "bridge.via_hello() → import pymergetic.wasmmod_examples.hello.hello → C peer",
     b.via_hello(),
     42,
 )
@@ -618,7 +618,7 @@ case(
     "G",
     "C",
     "C",
-    "bridge.via_loader_hello() → wasmmod.call_i32('hello','hello')",
+    "bridge.via_loader_hello() → wasmmod.call_i32('pymergetic.wasmmod_examples.hello','pymergetic.wasmmod_examples.hello')",
     b.via_loader_hello(),
     42,
 )
@@ -626,7 +626,7 @@ case(
     "G",
     "RS",
     "C",
-    "bridge.rs_via_loader_hello() → wasmmod.call_i32('hello','hello')",
+    "bridge.rs_via_loader_hello() → wasmmod.call_i32('pymergetic.wasmmod_examples.hello','pymergetic.wasmmod_examples.hello')",
     b.rs_via_loader_hello(),
     42,
 )
@@ -674,7 +674,7 @@ case(
     "G",
     "C",
     "RS",
-    "bridge.via_mixed() → import mixed.mixed_answer → C→RS peer",
+    "bridge.via_mixed() → import pymergetic.wasmmod_examples.mixed.mixed_answer → C→RS peer",
     b.via_mixed(),
     42,
 )
@@ -682,7 +682,7 @@ case(
     "G",
     "C",
     "RS",
-    "bridge.via_mixed_i64(10) → import mixed.mixed_i64 → C→RS peer",
+    "bridge.via_mixed_i64(10) → import pymergetic.wasmmod_examples.mixed.mixed_i64 → C→RS peer",
     b.via_mixed_i64(10),
     17,
 )
@@ -690,27 +690,27 @@ case(
     "G",
     "RS",
     "RS",
-    "bridge.rs_via_mixed_i64(10) → Rust import mixed.mixed_i64",
+    "bridge.rs_via_mixed_i64(10) → Rust import pymergetic.wasmmod_examples.mixed.mixed_i64",
     b.rs_via_mixed_i64(10),
     17,
 )
 
-c = wasm.load_pack(p("packs/client.wasm"))
+c = wasm.load_pack(p("packs/pymergetic.wasmmod_examples.client.wasm"))
 case(
     "G",
     "C",
     "C",
-    "client.use_hello() → import hello.hello  [separate client pack]",
+    "client.use_hello() → import pymergetic.wasmmod_examples.hello.hello  [separate client pack]",
     c.use_hello(),
     42,
 )
-wasm.unload("client")
+wasm.unload("pymergetic.wasmmod_examples.client")
 
 case(
     "G",
     "Py",
     "C",
-    "bridge.via_peer_hello()  [pack py import hello → C export]",
+    "bridge.via_peer_hello()  [pack py import pymergetic.wasmmod_examples.hello → C export]",
     b.via_peer_hello(),
     42,
 )
@@ -718,7 +718,7 @@ case(
     "G",
     "Py",
     "RS",
-    "bridge.via_peer_mixed_i64(10)  [pack py import mixed → mixed_i64]",
+    "bridge.via_peer_mixed_i64(10)  [pack py import pymergetic.wasmmod_examples.mixed → mixed_i64]",
     b.via_peer_mixed_i64(10),
     17,
 )
@@ -770,16 +770,16 @@ case(
     "H",
     "C",
     "C",
-    "wasm.c_call('hello','hello')  [host C → guest C export]",
-    wasm.c_call("hello", "hello"),
+    "wasm.c_call('pymergetic.wasmmod_examples.hello','pymergetic.wasmmod_examples.hello')  [host C → guest C export]",
+    wasm.c_call("pymergetic.wasmmod_examples.hello", "pymergetic.wasmmod_examples.hello"),
     42,
 )
 case(
     "H",
     "C",
     "RS",
-    "wasm.c_call('bridge','rs_square',5)  [host C → guest RS]",
-    wasm.c_call("bridge", "rs_square", 5),
+    "wasm.c_call('pymergetic.wasmmod_examples.bridge','rs_square',5)  [host C → guest RS]",
+    wasm.c_call("pymergetic.wasmmod_examples.bridge", "rs_square", 5),
     25,
 )
 case(
@@ -794,24 +794,24 @@ case(
     "H",
     "RS",
     "C",
-    "wasm.rs_call('hello','hello')  [host RS → guest C]",
-    wasm.rs_call("hello", "hello"),
+    "wasm.rs_call('pymergetic.wasmmod_examples.hello','pymergetic.wasmmod_examples.hello')  [host RS → guest C]",
+    wasm.rs_call("pymergetic.wasmmod_examples.hello", "pymergetic.wasmmod_examples.hello"),
     42,
 )
 case(
     "H",
     "RS",
     "RS",
-    "wasm.rs_call('bridge','rs_square',5)  [host RS → guest RS]",
-    wasm.rs_call("bridge", "rs_square", 5),
+    "wasm.rs_call('pymergetic.wasmmod_examples.bridge','rs_square',5)  [host RS → guest RS]",
+    wasm.rs_call("pymergetic.wasmmod_examples.bridge", "rs_square", 5),
     25,
 )
 case(
     "H",
     "RS",
     "Py",
-    "wasm.rs_call_attr('bridge','ping')  [host RS → pack Py]",
-    wasm.rs_call_attr("bridge", "ping"),
+    "wasm.rs_call_attr('pymergetic.wasmmod_examples.bridge','ping')  [host RS → pack Py]",
+    wasm.rs_call_attr("pymergetic.wasmmod_examples.bridge", "ping"),
     "bridge-py",
 )
 
@@ -844,9 +844,9 @@ if missing:
     raise SystemExit(1)
 
 section("Cleanup")
-wasm.unload("bridge")
-wasm.unload("mixed")
-wasm.unload("hello")
+wasm.unload("pymergetic.wasmmod_examples.bridge")
+wasm.unload("pymergetic.wasmmod_examples.mixed")
+wasm.unload("pymergetic.wasmmod_examples.hello")
 wasm.host_clear()
 wasm.mem_clear()
 wasm.handle_clear()

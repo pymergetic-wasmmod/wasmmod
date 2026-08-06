@@ -15,6 +15,10 @@ extern "C" {
 
 int pm_upy_dynruntime_available(void);
 
+#include <stddef.h>
+#include <stdint.h>
+int pm_upy_dynruntime_load(const uint8_t *mpy, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

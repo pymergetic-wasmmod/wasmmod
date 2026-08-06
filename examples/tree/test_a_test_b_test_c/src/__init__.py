@@ -2,4 +2,4 @@
 
 
 def c_py():
-    return "test_a.test_b.test_c"
+    return "pymergetic.wasmmod_examples.test_a.test_b.test_c"

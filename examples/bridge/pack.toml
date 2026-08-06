@@ -1,6 +1,6 @@
 # Full call-matrix bridge: C+RS natives, guest→guest, guest→host, rich types.
 type = "package"
-name = "bridge"
+name = "pymergetic.wasmmod_examples.bridge"
 version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Py-callable bridge covering C/RS/host/peer + i64/f32/f64/mem/handles."
@@ -25,8 +25,8 @@ load = "mp_pack_load"
 unload = "mp_pack_unload"
 
 [deps]
-hello = "0.1.0"
-mixed = "0.1.0"
+pymergetic.wasmmod_examples.hello = "0.1.0"
+pymergetic.wasmmod_examples.mixed = "0.1.0"
 
 # --- Rust exports ---
 [[exports]]
@@ -200,15 +200,15 @@ func = "matrix_rich"
 
 # Guest→guest only (host imports are C/RS attributes, not listed here).
 [[imports]]
-module = "hello"
+module = "pymergetic.wasmmod_examples.hello"
 func = "hello"
 
 [[imports]]
-module = "mixed"
+module = "pymergetic.wasmmod_examples.mixed"
 func = "mixed_answer"
 
 [[imports]]
-module = "mixed"
+module = "pymergetic.wasmmod_examples.mixed"
 func = "mixed_i64"
 
 # Embed pack sources into wasmmod.source (CDN Inspect / locations).

@@ -1,6 +1,6 @@
 # Nested monorepo package (source tree: test_a2/…).
 type = "package"
-name = "test_a2"
+name = "pymergetic.wasmmod_examples.test_a2"
 version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Nested-tree root; children live under this directory."

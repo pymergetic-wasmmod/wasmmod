@@ -1,45 +1,22 @@
 /*
- * This file is part of wasmmod, https://github.com/pymergetic/wasmmod
- *
  * Leftover stubs for APIs without a stable host wrap in this wave.
+ * (Most former entries moved to dedicated glue TUs.)
  */
 
 #include "pm_common.h"
-#include <stdint.h>
+
 #include <stddef.h>
+#include <stdint.h>
 
-int pm_upy_raw_code_load_mem(const uint8_t *data, size_t len) {
-    (void)data;
-    (void)len;
-    return PM_ERR_FEATURE;
-}
-
-int pm_upy_raw_code_save(void) {
-    return PM_ERR_FEATURE;
-}
-
-uint32_t pm_upy_await(uint32_t a, uint32_t b) {
-    (void)a;
-    (void)b;
-    return 0;
-}
+#include "py/mphal.h"
 
 uint32_t pm_upy_sleep_us(uint64_t us) {
-    (void)us;
+    while (us > 1000000ull) {
+        mp_hal_delay_us(1000000u);
+        us -= 1000000ull;
+    }
+    if (us) {
+        mp_hal_delay_us((uint32_t)us);
+    }
     return 0;
-}
-
-uint32_t pm_upy_new_awaitable(uint32_t h) {
-    (void)h;
-    return 0;
-}
-
-int pm_upy_resume(void *obj) {
-    (void)obj;
-    return PM_ERR_FEATURE;
-}
-
-int pm_upy_profile_settrace(void *cb) {
-    (void)cb;
-    return PM_ERR_FEATURE;
 }

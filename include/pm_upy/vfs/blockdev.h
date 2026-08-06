@@ -15,6 +15,12 @@ extern "C" {
 
 int pm_upy_vfs_blockdev_available(void);
 
+#include <stdint.h>
+#include "pm_upy/obj/core.h"
+int pm_upy_vfs_blockdev_read(pm_upy_obj_t bdev, uint8_t *buf, uint32_t block_num);
+int pm_upy_vfs_blockdev_write(pm_upy_obj_t bdev, const uint8_t *buf, uint32_t block_num);
+int pm_upy_vfs_blockdev_ioctl(pm_upy_obj_t bdev, uint32_t op, uint32_t arg);
+
 #ifdef __cplusplus
 }
 #endif

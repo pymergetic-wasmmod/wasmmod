@@ -15,6 +15,9 @@ extern "C" {
 
 int pm_upy_persistentcode_available(void);
 
+#include "pm_upy/obj/core.h"
+int pm_upy_persistentcode_save_fun(pm_upy_obj_t fun, void *writer);
+
 #ifdef __cplusplus
 }
 #endif

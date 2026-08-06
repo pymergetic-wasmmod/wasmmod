@@ -13,8 +13,12 @@
 extern "C" {
 #endif
 
+#include "pm_upy/obj/core.h"
+
 /* Lexer/parse/compile faces — fail with PM_ERR_FEATURE when compiler off. */
 int pm_upy_compile_available(void);
+pm_upy_obj_t pm_upy_compile(const char *src, const char *filename, int kind);
+int pm_upy_compile_to_raw_code(const char *src, void **raw_out);
 
 #ifdef __cplusplus
 }

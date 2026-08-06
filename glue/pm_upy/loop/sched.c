@@ -8,6 +8,7 @@
 
 #include "pm_upy/loop/sched.h"
 #include "pm_common.h"
+#include "py/mphal.h"
 #include "py/runtime.h"
 
 #ifndef MICROPY_ENABLE_SCHEDULER
@@ -49,4 +50,33 @@ void pm_upy_sched_unlock(void) {
 
 void pm_upy_sched_keyboard_interrupt(void) {
     mp_sched_keyboard_interrupt();
+}
+
+int pm_upy_sched_exception(void *exc) {
+#if MICROPY_ENABLE_SCHEDULER
+    if (exc == NULL) {
+        return PM_ERR_ARG;
+    }
+    mp_sched_exception((mp_obj_t)(uintptr_t)exc);
+    return PM_OK;
+#else
+    (void)exc;
+    return PM_ERR_FEATURE;
+#endif
+}
+
+int pm_upy_event_wait_ms(uint32_t ms) {
+#if defined(MICROPY_EVENT_POLL_HOOK_FAST)
+    (void)ms;
+    MICROPY_EVENT_POLL_HOOK_FAST;
+    return PM_OK;
+#elif defined(MICROPY_EVENT_POLL_HOOK)
+    (void)ms;
+    MICROPY_EVENT_POLL_HOOK;
+    return PM_OK;
+#else
+    mp_hal_delay_ms(ms);
+    mp_handle_pending(MP_HANDLE_PENDING_CALLBACKS_AND_EXCEPTIONS);
+    return PM_OK;
+#endif
 }

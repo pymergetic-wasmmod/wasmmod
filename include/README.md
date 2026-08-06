@@ -6,6 +6,11 @@ Do not `#include` private `extmod/wasmmod/*.h` impl headers from product code.
 **Rust:** bindgen crate lives at [`../crates/pm`](../crates/pm) (`cargo check -p pm`).
 There are no Rust sources under `include/`.
 
+**C ↔ Rust ↔ Python names:** [`SYMBOLS.md`](SYMBOLS.md) — grouped by `include/` module;
+status `ok` / `stub` / `probe` / `missing` for backlog runs (`rg '`missing`' include/SYMBOLS.md`).
+
+**Host self-desc:** engine binary package name `pymergetic.wasmmod` (see [`docs/PACK.md`](../docs/PACK.md#host-engine-self-description-pymergeticwasmmod)).
+
 ## Umbrellas
 
 | Header | Role |
@@ -55,7 +60,8 @@ Unavailable call: Python raise / C `PM_ERR_FEATURE` / Rust `Err`.
 
 ## wasmmod as module face
 
-`pm_wasmmod_module_install("wasm")` at runtime init via `pm_upy_module_install_face`.
+`pm_wasmmod_module_install("pymergetic.wasmmod")` and
+`pm_upy_module_install_face("pymergetic.upy", …)` at runtime init.
 
 ## Glue
 

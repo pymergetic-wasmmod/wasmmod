@@ -1,6 +1,6 @@
 # Sibling dep of test_a.test_b.test_c (C + Rust + Python).
 type = "package"
-name = "test_a.test_d"
+name = "pymergetic.wasmmod_examples.test_a.test_d"
 version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Dotted-tree sibling dep under test_a."

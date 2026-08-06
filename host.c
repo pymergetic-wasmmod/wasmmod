@@ -682,6 +682,25 @@ static int32_t host_mem_len(wasm_exec_env_t exec_env, int32_t cookie) {
     return (int32_t)mp_wasm_mem_len(cookie);
 }
 
+static int32_t host_mem_valid(wasm_exec_env_t exec_env, int32_t cookie) {
+    (void)exec_env;
+    return mp_wasm_mem_valid(cookie) ? 1 : 0;
+}
+
+// Replace cookie contents from guest linear [off,len].
+static int32_t host_mem_set(wasm_exec_env_t exec_env, int32_t cookie, int32_t off, int32_t n) {
+    if (n < 0) {
+        return 0;
+    }
+    void *linear = NULL;
+    if (n > 0) {
+        if (!mp_wasm_linear_from_exec(exec_env, (uint32_t)off, (uint32_t)n, &linear)) {
+            return 0;
+        }
+    }
+    return mp_wasm_mem_set(cookie, (const uint8_t *)linear, (uint32_t)n) ? 1 : 0;
+}
+
 static int32_t host_mem_copy_in(wasm_exec_env_t exec_env, int32_t cookie, int32_t src_off, int32_t n) {
     if (n < 0) {
         return -1;
@@ -774,6 +793,8 @@ static NativeSymbol host_symbols[] = {
     { "mem_alloc", (void *)host_mem_alloc, "(i)i", NULL },
     { "mem_free", (void *)host_mem_free, "(i)", NULL },
     { "mem_len", (void *)host_mem_len, "(i)i", NULL },
+    { "mem_valid", (void *)host_mem_valid, "(i)i", NULL },
+    { "mem_set", (void *)host_mem_set, "(iii)i", NULL },
     { "mem_copy_in", (void *)host_mem_copy_in, "(iii)i", NULL },
     { "mem_copy_out", (void *)host_mem_copy_out, "(iii)i", NULL },
     { "mem_copy_in_at", (void *)host_mem_copy_in_at, "(iiii)i", NULL },
@@ -827,6 +848,15 @@ static void elf_host_mem_free(int32_t cookie) {
 }
 static int32_t elf_host_mem_len(int32_t cookie) {
     return host_mem_len(NULL, cookie);
+}
+static int32_t elf_host_mem_valid(int32_t cookie) {
+    return host_mem_valid(NULL, cookie);
+}
+static int32_t elf_host_mem_set(int32_t cookie, const void *data, int32_t n) {
+    if (n < 0) {
+        return 0;
+    }
+    return mp_wasm_mem_set(cookie, (const uint8_t *)data, (uint32_t)n) ? 1 : 0;
 }
 
 static bool elf_guest_name(const void *ptr, int32_t len, char *buf, size_t buf_sz) {
@@ -981,6 +1011,8 @@ static const mp_wasm_elf_native_t elf_host_natives[] = {
     { "mem_alloc", (void *)elf_host_mem_alloc },
     { "mem_free", (void *)elf_host_mem_free },
     { "mem_len", (void *)elf_host_mem_len },
+    { "mem_valid", (void *)elf_host_mem_valid },
+    { "mem_set", (void *)elf_host_mem_set },
     { "mem_copy_in", (void *)elf_host_mem_copy_in },
     { "mem_copy_out", (void *)elf_host_mem_copy_out },
     { "mem_copy_in_at", (void *)elf_host_mem_copy_in_at },

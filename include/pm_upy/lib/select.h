@@ -15,6 +15,9 @@ extern "C" {
 
 int pm_upy_select_available(void);
 
+#include "pm_upy/obj/core.h"
+pm_upy_obj_t pm_upy_select_poll(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -96,6 +96,7 @@ MICROPY_WASM_AOT_VERSION ?= $(shell sed -n 's/^#define AOT_CURRENT_VERSION \([0-
 
 INC += -I$(TOP)/$(WAMR_DIR)/core/iwasm/include
 CFLAGS_EXTMOD += -DMICROPY_PY_WASM=1 \
+	-DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 \
 	-DMICROPY_PY_WASM_AOT=$(MICROPY_PY_WASM_AOT) \
 	-DMICROPY_PY_WASM_ELF=$(MICROPY_PY_WASM_ELF) \
 	-DMICROPY_PY_WASM_JIT=$(MICROPY_PY_WASM_JIT) \
@@ -200,4 +201,19 @@ $(WASM_HOST_MATRIX_O): $(TOP)/$(WASMMOD_DIR)/examples/host_matrix.rs
 	$(Q)$(MKDIR) -p $(dir $@)
 	$(Q)rustc -Copt-level=2 --crate-type=lib --emit=obj -Cpanic=abort -o $@ $<
 PY_O += $(WASM_HOST_MATRIX_O)
+endif
+
+# Optional: embed pymergetic.wasmmod self-desc into the linked unix PROG (ELF).
+#   make MICROPY_PY_WASM=1 embed-host-desc
+# Requires: pip install pymergetic-wasmmod-tools (or editable sibling wasmmod-tools).
+WASMMOD_EMBED_HOST_SOURCE ?= 0
+.PHONY: embed-host-desc
+embed-host-desc:
+ifeq ($(WASMMOD_EMBED_HOST_SOURCE),1)
+	@test -f "$(BUILD)/$(PROG)" || { echo "FAIL: missing $(BUILD)/$(PROG) — build first"; exit 1; }
+	python3 -m pymergetic.wasmmod.tools embed-host "$(BUILD)/$(PROG)" \
+		--wasmmod-root "$(TOP)/$(WASMMOD_DIR)" \
+		--alias "$(BUILD)/pymergetic.wasmmod.elf"
+else
+	@echo "Set WASMMOD_EMBED_HOST_SOURCE=1 to embed host source into $(BUILD)/$(PROG)"
 endif

@@ -15,6 +15,10 @@ extern "C" {
 
 int pm_upy_binary_available(void);
 
+#include <stdint.h>
+int pm_upy_binary_get(int typecode, const void *p, int64_t *out);
+int pm_upy_binary_set(int typecode, void *p, int64_t val);
+
 #ifdef __cplusplus
 }
 #endif

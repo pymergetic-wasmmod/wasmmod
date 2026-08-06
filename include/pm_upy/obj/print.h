@@ -15,6 +15,9 @@ extern "C" {
 
 void pm_upy_printf(const char *fmt, ...);
 
+#include "pm_upy/obj/core.h"
+void pm_upy_obj_print(pm_upy_obj_t o);
+
 #ifdef __cplusplus
 }
 #endif

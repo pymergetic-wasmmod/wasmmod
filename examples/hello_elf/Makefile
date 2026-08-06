@@ -4,10 +4,10 @@
 #   make -C extmod/wasmmod/examples/hello_elf aarch64   # cross object (CDN twin)
 
 include ../find_top.mk
-OUT = ../packs/hello.elf
+OUT = ../packs/pymergetic.wasmmod_examples.hello.elf
 ARCH ?= $(shell uname -m)
-OUT_ARCH = ../packs/hello.$(ARCH).elf
-OUT_AARCH64 = ../packs/hello.aarch64.elf
+OUT_ARCH = ../packs/pymergetic.wasmmod_examples.hello.$(ARCH).elf
+OUT_AARCH64 = ../packs/pymergetic.wasmmod_examples.hello.aarch64.elf
 
 CC ?= gcc
 # -g keeps .debug_line for CDN/wasmmod inspect addr2line (not stripped by pack-elf).

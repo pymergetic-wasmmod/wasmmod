@@ -30,6 +30,13 @@ bool pm_wasmmod_mem_set(int32_t cookie, const uint8_t *data, uint32_t len);
 MP_WASM_IMPORT("wasmmod.host", int32_t, mem_alloc, int32_t size);
 MP_WASM_IMPORT("wasmmod.host", void, mem_free, int32_t cookie);
 MP_WASM_IMPORT("wasmmod.host", int32_t, mem_len, int32_t cookie);
+MP_WASM_IMPORT("wasmmod.host", int32_t, mem_valid, int32_t cookie);
+#if PM_WASMMOD_GUEST_WASM
+/* mem_set(cookie, off, len) copies from guest linear memory into the cookie. */
+MP_WASM_IMPORT("wasmmod.host", int32_t, mem_set, int32_t cookie, int32_t off, int32_t len);
+#else
+MP_WASM_IMPORT("wasmmod.host", int32_t, mem_set, int32_t cookie, const void *data, int32_t len);
+#endif
 #endif
 
 #ifdef __cplusplus

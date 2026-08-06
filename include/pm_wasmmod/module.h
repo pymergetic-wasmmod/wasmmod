@@ -16,7 +16,7 @@ extern "C" {
 #include "pm_common.h"
 
 /* Gut-exposure: register wasmmod as a named module face (bind/reg style).
- * full_name e.g. "pymergetic.wasmmod" or "wasm".
+ * Default / canonical full_name: "pymergetic.wasmmod" (no top-level wasm).
  */
 bool pm_wasmmod_module_install(const char *full_name);
 bool pm_wasmmod_module_installed(void);

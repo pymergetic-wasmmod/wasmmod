@@ -15,6 +15,8 @@ extern "C" {
 
 int pm_upy_asm_available(void);
 
+int pm_upy_asm_emit(void *as, int op);
+
 #ifdef __cplusplus
 }
 #endif

@@ -5,7 +5,7 @@
 #   make -C ports/unix MICROPY_PY_WASM=1
 
 include ../find_top.mk
-OUT = ../packs/hello.wasm
+OUT = ../packs/pymergetic.wasmmod_examples.hello.wasm
 
 .PHONY: all clean
 

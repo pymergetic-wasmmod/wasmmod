@@ -30,6 +30,7 @@
 
 #include "py/mpstate.h"
 #include "py/objstr.h"
+#include "py/runtime.h"
 
 #if MICROPY_PY_WASM
 
@@ -38,6 +39,13 @@
 #include "extmod/wasmmod/mod.h"
 #include "extmod/wasmmod/verify.h"
 #include "extmod/wasmmod/version.h"
+#include "pm_upy/exec/await.h"
+#include "pm_upy/exec/run.h"
+#include "pm_upy/features.h"
+#include "pm_upy/hal/time.h"
+#include "pm_upy/loop/sched.h"
+#include "pm_upy/loop/step.h"
+#include "pm_upy/mem/gc.h"
 #include "wasm_export.h"
 
 #ifndef MICROPY_WASM_PACK_ARCH
@@ -116,11 +124,225 @@ static mp_obj_t mod_wasm_wamr_version(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_wamr_version_obj, mod_wasm_wamr_version);
 
-static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_wasm) },
-    #if MICROPY_MODULE_BUILTIN_INIT
-    { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&mod_wasm___init___obj) },
-    #endif
+/* --- pymergetic.upy.mem (minimal control-plane face) --- */
+
+static mp_obj_t mod_upy_mem_gc_collect(void) {
+    if (pm_upy_gc_collect() != 0) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("gc not available"));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_mem_gc_collect_obj, mod_upy_mem_gc_collect);
+
+static mp_obj_t mod_upy_mem_gc_enabled(void) {
+    return mp_obj_new_bool(pm_upy_gc_enabled() != 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_mem_gc_enabled_obj, mod_upy_mem_gc_enabled);
+
+static const mp_rom_map_elem_t mp_module_pymergetic_upy_mem_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_upy_dot_mem) },
+    { MP_ROM_QSTR(MP_QSTR_gc_collect), MP_ROM_PTR(&mod_upy_mem_gc_collect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gc_enabled), MP_ROM_PTR(&mod_upy_mem_gc_enabled_obj) },
+};
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_upy_mem_globals, mp_module_pymergetic_upy_mem_globals_table);
+
+const mp_obj_module_t mp_module_pymergetic_upy_mem = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_upy_mem_globals,
+};
+
+/* --- pymergetic.upy.features --- */
+
+static mp_obj_t mod_upy_features_bits(void) {
+    return mp_obj_new_int_from_uint(pm_upy_features());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_features_bits_obj, mod_upy_features_bits);
+
+static mp_obj_t mod_upy_features_has(mp_obj_t feat_in) {
+    return mp_obj_new_bool(pm_upy_has((pm_upy_feat_t)mp_obj_get_int(feat_in)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_upy_features_has_obj, mod_upy_features_has);
+
+static mp_obj_t mod_upy_features_version(void) {
+    const char *v = pm_upy_version();
+    return mp_obj_new_str(v, strlen(v ? v : ""));
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_features_version_obj, mod_upy_features_version);
+
+static const mp_rom_map_elem_t mp_module_pymergetic_upy_features_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_upy_dot_features) },
+    { MP_ROM_QSTR(MP_QSTR_bits), MP_ROM_PTR(&mod_upy_features_bits_obj) },
+    { MP_ROM_QSTR(MP_QSTR_has), MP_ROM_PTR(&mod_upy_features_has_obj) },
+    { MP_ROM_QSTR(MP_QSTR_version), MP_ROM_PTR(&mod_upy_features_version_obj) },
+};
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_upy_features_globals,
+    mp_module_pymergetic_upy_features_globals_table);
+
+const mp_obj_module_t mp_module_pymergetic_upy_features = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_upy_features_globals,
+};
+
+/* --- pymergetic.upy.time --- */
+
+static mp_obj_t mod_upy_time_ticks_ms(void) {
+    return mp_obj_new_int_from_uint(pm_upy_ticks_ms());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_time_ticks_ms_obj, mod_upy_time_ticks_ms);
+
+static mp_obj_t mod_upy_time_ticks_us(void) {
+    return mp_obj_new_int_from_uint(pm_upy_ticks_us());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_time_ticks_us_obj, mod_upy_time_ticks_us);
+
+static mp_obj_t mod_upy_time_time_ns(void) {
+    return mp_obj_new_int_from_ull(pm_upy_time_ns());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_time_time_ns_obj, mod_upy_time_time_ns);
+
+static mp_obj_t mod_upy_time_delay_ms(mp_obj_t ms_in) {
+    mp_int_t ms = mp_obj_get_int(ms_in);
+    if (ms < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("delay_ms"));
+    }
+    pm_upy_delay_ms((uint32_t)ms);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_upy_time_delay_ms_obj, mod_upy_time_delay_ms);
+
+static mp_obj_t mod_upy_time_sleep_us(mp_obj_t us_in) {
+    uint64_t us = (uint64_t)mp_obj_get_ll(us_in);
+    return mp_obj_new_int_from_uint(pm_upy_sleep_us(us));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_upy_time_sleep_us_obj, mod_upy_time_sleep_us);
+
+static const mp_rom_map_elem_t mp_module_pymergetic_upy_time_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_upy_dot_time) },
+    { MP_ROM_QSTR(MP_QSTR_ticks_ms), MP_ROM_PTR(&mod_upy_time_ticks_ms_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ticks_us), MP_ROM_PTR(&mod_upy_time_ticks_us_obj) },
+    { MP_ROM_QSTR(MP_QSTR_time_ns), MP_ROM_PTR(&mod_upy_time_time_ns_obj) },
+    { MP_ROM_QSTR(MP_QSTR_delay_ms), MP_ROM_PTR(&mod_upy_time_delay_ms_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sleep_us), MP_ROM_PTR(&mod_upy_time_sleep_us_obj) },
+};
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_upy_time_globals, mp_module_pymergetic_upy_time_globals_table);
+
+const mp_obj_module_t mp_module_pymergetic_upy_time = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_upy_time_globals,
+};
+
+/* --- pymergetic.upy.sched --- */
+
+static mp_obj_t mod_upy_sched_handle_pending(void) {
+    if (pm_upy_handle_pending() != 0) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("handle_pending"));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_sched_handle_pending_obj, mod_upy_sched_handle_pending);
+
+static mp_obj_t mod_upy_sched_num_pending(void) {
+    return mp_obj_new_int(pm_upy_sched_num_pending());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_sched_num_pending_obj, mod_upy_sched_num_pending);
+
+static mp_obj_t mod_upy_sched_event_wait_ms(mp_obj_t ms_in) {
+    mp_int_t ms = mp_obj_get_int(ms_in);
+    if (ms < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("event_wait_ms"));
+    }
+    if (pm_upy_event_wait_ms((uint32_t)ms) != 0) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("event_wait_ms"));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_upy_sched_event_wait_ms_obj, mod_upy_sched_event_wait_ms);
+
+static mp_obj_t mod_upy_sched_lock(void) {
+    pm_upy_sched_lock();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_sched_lock_obj, mod_upy_sched_lock);
+
+static mp_obj_t mod_upy_sched_unlock(void) {
+    pm_upy_sched_unlock();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_upy_sched_unlock_obj, mod_upy_sched_unlock);
+
+static const mp_rom_map_elem_t mp_module_pymergetic_upy_sched_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_upy_dot_sched) },
+    { MP_ROM_QSTR(MP_QSTR_handle_pending), MP_ROM_PTR(&mod_upy_sched_handle_pending_obj) },
+    { MP_ROM_QSTR(MP_QSTR_num_pending), MP_ROM_PTR(&mod_upy_sched_num_pending_obj) },
+    { MP_ROM_QSTR(MP_QSTR_event_wait_ms), MP_ROM_PTR(&mod_upy_sched_event_wait_ms_obj) },
+    { MP_ROM_QSTR(MP_QSTR_lock), MP_ROM_PTR(&mod_upy_sched_lock_obj) },
+    { MP_ROM_QSTR(MP_QSTR_unlock), MP_ROM_PTR(&mod_upy_sched_unlock_obj) },
+};
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_upy_sched_globals, mp_module_pymergetic_upy_sched_globals_table);
+
+const mp_obj_module_t mp_module_pymergetic_upy_sched = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_upy_sched_globals,
+};
+
+/* --- pymergetic.upy.run --- */
+
+static mp_obj_t mod_upy_run_run_str(mp_obj_t src_in) {
+    const char *src = mp_obj_str_get_str(src_in);
+    if (pm_upy_run_str(src) != 0) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("run_str"));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_upy_run_run_str_obj, mod_upy_run_run_str);
+
+static const mp_rom_map_elem_t mp_module_pymergetic_upy_run_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_upy_dot_run) },
+    { MP_ROM_QSTR(MP_QSTR_run_str), MP_ROM_PTR(&mod_upy_run_run_str_obj) },
+};
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_upy_run_globals, mp_module_pymergetic_upy_run_globals_table);
+
+const mp_obj_module_t mp_module_pymergetic_upy_run = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_upy_run_globals,
+};
+
+static const mp_rom_map_elem_t mp_module_pymergetic_upy_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_upy) },
+    { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mp_module_pymergetic_upy_mem) },
+    { MP_ROM_QSTR(MP_QSTR_features), MP_ROM_PTR(&mp_module_pymergetic_upy_features) },
+    { MP_ROM_QSTR(MP_QSTR_time), MP_ROM_PTR(&mp_module_pymergetic_upy_time) },
+    { MP_ROM_QSTR(MP_QSTR_sched), MP_ROM_PTR(&mp_module_pymergetic_upy_sched) },
+    { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&mp_module_pymergetic_upy_run) },
+};
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_upy_globals, mp_module_pymergetic_upy_globals_table);
+
+const mp_obj_module_t mp_module_pymergetic_upy = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_upy_globals,
+};
+
+/* --- pymergetic.wasmmod.host (self-desc) --- */
+
+static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_host_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_wasmmod_dot_host) },
+    { MP_ROM_QSTR(MP_QSTR_package_name), MP_ROM_PTR(&mod_wasm_host_package_name_obj) },
+    { MP_ROM_QSTR(MP_QSTR_source), MP_ROM_PTR(&mod_wasm_host_source_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_self_image), MP_ROM_PTR(&mod_wasm_host_set_self_image_obj) },
+};
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_wasmmod_host_globals,
+    mp_module_pymergetic_wasmmod_host_globals_table);
+
+const mp_obj_module_t mp_module_pymergetic_wasmmod_host = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_wasmmod_host_globals,
+};
+
+/* --- pymergetic.wasmmod (product / pack / inspect face) --- */
+
+static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_wasmmod) },
+    { MP_ROM_QSTR(MP_QSTR_host), MP_ROM_PTR(&mp_module_pymergetic_wasmmod_host) },
     { MP_ROM_QSTR(MP_QSTR_version), MP_ROM_PTR(&mp_wasm_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_wamr_version), MP_ROM_PTR(&mod_wasm_wamr_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_path), MP_ROM_PTR(&MP_STATE_VM(mp_wasm_path_obj)) },
@@ -130,7 +352,7 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_sig_info), MP_ROM_PTR(&mod_wasm_sig_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_verify_sig), MP_ROM_PTR(&mod_wasm_verify_sig_obj) },
     { MP_ROM_QSTR(MP_QSTR_AOT), MP_ROM_INT(MICROPY_PY_WASM_AOT) },
-    { MP_ROM_QSTR(MP_QSTR_AOT_VERSION), MP_ROM_INT(MICROPY_WASM_AOT_VERSION) }, // WAMR AOT file-format N
+    { MP_ROM_QSTR(MP_QSTR_AOT_VERSION), MP_ROM_INT(MICROPY_WASM_AOT_VERSION) },
     { MP_ROM_QSTR(MP_QSTR_JIT), MP_ROM_INT(MICROPY_PY_WASM_JIT) },
     { MP_ROM_QSTR(MP_QSTR_FAST_JIT), MP_ROM_INT(MICROPY_PY_WASM_FAST_JIT) },
     { MP_ROM_QSTR(MP_QSTR_MODE), MP_ROM_INT(MICROPY_WASM_MODE_DEFAULT) },
@@ -181,13 +403,31 @@ static const mp_rom_map_elem_t mp_module_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_PackModule), MP_ROM_PTR(&mp_type_pack_module) },
 };
 
-static MP_DEFINE_CONST_DICT(mp_module_wasm_globals, mp_module_wasm_globals_table);
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_wasmmod_globals, mp_module_pymergetic_wasmmod_globals_table);
 
-const mp_obj_module_t mp_module_wasm = {
+const mp_obj_module_t mp_module_pymergetic_wasmmod = {
     .base = { &mp_type_module },
-    .globals = (mp_obj_dict_t *)&mp_module_wasm_globals,
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_wasmmod_globals,
 };
 
-MP_REGISTER_MODULE(MP_QSTR_wasm, mp_module_wasm);
+/* --- pymergetic (org root; subpackages via MICROPY_MODULE_BUILTIN_SUBPACKAGES) --- */
+
+static const mp_rom_map_elem_t mp_module_pymergetic_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic) },
+    #if MICROPY_MODULE_BUILTIN_INIT
+    // Builtin __init__ runs when the registered root is first imported.
+    { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&mod_wasm___init___obj) },
+    #endif
+    { MP_ROM_QSTR(MP_QSTR_wasmmod), MP_ROM_PTR(&mp_module_pymergetic_wasmmod) },
+    { MP_ROM_QSTR(MP_QSTR_upy), MP_ROM_PTR(&mp_module_pymergetic_upy) },
+};
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_globals, mp_module_pymergetic_globals_table);
+
+const mp_obj_module_t mp_module_pymergetic = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_globals,
+};
+
+MP_REGISTER_MODULE(MP_QSTR_pymergetic, mp_module_pymergetic);
 
 #endif // MICROPY_PY_WASM

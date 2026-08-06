@@ -15,6 +15,10 @@ extern "C" {
 
 int pm_upy_deflate_available(void);
 
+#include <stddef.h>
+#include <stdint.h>
+int pm_upy_deflate_decompress(const uint8_t *in, size_t in_len, uint8_t *out, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

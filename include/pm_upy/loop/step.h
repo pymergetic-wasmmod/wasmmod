@@ -20,6 +20,11 @@ int pm_upy_loop_feed(const uint8_t *ptr, size_t len);
 int pm_upy_loop_reset(void);
 int pm_upy_handle_pending(void);
 
+#include "pm_guest.h"
+#if PM_WASMMOD_GUEST
+MP_WASM_IMPORT("micropython.runtime", int, handle_pending, void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,0 +1,12 @@
+{
+  "include": ["scripts", "python", "tools", "examples"],
+  "exclude": ["**/.venv", "**/__pycache__", "build", "dist", "third_party", "target", ".clangd-include"],
+  "extraPaths": [
+    "../wasmmod-tools/src",
+    "python"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "error",
+  "reportMissingModuleSource": "none"
+}

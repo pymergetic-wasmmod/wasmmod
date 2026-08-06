@@ -14,6 +14,7 @@ extern "C" {
 #endif
 
 int pm_upy_autoload_available(void);
+int pm_upy_autoload(const char *name);
 
 #ifdef __cplusplus
 }

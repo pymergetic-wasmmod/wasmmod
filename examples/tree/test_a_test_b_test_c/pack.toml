@@ -1,6 +1,6 @@
 # Nested leaf pack; [deps] pulls sibling test_a.test_d.
 type = "package"
-name = "test_a.test_b.test_c"
+name = "pymergetic.wasmmod_examples.test_a.test_b.test_c"
 version = "0.1.0"
 impl = ["c", "rs"]
 comment = "Dotted-tree leaf that depends on test_a.test_d."
@@ -16,7 +16,7 @@ load = "mp_pack_load"
 unload = "mp_pack_unload"
 
 [deps]
-"test_a.test_d" = "0.1.0"
+"pymergetic.wasmmod_examples.test_a.test_d" = "0.1.0"
 
 [[exports]]
 func = "c_answer"
@@ -25,7 +25,7 @@ func = "c_answer"
 func = "c_rs_tag"
 
 [[imports]]
-module = "test_a.test_d"
+module = "pymergetic.wasmmod_examples.test_a.test_d"
 func = "d_value"
 
 # Embed pack sources into wasmmod.source (CDN Inspect / locations).

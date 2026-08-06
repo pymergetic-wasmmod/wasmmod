@@ -1,7 +1,7 @@
 # Positive micropython.* catalog (Wasm twin of ticks_elf).
 
 type = "package"
-name = "ticks"
+name = "pymergetic.wasmmod_examples.ticks"
 version = "0.1.0"
 impl = ["c"]
 comment = "Wasm pack importing micropython.runtime.ticks_ms (host catalog)"

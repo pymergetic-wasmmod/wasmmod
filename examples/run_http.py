@@ -4,7 +4,7 @@
 
 import os
 import sys
-import wasm
+import pymergetic.wasmmod as wasm
 
 root = os.getenv("HTTP_PACK_ROOT")
 if not root:
@@ -16,10 +16,10 @@ print("install_hook", root)
 wasm.install_hook(root)
 print("wasm.path =", wasm.path)
 
-print("import hello  # finder → HTTP GET hello.elf or hello.wasm (unsigned)")
-import hello
+print("import pymergetic.wasmmod_examples.hello  # finder → HTTP GET …hello.elf or …hello.wasm")
+import pymergetic.wasmmod_examples.hello as hello
 
-print("  sys.modules['hello'] =", sys.modules.get("hello"))
+print("  sys.modules['pymergetic.wasmmod_examples.hello'] =", sys.modules.get("pymergetic.wasmmod_examples.hello"))
 print("  hello.hello()  ->", hello.hello())
 print("  hello.add(2,3) ->", hello.add(2, 3))
 print("  hello.greet()  ->", repr(hello.greet()))

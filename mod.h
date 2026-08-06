@@ -126,6 +126,9 @@ MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_disasm_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_mpy_disasm_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_from_file_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_from_bytes_obj);
+MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_host_package_name_obj);
+MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_host_source_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_host_set_self_image_obj);
 #if MICROPY_PY_WASM_MATRIX
 MP_DECLARE_CONST_FUN_OBJ_VAR(mod_wasm_c_call_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_c_call_attr_obj);

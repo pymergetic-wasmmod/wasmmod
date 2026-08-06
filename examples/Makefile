@@ -28,25 +28,25 @@ SIGN_LEAF_KEY = $(SIGN_KEY_DIR)/sign/leaf.key.pem
 SIGN_CHAIN = $(SIGN_KEY_DIR)/sign/chain.der
 
 PACK_WASMS = \
-	packs/hello.wasm \
-	packs/client.wasm \
-	packs/ticks.wasm \
-	packs/mixed.wasm \
-	packs/bridge.wasm \
-	packs/test_a.wasm \
-	packs/test_a.test_d.wasm \
-	packs/test_a.test_b.test_c.wasm \
-	packs/test_a2.wasm \
-	packs/test_a2.test_d2.wasm \
-	packs/test_a2.test_b2.test_c2.wasm
+	packs/pymergetic.wasmmod_examples.hello.wasm \
+	packs/pymergetic.wasmmod_examples.client.wasm \
+	packs/pymergetic.wasmmod_examples.ticks.wasm \
+	packs/pymergetic.wasmmod_examples.mixed.wasm \
+	packs/pymergetic.wasmmod_examples.bridge.wasm \
+	packs/pymergetic.wasmmod_examples.test_a.wasm \
+	packs/pymergetic.wasmmod_examples.test_a.test_d.wasm \
+	packs/pymergetic.wasmmod_examples.test_a.test_b.test_c.wasm \
+	packs/pymergetic.wasmmod_examples.test_a2.wasm \
+	packs/pymergetic.wasmmod_examples.test_a2.test_d2.wasm \
+	packs/pymergetic.wasmmod_examples.test_a2.test_b2.test_c2.wasm
 
 TREE_WASMS = \
-	packs/test_a.wasm \
-	packs/test_a.test_d.wasm \
-	packs/test_a.test_b.test_c.wasm \
-	packs/test_a2.wasm \
-	packs/test_a2.test_d2.wasm \
-	packs/test_a2.test_b2.test_c2.wasm
+	packs/pymergetic.wasmmod_examples.test_a.wasm \
+	packs/pymergetic.wasmmod_examples.test_a.test_d.wasm \
+	packs/pymergetic.wasmmod_examples.test_a.test_b.test_c.wasm \
+	packs/pymergetic.wasmmod_examples.test_a2.wasm \
+	packs/pymergetic.wasmmod_examples.test_a2.test_d2.wasm \
+	packs/pymergetic.wasmmod_examples.test_a2.test_b2.test_c2.wasm
 
 # Prefer wamrc from this tree's WAMR (version-matched). Override with WAMRC=...
 WAMRC_BUILD ?= $(UNIX)/build-wamrc
@@ -121,18 +121,22 @@ sign-packs: packs-wasm sign-key
 		echo "ZLIB $$f"; \
 		python3 $(WASMMOD_ROOT)/tools/wasmmod.py zlib wrap "$$f"; \
 	}; \
-	if [ -f packs/hello.elf ]; then \
-		echo "SIGN packs/hello.elf"; \
-		python3 $(WASM_SIGN) sign sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) packs/hello.elf; \
-		wrap packs/hello.elf; \
+	if [ -f packs/pymergetic.wasmmod_examples.hello.elf ]; then \
+		echo "SIGN packs/pymergetic.wasmmod_examples.hello.elf"; \
+		python3 $(WASM_SIGN) sign sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) packs/pymergetic.wasmmod_examples.hello.elf; \
+		wrap packs/pymergetic.wasmmod_examples.hello.elf; \
 	fi; \
-	for f in packs/client.elf packs/hostcall.elf packs/ticks.elf packs/hello.aarch64.elf; do \
+	for f in packs/pymergetic.wasmmod_examples.client.elf packs/pymergetic.wasmmod_examples.hostcall.elf packs/pymergetic.wasmmod_examples.ticks.elf packs/pymergetic.wasmmod_examples.hello.aarch64.elf; do \
 		[ -f "$$f" ] || continue; \
 		echo "SIGN $$f"; \
 		python3 $(WASM_SIGN) sign sign --key $(SIGN_LEAF_KEY) --chain $(SIGN_CHAIN) $$f; \
 		wrap $$f; \
 	done; \
-	for base in hello client hostcall ticks; do \
+	for base in \
+		pymergetic.wasmmod_examples.hello \
+		pymergetic.wasmmod_examples.client \
+		pymergetic.wasmmod_examples.hostcall \
+		pymergetic.wasmmod_examples.ticks; do \
 		if [ -f packs/$$base.elf ]; then \
 			cp -f packs/$$base.elf packs/$$base.$$(uname -m).elf; \
 			wrap packs/$$base.$$(uname -m).elf; \
@@ -238,12 +242,12 @@ test-tree-cdn: tree-packs host
 	  echo "HTTP $$code"; \
 	  test "$$code" = "201" -o "$$code" = "200"; \
 	}; \
-	pub test_a "$$PACKS/test_a.wasm" 0.1.0 '{}' true; \
-	pub test_a.test_d "$$PACKS/test_a.test_d.wasm" 0.1.0 '{}' true; \
-	pub test_a.test_b.test_c "$$PACKS/test_a.test_b.test_c.wasm" 0.1.0 '{"test_a.test_d":"0.1.0"}' true; \
-	pub test_a2 "$$PACKS/test_a2.wasm" 0.1.0 '{}' true; \
-	pub test_a2.test_d2 "$$PACKS/test_a2.test_d2.wasm" 0.1.0 '{}' true; \
-	pub test_a2.test_b2.test_c2 "$$PACKS/test_a2.test_b2.test_c2.wasm" 0.1.0 '{"test_a2.test_d2":"0.1.0"}' true; \
+	pub pymergetic.wasmmod_examples.test_a "$$PACKS/pymergetic.wasmmod_examples.test_a.wasm" 0.1.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a.test_d "$$PACKS/pymergetic.wasmmod_examples.test_a.test_d.wasm" 0.1.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a.test_b.test_c "$$PACKS/pymergetic.wasmmod_examples.test_a.test_b.test_c.wasm" 0.1.0 '{"pymergetic.wasmmod_examples.test_a.test_d":"0.1.0"}' true; \
+	pub pymergetic.wasmmod_examples.test_a2 "$$PACKS/pymergetic.wasmmod_examples.test_a2.wasm" 0.1.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a2.test_d2 "$$PACKS/pymergetic.wasmmod_examples.test_a2.test_d2.wasm" 0.1.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a2.test_b2.test_c2 "$$PACKS/pymergetic.wasmmod_examples.test_a2.test_b2.test_c2.wasm" 0.1.0 '{"pymergetic.wasmmod_examples.test_a2.test_d2":"0.1.0"}' true; \
 	if [ -n "$$token" ]; then \
 	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url --token=$$token; \
 	else \
@@ -277,12 +281,12 @@ test-tree-cdn-versions: tree-packs host
 	  echo "FAIL: missing pin $$stem@$$ver"; return 1; \
 	}; \
 	echo "=== publish 0.1.0 ==="; \
-	pub test_a "$$PACKS/test_a.wasm" 0.1.0 '{}' true; \
-	pub test_a.test_d "$$PACKS/test_a.test_d.wasm" 0.1.0 '{}' true; \
-	pub test_a.test_b.test_c "$$PACKS/test_a.test_b.test_c.wasm" 0.1.0 '{"test_a.test_d":"0.1.0"}' true; \
-	pub test_a2 "$$PACKS/test_a2.wasm" 0.1.0 '{}' true; \
-	pub test_a2.test_d2 "$$PACKS/test_a2.test_d2.wasm" 0.1.0 '{}' true; \
-	pub test_a2.test_b2.test_c2 "$$PACKS/test_a2.test_b2.test_c2.wasm" 0.1.0 '{"test_a2.test_d2":"0.1.0"}' true; \
+	pub pymergetic.wasmmod_examples.test_a "$$PACKS/pymergetic.wasmmod_examples.test_a.wasm" 0.1.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a.test_d "$$PACKS/pymergetic.wasmmod_examples.test_a.test_d.wasm" 0.1.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a.test_b.test_c "$$PACKS/pymergetic.wasmmod_examples.test_a.test_b.test_c.wasm" 0.1.0 '{"pymergetic.wasmmod_examples.test_a.test_d":"0.1.0"}' true; \
+	pub pymergetic.wasmmod_examples.test_a2 "$$PACKS/pymergetic.wasmmod_examples.test_a2.wasm" 0.1.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a2.test_d2 "$$PACKS/pymergetic.wasmmod_examples.test_a2.test_d2.wasm" 0.1.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a2.test_b2.test_c2 "$$PACKS/pymergetic.wasmmod_examples.test_a2.test_b2.test_c2.wasm" 0.1.0 '{"pymergetic.wasmmod_examples.test_a2.test_d2":"0.1.0"}' true; \
 	echo "=== import lead @0.1.0 ==="; \
 	if [ -n "$$token" ]; then \
 	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url --token=$$token; \
@@ -290,16 +294,16 @@ test-tree-cdn-versions: tree-packs host
 	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url; \
 	fi; \
 	echo "=== publish 0.2.0 (new pins, promote lead) ==="; \
-	pub test_a "$$PACKS/test_a.wasm" 0.2.0 '{}' true; \
-	pub test_a.test_d "$$PACKS/test_a.test_d.wasm" 0.2.0 '{}' true; \
-	pub test_a.test_b.test_c "$$PACKS/test_a.test_b.test_c.wasm" 0.2.0 '{"test_a.test_d":"0.2.0"}' true; \
-	pub test_a2 "$$PACKS/test_a2.wasm" 0.2.0 '{}' true; \
-	pub test_a2.test_d2 "$$PACKS/test_a2.test_d2.wasm" 0.2.0 '{}' true; \
-	pub test_a2.test_b2.test_c2 "$$PACKS/test_a2.test_b2.test_c2.wasm" 0.2.0 '{"test_a2.test_d2":"0.2.0"}' true; \
+	pub pymergetic.wasmmod_examples.test_a "$$PACKS/pymergetic.wasmmod_examples.test_a.wasm" 0.2.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a.test_d "$$PACKS/pymergetic.wasmmod_examples.test_a.test_d.wasm" 0.2.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a.test_b.test_c "$$PACKS/pymergetic.wasmmod_examples.test_a.test_b.test_c.wasm" 0.2.0 '{"pymergetic.wasmmod_examples.test_a.test_d":"0.2.0"}' true; \
+	pub pymergetic.wasmmod_examples.test_a2 "$$PACKS/pymergetic.wasmmod_examples.test_a2.wasm" 0.2.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a2.test_d2 "$$PACKS/pymergetic.wasmmod_examples.test_a2.test_d2.wasm" 0.2.0 '{}' true; \
+	pub pymergetic.wasmmod_examples.test_a2.test_b2.test_c2 "$$PACKS/pymergetic.wasmmod_examples.test_a2.test_b2.test_c2.wasm" 0.2.0 '{"pymergetic.wasmmod_examples.test_a2.test_d2":"0.2.0"}' true; \
 	echo "=== assert pins ==="; \
-	have test_a 0.1.0; have test_a 0.2.0; \
-	have test_a.test_d 0.1.0; have test_a.test_d 0.2.0; \
-	have test_a2 0.1.0; have test_a2 0.2.0; \
+	have pymergetic.wasmmod_examples.test_a 0.1.0; have pymergetic.wasmmod_examples.test_a 0.2.0; \
+	have pymergetic.wasmmod_examples.test_a.test_d 0.1.0; have pymergetic.wasmmod_examples.test_a.test_d 0.2.0; \
+	have pymergetic.wasmmod_examples.test_a2 0.1.0; have pymergetic.wasmmod_examples.test_a2 0.2.0; \
 	echo "=== import lead @0.2.0 ==="; \
 	if [ -n "$$token" ]; then \
 	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url --token=$$token; \
@@ -307,7 +311,7 @@ test-tree-cdn-versions: tree-packs host
 	  $(MPY_INTERP) $(CURDIR)/run_tree_cdn.py --suite=both --cdn --cdn-url=$$cdn_url; \
 	fi; \
 	echo "=== history page has both versions ==="; \
-	html=$$(curl -sS "$$cdn_url/channels/lead/packs/test_a"); \
+	html=$$(curl -sS "$$cdn_url/channels/lead/packs/pymergetic.wasmmod_examples.test_a"); \
 	echo "$$html" | grep -q 'id="history"'; \
 	echo "$$html" | grep -q '0.1.0'; \
 	echo "$$html" | grep -q '0.2.0'; \

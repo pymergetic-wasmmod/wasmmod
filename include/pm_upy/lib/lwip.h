@@ -26,6 +26,9 @@ int pm_upy_lwip_init(void);
 /** `mod_network_lwip_poll_wrapper(ticks_ms)` — no-op / feature-fail if off. */
 int pm_upy_lwip_poll(uint32_t ticks_ms);
 
+#include <stdint.h>
+int pm_upy_lwip_gethostbyname(const char *host, uint8_t ip[4]);
+
 #ifdef __cplusplus
 }
 #endif

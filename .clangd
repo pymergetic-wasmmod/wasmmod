@@ -4,6 +4,8 @@
 # .clangd-include/extmod/wasmmod → ..  so #include "extmod/wasmmod/…" works
 # without needing MicroPython TOP (standalone packages/wasmmod view).
 CompileFlags:
+  # Prefer this file's flags over a root compile_commands that may point at
+  CompilationDatabase: None
   Add:
     - -I.clangd-include
     - -Iinclude
@@ -13,16 +15,12 @@ CompileFlags:
     # MicroPython TOP (py/, …) — submodule or sibling checkout
     - -I../..
     - -I../metalpython
-    # unix port + generated qstrs
+    # unix port + generated qstrs — ONLY build-wasm (other variants lack MICROPY_PY_WASM QSTRs)
     - -I../../ports/unix
     - -I../../ports/unix/variants/standard
-    - -I../../ports/unix/build-standard
-    - -I../../ports/unix/build-api4
     - -I../../ports/unix/build-wasm
     - -I../metalpython/ports/unix
     - -I../metalpython/ports/unix/variants/standard
-    - -I../metalpython/ports/unix/build-standard
-    - -I../metalpython/ports/unix/build-api4
     - -I../metalpython/ports/unix/build-wasm
     - -DMICROPY_PY_WASM=1
     - -Wno-unknown-attributes
@@ -35,6 +33,8 @@ CompileFlags:
 If:
   PathMatch: .*/(glue|include)/.*\.(c|h|cc|cpp)
 CompileFlags:
+  # Prefer this file's flags over a root compile_commands that may point at
+  CompilationDatabase: None
   Add:
     - -I.clangd-include
     - -Iinclude
@@ -45,13 +45,9 @@ CompileFlags:
     - -I../metalpython
     - -I../../ports/unix
     - -I../../ports/unix/variants/standard
-    - -I../../ports/unix/build-standard
-    - -I../../ports/unix/build-api4
     - -I../../ports/unix/build-wasm
     - -I../metalpython/ports/unix
     - -I../metalpython/ports/unix/variants/standard
-    - -I../metalpython/ports/unix/build-standard
-    - -I../metalpython/ports/unix/build-api4
     - -I../metalpython/ports/unix/build-wasm
     - -DMICROPY_PY_WASM=1
     - -Wno-unknown-attributes
@@ -63,6 +59,8 @@ CompileFlags:
 If:
   PathMatch: examples/.*\.(c|h|cc|cpp)
 CompileFlags:
+  # Prefer this file's flags over a root compile_commands that may point at
+  CompilationDatabase: None
   Add:
     - -Iinclude
     - -I.

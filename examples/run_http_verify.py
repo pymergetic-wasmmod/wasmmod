@@ -4,7 +4,7 @@
 
 import os
 import sys
-import wasm
+import pymergetic.wasmmod as wasm
 
 root = os.getenv("HTTP_PACK_ROOT")
 if not root:
@@ -24,8 +24,8 @@ print("install_hook", root)
 wasm.install_hook(root)
 print("wasm.path =", wasm.path)
 
-# Explicit signed ELF URL (fetch prefers hello.elf.zlib twin when present).
-elf_url = root.rstrip("/") + "/hello.elf"
+# Explicit signed ELF URL (fetch prefers .elf.zlib twin when present).
+elf_url = root.rstrip("/") + "/pymergetic.wasmmod_examples.hello.elf"
 print("load_pack", elf_url)
 he = wasm.load_pack(elf_url)
 print("  hello.elf hello()  ->", he.hello())
@@ -33,11 +33,11 @@ print("  hello.elf add(2,3) ->", he.add(2, 3))
 assert he.hello() == 42
 assert he.add(2, 3) == 5
 
-# With MICROPY_WASM_CONTAINERS=elf,aot,wasm the finder prefers hello.elf when present.
-print("import hello  # finder → HTTP GET hello.elf (+ verify)")
-import hello
+# With MICROPY_WASM_CONTAINERS=elf,aot,wasm the finder prefers .elf when present.
+print("import pymergetic.wasmmod_examples.hello  # finder → HTTP GET …hello.elf (+ verify)")
+import pymergetic.wasmmod_examples.hello as hello
 
-print("  sys.modules['hello'] =", sys.modules.get("hello"))
+print("  sys.modules['pymergetic.wasmmod_examples.hello'] =", sys.modules.get("pymergetic.wasmmod_examples.hello"))
 print("  hello.hello()  ->", hello.hello())
 print("  hello.add(2,3) ->", hello.add(2, 3))
 print("  hello.greet()  ->", repr(hello.greet()))

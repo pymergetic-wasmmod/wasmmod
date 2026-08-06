@@ -6,24 +6,51 @@
  * Copyright (c) 2026 Rouven Raudzus <raudzus@pymergetic.com>
  */
 
-
 #include "pm_upy/obj/module.h"
 #include "pm_common.h"
+#include "py/builtin.h"
+#include "py/obj.h"
+#include "py/objmodule.h"
+#include "py/runtime.h"
+
 #include <string.h>
 
 #define PM_UPY_MOD_MAX 32
-typedef struct { char name[96]; void *face; } pm_upy_mod_ent_t;
+typedef struct {
+    char name[96];
+    void *face;
+} pm_upy_mod_ent_t;
 static pm_upy_mod_ent_t mods[PM_UPY_MOD_MAX];
 static size_t nmods;
 
 pm_upy_obj_t pm_upy_import_name(const char *name) {
-    (void)name;
-    return 0; /* full import via mp_import_name in later wave */
+    if (!name || !name[0]) {
+        return (pm_upy_obj_t)(uintptr_t)mp_const_none;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t mod = mp_import_name(qstr_from_str(name), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        nlr_pop();
+        return (pm_upy_obj_t)(uintptr_t)mod;
+    }
+    return (pm_upy_obj_t)(uintptr_t)mp_const_none;
 }
+
 int pm_upy_bind_reg(const char *full_module, const char *func, void *fn_ptr) {
-    (void)full_module; (void)func; (void)fn_ptr;
-    return PM_ERR_FEATURE; /* Metal reg bridge later */
+    if (!full_module || !func || !fn_ptr) {
+        return PM_ERR_ARG;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t mod = mp_import_name(qstr_from_str(full_module), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        /* Store the C pointer as an int attribute; call via host/ffi as needed. */
+        mp_store_attr(mod, qstr_from_str(func), mp_obj_new_int_from_uint((mp_uint_t)(uintptr_t)fn_ptr));
+        nlr_pop();
+        return PM_OK;
+    }
+    return PM_ERR;
 }
+
 int pm_upy_module_install_face(const char *full_name, void *face) {
     if (!full_name || !full_name[0] || nmods >= PM_UPY_MOD_MAX) {
         return PM_ERR_ARG;
@@ -39,11 +66,66 @@ int pm_upy_module_install_face(const char *full_name, void *face) {
     nmods++;
     return PM_OK;
 }
+
 bool pm_upy_module_has(const char *full_name) {
-    if (!full_name) return false;
+    if (!full_name) {
+        return false;
+    }
     for (size_t i = 0; i < nmods; i++) {
-        if (strcmp(mods[i].name, full_name) == 0) return true;
+        if (strcmp(mods[i].name, full_name) == 0) {
+            return true;
+        }
     }
     return false;
 }
 
+pm_upy_obj_t pm_upy_module_get_builtin(const char *name) {
+    if (!name) {
+        return (pm_upy_obj_t)(uintptr_t)mp_const_none;
+    }
+    mp_obj_t mod = mp_module_get_builtin(qstr_from_str(name), false);
+    return (pm_upy_obj_t)(uintptr_t)(mod == MP_OBJ_NULL ? mp_const_none : mod);
+}
+
+pm_upy_obj_t pm_upy_obj_new_module(const char *name) {
+    if (!name) {
+        return (pm_upy_obj_t)(uintptr_t)mp_const_none;
+    }
+    return (pm_upy_obj_t)(uintptr_t)mp_obj_new_module(qstr_from_str(name));
+}
+
+int pm_upy_bind(const char *mod, const char *name, void *fn) {
+    return pm_upy_bind_reg(mod, name, fn);
+}
+
+pm_upy_obj_t pm_upy_bind_resolve_module(const char *name) {
+    return pm_upy_import_name(name);
+}
+
+pm_upy_obj_t pm_upy_import_from(const char *mod, const char *name) {
+    if (!mod || !name) {
+        return (pm_upy_obj_t)(uintptr_t)mp_const_none;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t m = mp_import_name(qstr_from_str(mod), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_t attr = mp_load_attr(m, qstr_from_str(name));
+        nlr_pop();
+        return (pm_upy_obj_t)(uintptr_t)attr;
+    }
+    return (pm_upy_obj_t)(uintptr_t)mp_const_none;
+}
+
+int pm_upy_import_all(const char *mod) {
+    if (!mod) {
+        return PM_ERR_ARG;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t m = mp_import_name(qstr_from_str(mod), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        mp_import_all(m);
+        nlr_pop();
+        return PM_OK;
+    }
+    return PM_ERR;
+}

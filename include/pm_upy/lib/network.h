@@ -25,6 +25,12 @@ int pm_upy_network_available(void);
  */
 const char *pm_upy_network_hostname(void);
 
+#include "pm_upy/obj/core.h"
+pm_upy_obj_t pm_upy_network_ifconfig(pm_upy_obj_t nic);
+int pm_upy_network_active(pm_upy_obj_t nic, int on);
+int pm_upy_network_connect(pm_upy_obj_t nic, const char *ssid, const char *key);
+int pm_upy_network_status(pm_upy_obj_t nic);
+
 #ifdef __cplusplus
 }
 #endif

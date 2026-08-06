@@ -1,7 +1,7 @@
 # Pack manifest (see ../../docs/PACK.md; examples/PACK.md is a symlink).
 
 type = "package"
-name = "hello"
+name = "pymergetic.wasmmod_examples.hello"
 version = "0.1.0"
 impl = ["c"]
 comment = "Minimal freestanding demo: src/ natives + Python tree."

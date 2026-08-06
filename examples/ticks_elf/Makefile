@@ -1,6 +1,6 @@
 # Build ticks.elf — positive micropython.runtime.ticks_ms catalog smoke.
 include ../find_top.mk
-OUT = ../packs/ticks.elf
+OUT = ../packs/pymergetic.wasmmod_examples.ticks.elf
 CC ?= gcc
 CFLAGS ?= -ffreestanding -fPIC -fno-plt -fno-stack-protector -O2 -g -c
 

@@ -2,7 +2,7 @@
 
 #include "pm_guest.h"
 
-MP_WASM_IMPORT("test_a2.test_d2", int, d2_value, void);
+MP_WASM_IMPORT("pymergetic.wasmmod_examples.test_a2.test_d2", int, d2_value, void);
 
 int c2_rs_tag(void);
 

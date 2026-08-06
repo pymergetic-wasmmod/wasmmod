@@ -15,6 +15,8 @@ extern "C" {
 
 int pm_upy_stackalt_available(void);
 
+int pm_upy_pystack_init(void *start, void *end);
+
 #ifdef __cplusplus
 }
 #endif

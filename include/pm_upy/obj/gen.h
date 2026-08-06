@@ -15,6 +15,9 @@ extern "C" {
 
 int pm_upy_gen_available(void);
 
+#include "pm_upy/obj/core.h"
+int pm_upy_gen_resume(pm_upy_obj_t gen, pm_upy_obj_t send_val, pm_upy_obj_t *ret_out);
+
 #ifdef __cplusplus
 }
 #endif

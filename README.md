@@ -101,8 +101,8 @@ def answer():
 ```c
 #include "pm_guest.h"
 
-MP_WASM_IMPORT("hello", int, hello, void);
-MP_WASM_IMPORT("mixed", int, mixed_answer, void);
+MP_WASM_IMPORT("pymergetic.wasmmod_examples.hello", int, hello, void);
+MP_WASM_IMPORT("pymergetic.wasmmod_examples.mixed", int, mixed_answer, void);
 MP_WASM_IMPORT("wasmmod.host", int, call_i32, int slot, int arg);
 
 int via_rs(int x)   { return rs_square(x); }   /* same-pack Rust */
@@ -135,10 +135,11 @@ Type "help()" for more information.
 …  select            websocket
 …  socket
 Plus any modules on the filesystem
->>> import wasm
+>>> import pymergetic.wasmmod as wasm
 >>> wasm.path.append("packs")
 >>> wasm.install_hook()
->>> import hello, mixed, bridge    # packs/hello.wasm etc.
+>>> import pymergetic.wasmmod_examples.hello as hello
+>>> import pymergetic.wasmmod_examples.bridge as bridge
 >>> hello.greet()
 'hello from pack py'
 >>> bridge.via_rs(6)
@@ -152,10 +153,10 @@ make -C examples test-signed   # → test-http-verify OK
 ```
 
 <p align="center">
-  <img src="screenshots/http-verify.png" alt="Signed HTTP pack: baked trust, [httpd] GETs, import hello" width="780" />
+  <img src="screenshots/http-verify.png" alt="Signed HTTP pack: baked trust, [httpd] GETs, import pymergetic.wasmmod_examples.hello" width="780" />
 </p>
 
-Example without verify: `wasm.verify(False); wasm.install_hook("http://host/packs/")` then `import hello`.
+Example without verify: `wasm.verify(False); wasm.install_hook("http://host/packs/")` then `import pymergetic.wasmmod_examples.hello`.
 See also `make -C examples test-http`.
 
 **FQN → file:** `import a.b.c` searches `wasm.path` then `sys.path`. A pack can sit at any depth; if only the leaf file exists, missing parents are thin namespace packages (PEP 420-ish) so `a.b.c` stays attribute-reachable. VFS pack roots are scanned so `import a` / `a.b` work when children exist (flat `a.b.c.wasm` or tree `a/b/…`).
@@ -240,7 +241,7 @@ CI: [`.github/workflows/publish-pack.yml`](.github/workflows/publish-pack.yml)
 ```mermaid
 flowchart LR
   subgraph host [Host Python]
-    PY[import hello / bridge]
+    PY[import pymergetic.wasmmod_examples.hello / bridge]
     WM[wasm module]
     HS[host slots / mem / handles]
   end
@@ -298,7 +299,7 @@ CDN loader without loading a pack:
 wasm.cdn("https://cdn.example/cdn")   # MetalCdnDriver; no pack fetch
 wasm.install_hook()                   # import finder on; still no pack load
 wasm.session_id("…")                  # optional correlation id (autoexec sets this)
-# import hello                        # first HTTP / VFS pack load
+# import pymergetic.wasmmod_examples.hello                        # first HTTP / VFS pack load
 names = wasm.catalog()                # GET …/index/lead → package name list
 # wasm.publish("pkg", "0.1.0", data)  # NotImplemented until host request op
 ```

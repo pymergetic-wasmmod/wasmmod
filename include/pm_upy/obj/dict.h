@@ -16,6 +16,9 @@ extern "C" {
 #include "pm_upy/obj/core.h"
 pm_upy_obj_t pm_upy_obj_new_dict(void);
 int pm_upy_dict_store(pm_upy_obj_t dict, pm_upy_obj_t key, pm_upy_obj_t val);
+pm_upy_obj_t pm_upy_dict_get(pm_upy_obj_t dict, pm_upy_obj_t key);
+int pm_upy_dict_delete(pm_upy_obj_t dict, pm_upy_obj_t key);
+pm_upy_obj_t pm_upy_dict_copy(pm_upy_obj_t dict);
 
 #ifdef __cplusplus
 }

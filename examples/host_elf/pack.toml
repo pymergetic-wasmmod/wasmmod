@@ -1,7 +1,7 @@
 # Pack: ELF guest → wasmmod.host / wasmmod (native pointers, no linear mem).
 
 type = "package"
-name = "hostcall"
+name = "pymergetic.wasmmod_examples.hostcall"
 version = "0.1.0"
 impl = ["c"]
 comment = "ELF pack that calls Python via wasmmod.host slots (buf/mem/py + loader version)."

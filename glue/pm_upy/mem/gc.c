@@ -10,6 +10,12 @@
 #include "pm_upy/mem/gc.h"
 #include "pm_upy/features.h"
 #include "pm_common.h"
+#if defined(MICROPY_PY_WASM) && __has_include("py/mpconfig.h")
+#include "py/mpconfig.h"
+#endif
+#ifndef MICROPY_ENABLE_GC
+#define MICROPY_ENABLE_GC 0
+#endif
 #if MICROPY_ENABLE_GC
 #include "py/gc.h"
 #endif

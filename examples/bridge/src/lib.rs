@@ -75,12 +75,12 @@ pub unsafe extern "C" fn rs_via_add3(x: i32) -> i32 {
 }
 
 // Guest→guest
-#[link(wasm_import_module = "hello")]
+#[link(wasm_import_module = "pymergetic.wasmmod_examples.hello")]
 unsafe extern "C" {
     fn hello() -> i32;
 }
 
-#[link(wasm_import_module = "mixed")]
+#[link(wasm_import_module = "pymergetic.wasmmod_examples.mixed")]
 unsafe extern "C" {
     fn mixed_i64(x: i64) -> i64;
 }
@@ -126,9 +126,9 @@ pub unsafe extern "C" fn rs_via_hello() -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_loader_hello() -> i32 {
-    static PACK: [u8; 5] = *b"hello";
+    static PACK: [u8; 33] = *b"pymergetic.wasmmod_examples.hello";
     static FUNC: [u8; 5] = *b"hello";
-    wasmmod_call_i32(PACK.as_ptr() as i32, 5, FUNC.as_ptr() as i32, 5, 0, 0)
+    wasmmod_call_i32(PACK.as_ptr() as i32, 33, FUNC.as_ptr() as i32, 5, 0, 0)
 }
 
 #[no_mangle]
@@ -216,16 +216,16 @@ pub unsafe extern "C" fn rs_via_host_rs(x: i32) -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_pack_py() -> i32 {
-    static M: [u8; 6] = *b"bridge";
+    static M: [u8; 34] = *b"pymergetic.wasmmod_examples.bridge";
     static A: [u8; 9] = *b"ping_code";
-    call0_py(M.as_ptr() as i32, 6, A.as_ptr() as i32, 9)
+    call0_py(M.as_ptr() as i32, 34, A.as_ptr() as i32, 9)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_peer_py() -> i32 {
-    static M: [u8; 10] = *b"hello.util";
+    static M: [u8; 38] = *b"pymergetic.wasmmod_examples.hello.util";
     static A: [u8; 9] = *b"ping_code";
-    call0_py(M.as_ptr() as i32, 10, A.as_ptr() as i32, 9)
+    call0_py(M.as_ptr() as i32, 38, A.as_ptr() as i32, 9)
 }
 
 #[panic_handler]

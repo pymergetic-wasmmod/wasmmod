@@ -38,9 +38,9 @@
 #include "pm_guest.h"
 
 /* Guest→guest (loader forwarders; peers must already be loaded). */
-MP_WASM_IMPORT("hello", int, hello, void);
-MP_WASM_IMPORT("mixed", int, mixed_answer, void);
-MP_WASM_IMPORT("mixed", long long, mixed_i64, long long x);
+MP_WASM_IMPORT("pymergetic.wasmmod_examples.hello", int, hello, void);
+MP_WASM_IMPORT("pymergetic.wasmmod_examples.mixed", int, mixed_answer, void);
+MP_WASM_IMPORT("pymergetic.wasmmod_examples.mixed", long long, mixed_i64, long long x);
 
 /* Guest→host (registered by the loader as wasmmod.host.*). */
 MP_WASM_IMPORT("wasmmod.host", int, call_i32, int slot, int arg);
@@ -123,9 +123,9 @@ int via_hello(void) {
 
 /* Dynamic peer call via wasmmod.call_i32 (no static hello import required). */
 int via_loader_hello(void) {
-    static const char pack[] = "hello";
+    static const char pack[] = "pymergetic.wasmmod_examples.hello";
     static const char func[] = "hello";
-    return wasmmod_call_i32(MP_WASM_PTR(pack), 5, MP_WASM_PTR(func), 5, 0, 0);
+    return wasmmod_call_i32(MP_WASM_PTR(pack), 33, MP_WASM_PTR(func), 5, 0, 0);
 }
 
 int via_loader_version_len(void) {
@@ -168,14 +168,14 @@ int via_host_rs(int x) {
 
 /* Same-pack C → pack Python via call0_py. */
 int via_pack_py(void) {
-    static const char m[] = "bridge";
+    static const char m[] = "pymergetic.wasmmod_examples.bridge";
     static const char a[] = "ping_code";
     return call0_py(MP_WASM_PTR(m), (int)(sizeof(m) - 1), MP_WASM_PTR(a), (int)(sizeof(a) - 1));
 }
 
 /* Guest→guest C → peer pack Python. */
 int via_peer_py(void) {
-    static const char m[] = "hello.util";
+    static const char m[] = "pymergetic.wasmmod_examples.hello.util";
     static const char a[] = "ping_code";
     return call0_py(MP_WASM_PTR(m), (int)(sizeof(m) - 1), MP_WASM_PTR(a), (int)(sizeof(a) - 1));
 }

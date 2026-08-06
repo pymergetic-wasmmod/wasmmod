@@ -4,7 +4,7 @@
 #   make -C extmod/wasmmod/examples/client
 
 include ../find_top.mk
-OUT = ../packs/client.wasm
+OUT = ../packs/pymergetic.wasmmod_examples.client.wasm
 
 .PHONY: all clean
 

@@ -1111,9 +1111,52 @@ wasmmod-read disasm hello.wasm 0 [OFFSET [LIMIT]]   # Wasm: index ignored; code 
 # CDN: GET …/artifacts/lead/hello.elf/files/mpy-disasm?path=…
 ```
 
-`micropython.*` catalog (minimal): `micropython.runtime.ticks_ms` →
-`mp_hal_ticks_ms` (Wasm natives + ELF). Unknown names still fail at load
-(`examples/ticks`, `examples/ticks_elf`, `examples/bad_upy_elf`).
+### Host engine self-description (`pymergetic.wasmmod`)
+
+The main µPy+wasmmod binary can carry the **same** `wasmmod.pack` + `wasmmod.source`
+sections as guest packs (inspect/document only — **not** loaded as a runnable guest).
+
+| | |
+|--|--|
+| **Package name** | `pymergetic.wasmmod` (first-party `pymergetic.*` namespace; kernel later: `pymergetic.metal`) |
+| **Tags** | `role=host`, `product=wasmmod`, `org=pymergetic` |
+| **CDN sidebar** | Synthetic **Platform** group for `role=host\|kernel` (not only nested under `pymergetic.*`) |
+| **CDN Play** | **Disabled** for host/kernel artifacts (WAMR self-load OOMs) — use **Inspect** |
+| **Browser build** | `make -C extmod/wasmmod/ports/micropython/webassembly` post-link embeds into `micropython.wasm` and aliases `pymergetic.wasmmod.wasm` (`WASMMOD_EMBED_HOST_SOURCE=1`, default on) |
+| **Unix ELF** | `make MICROPY_PY_WASM=1 WASMMOD_EMBED_HOST_SOURCE=1 embed-host-desc` |
+| **Tool** | `wasmmod embed-host` (`pymergetic-wasmmod-tools`) |
+| **CDN** | `dev-up` publishes signed `pymergetic.wasmmod` for Inspect |
+| **Self API** | `pm_wasmmod_host_self_open()` / `pymergetic.wasmmod.host.source()` resolves the running image; browser may call `host.set_self_image(bytes)` first |
+| **Examples FQN** | `pymergetic.wasmmod_examples.*` (local dirs stay short: `hello/`, `ticks/`, …) |
+
+#### Cross-language naming (locked)
+
+C keeps full `pm_upy_*` / `pm_wasmmod_*` linkage. Rust/Python put the **domain in the path**; leaf = C name minus `pm_{domain}_`.
+
+| Domain | C | Rust | Python |
+|--------|---|------|--------|
+| µPy gut | `pm_upy_gc_collect()` | `pm::upy::mem::gc_collect()` / `pm::upy::ffi::…` | `pymergetic.upy` (`upy.mem`, `upy.features`, `upy.time`) |
+| wasmmod | `pm_wasmmod_host_self_open()` | `pm::wasmmod::host::self_open()` / `…::ffi::…` | `pymergetic.wasmmod` (`wm.host.source()`) |
+
+No top-level short Python modules (`upy` / `wasmmod` / `wasm` as product faces). Pack finder skips host FQNs so `import pymergetic.wasmmod` never guest-loads the engine.
+
+```python
+import pymergetic.wasmmod as wm
+import pymergetic.upy as upy
+print(wm.host.package_name())  # "pymergetic.wasmmod"
+src = wm.host.source()         # WasmSource for this process image
+upy.mem.gc_collect()
+print(hex(upy.features.bits()), upy.time.ticks_ms())
+src.close()
+```
+
+Curated tree: `include/`, `glue/`, top-level wasmmod `*.c`/`*.h`, webassembly port slice, `crates/pm`, key docs — not all of MicroPython / `third_party`. See [`include/SYMBOLS.md`](../include/SYMBOLS.md).
+
+`micropython.runtime` guest catalog (Wasm natives + ELF): `ticks_ms`, `ticks_us`,
+`time_ns`, `delay_ms`, `features`, `has`, `gc_collect`, `handle_pending`,
+`run_str`, `sched_schedule`. `wasmmod.host` also exposes `mem_set` / `mem_valid`.
+Unknown `micropython.*` names still fail at load (`examples/ticks`,
+`examples/ticks_elf`, `examples/bad_upy_elf`).
 
 ## Loader API (proposed Python surface)
 

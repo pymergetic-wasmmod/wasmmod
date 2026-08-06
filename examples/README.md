@@ -62,9 +62,9 @@ Two source layouts, same runtime/CDN tree (names split on `.`):
 **Sibling / flat** (different-repo style) under `tree/`:
 
 ```text
-tree/test_a/                  → packs/test_a.wasm
-tree/test_a_test_d/           → packs/test_a.test_d.wasm
-tree/test_a_test_b_test_c/    → packs/test_a.test_b.test_c.wasm
+tree/test_a/                  → packs/pymergetic.wasmmod_examples.test_a.wasm
+tree/test_a_test_d/           → packs/pymergetic.wasmmod_examples.test_a.test_d.wasm
+tree/test_a_test_b_test_c/    → packs/pymergetic.wasmmod_examples.test_a.test_b.test_c.wasm
 ```
 
 **Nested monorepo** (`type = "package"` markers; `wasmmod pack-tree` walks them):
@@ -85,13 +85,13 @@ make -C extmod/wasmmod/examples test-tree-cdn   # publish + wasm.cdn
 Smoke (`run_tree_cdn.py`):
 
 ```python
-import wasm
+import pymergetic.wasmmod as wasm
 wasm.path.append("packs")  # or wasm.cdn("http://127.0.0.1:8000/cdn")
 wasm.install_hook()
-import test_a
+import pymergetic.wasmmod_examples.test_a
 from test_a.test_b import test_c
 assert test_c.c_answer() == 42
-import test_a2
+import pymergetic.wasmmod_examples.test_a2
 from test_a2.test_b2 import test_c2
 assert test_c2.c2_answer() == 42
 ```
@@ -123,7 +123,7 @@ Minimal export surface — loader introspects Wasm types; no `sig` required:
 
 ```toml
 [[exports]]
-func = "hello"
+func = "pymergetic.wasmmod_examples.hello"
 
 [[exports]]
 func = "add"
@@ -158,11 +158,11 @@ Same register/connect/sign path as Wasm; execute is in-tree ET_REL:
 
 | Example | Artifact | Notes |
 |---------|----------|--------|
-| `hello_elf/` | `packs/hello.elf` | freestanding exports + shared `hello` Python tree (`-fPIC`) |
-| `client_elf/` | `packs/client.elf` | peer `hello` via MPWI + GOT |
-| `host_elf/` | `packs/hostcall.elf` | `wasmmod.host` slots + `via_buf` / `via_mem` / `via_py` + loader `version` |
-| `ticks/` | `packs/ticks.wasm` | positive: `micropython.runtime.ticks_ms` (Wasm) |
-| `ticks_elf/` | `packs/ticks.elf` | positive: `micropython.runtime.ticks_ms` (ELF) |
+| `hello_elf/` | `packs/pymergetic.wasmmod_examples.hello.elf` | freestanding exports + shared `hello` Python tree (`-fPIC`) |
+| `client_elf/` | `packs/pymergetic.wasmmod_examples.client.elf` | peer `hello` via MPWI + GOT |
+| `host_elf/` | `packs/pymergetic.wasmmod_examples.hostcall.elf` | `wasmmod.host` slots + `via_buf` / `via_mem` / `via_py` + loader `version` |
+| `ticks/` | `packs/pymergetic.wasmmod_examples.ticks.wasm` | positive: `micropython.runtime.ticks_ms` (Wasm) |
+| `ticks_elf/` | `packs/pymergetic.wasmmod_examples.ticks.elf` | positive: `micropython.runtime.ticks_ms` (ELF) |
 | `bad_upy_elf/` | `/tmp/wasmmod_badupy.elf` | negative: unknown `micropython.*` → load error |
 
 ```sh
@@ -190,24 +190,24 @@ make -C ports/unix MICROPY_PY_WASM=1 MICROPY_PY_BTREE=0 MICROPY_PY_FFI=0 BUILD=b
 
 # 3) Hello smoke (native + embedded src/, including nested hello.util)
 ports/unix/build-wasm/micropython -c '
-import wasm
-m = wasm.load_pack("extmod/wasmmod/examples/packs/hello.wasm")
+import pymergetic.wasmmod as wasm
+m = wasm.load_pack("extmod/wasmmod/examples/packs/pymergetic.wasmmod_examples.hello.wasm")
 print(m.hello(), m.add(2, 3), m.greet())
-import hello.util
-import hello.util.extra
+import pymergetic.wasmmod_examples.hello.util
+import pymergetic.wasmmod_examples.hello.util.extra
 print(hello.util.ping(), hello.util.extra.twice(21))
-wasm.unload("hello")
+wasm.unload("pymergetic.wasmmod_examples.hello")
 '
 ```
 
 ### Guest → host (Python callbacks)
 
 ```python
-import wasm
+import pymergetic.wasmmod as wasm
 wasmmod.host_set(0, lambda x: x * 2)   # slot for wasmmod.host.call_i32
-wasm.load_pack("extmod/wasmmod/examples/packs/hello.wasm")
-wasm.load_pack("extmod/wasmmod/examples/packs/mixed.wasm")
-b = wasm.load_pack("extmod/wasmmod/examples/packs/bridge.wasm")
+wasm.load_pack("extmod/wasmmod/examples/packs/pymergetic.wasmmod_examples.hello.wasm")
+wasm.load_pack("extmod/wasmmod/examples/packs/pymergetic.wasmmod_examples.mixed.wasm")
+b = wasm.load_pack("extmod/wasmmod/examples/packs/pymergetic.wasmmod_examples.bridge.wasm")
 print(b.via_host(7))   # → 14
 wasmmod.host_clear()
 ```

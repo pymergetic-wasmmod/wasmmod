@@ -599,6 +599,34 @@ static mp_obj_t mod_wasm_source_from_bytes(mp_obj_t buf_in) {
 }
 MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_source_from_bytes_obj, mod_wasm_source_from_bytes);
 
+#include "pm_wasmmod/host/self.h"
+
+static mp_obj_t mod_wasm_host_package_name(void) {
+    const char *name = pm_wasmmod_host_package_name();
+    return mp_obj_new_str(name, strlen(name));
+}
+MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_host_package_name_obj, mod_wasm_host_package_name);
+
+static mp_obj_t mod_wasm_host_source(void) {
+    return wasm_source_make((mp_wasm_source_view_t *)pm_wasmmod_host_self_open(), NULL);
+}
+MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_host_source_obj, mod_wasm_host_source);
+
+static mp_obj_t mod_wasm_host_set_self_image(mp_obj_t buf_in) {
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_READ);
+    uint8_t *copy = MICROPY_WASM_MALLOC(bufinfo.len ? bufinfo.len : 1);
+    if (copy == NULL) {
+        mp_raise_OSError(MP_ENOMEM);
+    }
+    if (bufinfo.len) {
+        memcpy(copy, bufinfo.buf, bufinfo.len);
+    }
+    pm_wasmmod_host_set_self_image(copy, (uint32_t)bufinfo.len, true);
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_host_set_self_image_obj, mod_wasm_host_set_self_image);
+
 static mp_obj_t source_close(mp_obj_t self_in) {
     mp_obj_wasm_source_t *self = MP_OBJ_TO_PTR(self_in);
     if (self->view != NULL && !self->borrowed) {
