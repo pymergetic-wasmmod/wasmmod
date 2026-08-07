@@ -11,7 +11,8 @@ license = "MIT"
 # Defaults: native.dir = "src" (src/client.c).
 
 [deps]
-pymergetic.wasmmod_examples.hello = "0.1.0"
+# Dotted names must be quoted — bare keys nest in TOML.
+"pymergetic.wasmmod_examples.hello" = "0.1.0"
 
 [lifecycle]
 load = "mp_pack_load"

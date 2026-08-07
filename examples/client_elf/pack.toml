@@ -7,7 +7,7 @@ impl = ["c"]
 comment = "ELF twin of client.wasm — calls hello through in-tree undef resolve."
 
 [deps]
-pymergetic.wasmmod_examples.hello = "0.1.0"
+"pymergetic.wasmmod_examples.hello" = "0.1.0"
 
 [lifecycle]
 load = "mp_pack_load"

@@ -113,6 +113,9 @@ LDFLAGS_EXTMOD += -L$(WAMR_BUILD) -liwasm -lm
 SRC_WASMMOD_WEB = $(WASMMOD_DIR)/ports/micropython/webassembly/io_browser.c
 PY_O += $(addprefix $(BUILD)/, $(SRC_WASMMOD_WEB:.c=.o))
 SRC_QSTR += $(SRC_WASMMOD_WEB)
+# Emscripten defines __wasm__, but this image is the µPy *host* — not a guest pack.
+# Force guest macros off so glue headers do not emit import_module(gc_collect) etc.
+CFLAGS_EXTMOD += -DPM_WASMMOD_GUEST=0
 else
 LDFLAGS_EXTMOD += -L$(WAMR_BUILD) -liwasm -lpthread -ldl -lm
 endif

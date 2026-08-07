@@ -3,7 +3,9 @@ MICROPY_PY_WASM = 1
 WASMMOD_EMSCRIPTEN = 1
 
 # Asyncify so js.fetch can park inside sync I/O ops.
+# Default stack is tight for REPL eval + catalog/import fetch; 64KiB is safer.
 JSFLAGS += -s ASYNCIFY
+JSFLAGS += -s ASYNCIFY_STACK_SIZE=65536
 
 CFLAGS += -DMICROPY_WASM_HTTP_NATIVE=0
 
