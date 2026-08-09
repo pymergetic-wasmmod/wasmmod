@@ -23,13 +23,19 @@ typedef struct {
 static pm_upy_mod_ent_t mods[PM_UPY_MOD_MAX];
 static size_t nmods;
 
+/* Dotted names need a non-empty fromlist so µPy returns the leaf module. */
+static mp_obj_t pm_upy_import_leaf(const char *name) {
+    mp_obj_t fromlist = strchr(name, '.') != NULL ? mp_const_true : mp_const_none;
+    return mp_import_name(qstr_from_str(name), fromlist, MP_OBJ_NEW_SMALL_INT(0));
+}
+
 pm_upy_obj_t pm_upy_import_name(const char *name) {
     if (!name || !name[0]) {
         return (pm_upy_obj_t)(uintptr_t)mp_const_none;
     }
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        mp_obj_t mod = mp_import_name(qstr_from_str(name), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_t mod = pm_upy_import_leaf(name);
         nlr_pop();
         return (pm_upy_obj_t)(uintptr_t)mod;
     }
@@ -42,7 +48,7 @@ int pm_upy_bind_reg(const char *full_module, const char *func, void *fn_ptr) {
     }
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        mp_obj_t mod = mp_import_name(qstr_from_str(full_module), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_t mod = pm_upy_import_leaf(full_module);
         /* Store the C pointer as an int attribute; call via host/ffi as needed. */
         mp_store_attr(mod, qstr_from_str(func), mp_obj_new_int_from_uint((mp_uint_t)(uintptr_t)fn_ptr));
         nlr_pop();
@@ -108,8 +114,8 @@ pm_upy_obj_t pm_upy_import_from(const char *mod, const char *name) {
     }
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        mp_obj_t m = mp_import_name(qstr_from_str(mod), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
-        mp_obj_t attr = mp_load_attr(m, qstr_from_str(name));
+        mp_obj_t m = pm_upy_import_leaf(mod);
+        mp_obj_t attr = mp_import_from(m, qstr_from_str(name));
         nlr_pop();
         return (pm_upy_obj_t)(uintptr_t)attr;
     }
@@ -122,7 +128,7 @@ int pm_upy_import_all(const char *mod) {
     }
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        mp_obj_t m = mp_import_name(qstr_from_str(mod), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_t m = pm_upy_import_leaf(mod);
         mp_import_all(m);
         nlr_pop();
         return PM_OK;

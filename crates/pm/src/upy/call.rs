@@ -31,6 +31,11 @@ pub fn fn_call_async(fun: pm_upy_obj_t, n: usize, args: *mut pm_upy_obj_t) -> pm
     unsafe { ffi::pm_upy_fn_call_async(fun, n, args) }
 }
 
+/// `pm_upy_fn_call` — n-arg call via handle (str/obj args).
+pub fn fn_call(fn_h: u32, n: usize, args: *mut pm_upy_obj_t) -> pm_upy_obj_t {
+    unsafe { ffi::pm_upy_fn_call(fn_h, n, args) }
+}
+
 /// `pm_upy_fn_call_i32`.
 pub fn fn_call_i32(fn_h: u32, a: i32, b: i32, out: *mut i32) -> Result<(), PmError> {
     check_status(unsafe { ffi::pm_upy_fn_call_i32(fn_h, a, b, out) })

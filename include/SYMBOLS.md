@@ -423,8 +423,9 @@ Host engine package name (self-desc embed): **`pymergetic.wasmmod`** (`role=host
 |---|------|--------|-------|--------|-------|
 | `pm_upy_call_function_0` | `pm::upy::call::call_function_0` | — | — | `ok` | |
 | `pm_upy_call_function_1` | `pm::upy::call::call_function_1` | — | — | `ok` | |
-| `pm_upy_fn_call_i32` | `pm::upy::call::fn_call_i32` | — | — | `ok` | |
-| `pm_upy_fn_resolve` | `pm::upy::call::fn_resolve` | — | — | `ok` | |
+| `pm_upy_fn_call_i32` | `pm::upy::call::fn_call_i32` | `upy.call.fn_call_i32` | — | `ok` | int path via handle |
+| `pm_upy_fn_resolve` | `pm::upy::call::fn_resolve` | `upy.call.fn_resolve` | — | `ok` | leaf import + attr → handle |
+| `pm_upy_fn_call` | `pm::upy::call::fn_call` | — | — | `ok` | n-arg/str path via handle |
 | `pm_upy_call_function_n` | `pm::upy::call::call_function_n` | — | — | `ok` | n-arg call |
 | `pm_upy_call_method` | `pm::upy::call::call_method` | — | — | `ok` |  |
 | `pm_upy_fn_call_async` | `pm::upy::call::fn_call_async` | — | — | `ok` |  |
@@ -441,7 +442,7 @@ Host engine package name (self-desc embed): **`pymergetic.wasmmod`** (`role=host
 | C | Rust | Python | Guest | Status | Notes |
 |---|------|--------|-------|--------|-------|
 | `pm_upy_bind_reg` | `pm::upy::module::bind_reg` | — | — | `ok` | |
-| `pm_upy_import_name` | `pm::upy::module::import_name` | `__import__` | — | `ok` | |
+| `pm_upy_import_name` | `pm::upy::module::import_name` | `__import__` | — | `ok` | dotted → leaf (non-empty fromlist) |
 | `pm_upy_module_has` | `pm::upy::module::module_has` | — | — | `ok` | |
 | `pm_upy_module_install_face` | `pm::upy::module::module_install_face` | — | — | `ok` | |
 | `pm_upy_module_get_builtin` | `pm::upy::module::module_get_builtin` | — | — | `ok` |  |

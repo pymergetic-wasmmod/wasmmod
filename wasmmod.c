@@ -48,6 +48,7 @@
 #include "pm_upy/loop/repl.h"
 #include "pm_upy/loop/sched.h"
 #include "pm_upy/loop/step.h"
+#include "pm_upy/obj/call.h"
 #include "pm_upy/mem/gc.h"
 #include "pm_upy/mem/stack.h"
 #include "wasm_export.h"
@@ -314,6 +315,40 @@ const mp_obj_module_t mp_module_pymergetic_upy_sched = {
     .globals = (mp_obj_dict_t *)&mp_module_pymergetic_upy_sched_globals,
 };
 
+/* --- pymergetic.upy.call --- */
+
+static mp_obj_t mod_upy_call_fn_resolve(mp_obj_t dotted_in) {
+    const char *dotted = mp_obj_str_get_str(dotted_in);
+    return mp_obj_new_int_from_uint((mp_uint_t)pm_upy_fn_resolve(dotted));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_upy_call_fn_resolve_obj, mod_upy_call_fn_resolve);
+
+static mp_obj_t mod_upy_call_fn_call_i32(mp_obj_t fn_h_in, mp_obj_t a_in, mp_obj_t b_in) {
+    int32_t out = 0;
+    int st = pm_upy_fn_call_i32(
+        (uint32_t)mp_obj_get_int(fn_h_in),
+        (int32_t)mp_obj_get_int(a_in),
+        (int32_t)mp_obj_get_int(b_in),
+        &out);
+    if (st != 0) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("fn_call_i32"));
+    }
+    return mp_obj_new_int(out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_upy_call_fn_call_i32_obj, mod_upy_call_fn_call_i32);
+
+static const mp_rom_map_elem_t mp_module_pymergetic_upy_call_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_upy_dot_call) },
+    { MP_ROM_QSTR(MP_QSTR_fn_resolve), MP_ROM_PTR(&mod_upy_call_fn_resolve_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fn_call_i32), MP_ROM_PTR(&mod_upy_call_fn_call_i32_obj) },
+};
+static MP_DEFINE_CONST_DICT(mp_module_pymergetic_upy_call_globals, mp_module_pymergetic_upy_call_globals_table);
+
+const mp_obj_module_t mp_module_pymergetic_upy_call = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_upy_call_globals,
+};
+
 /* --- pymergetic.upy.run --- */
 
 static mp_obj_t mod_upy_run_run_str(mp_obj_t src_in) {
@@ -522,6 +557,7 @@ static const mp_rom_map_elem_t mp_module_pymergetic_upy_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_features), MP_ROM_PTR(&mp_module_pymergetic_upy_features) },
     { MP_ROM_QSTR(MP_QSTR_time), MP_ROM_PTR(&mp_module_pymergetic_upy_time) },
     { MP_ROM_QSTR(MP_QSTR_sched), MP_ROM_PTR(&mp_module_pymergetic_upy_sched) },
+    { MP_ROM_QSTR(MP_QSTR_call), MP_ROM_PTR(&mp_module_pymergetic_upy_call) },
     { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&mp_module_pymergetic_upy_run) },
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&mp_module_pymergetic_upy_init) },
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&mp_module_pymergetic_upy_step) },

@@ -21,7 +21,9 @@ pm_upy_obj_t pm_upy_call_function_1(pm_upy_obj_t fun, pm_upy_obj_t arg);
 pm_upy_obj_t pm_upy_call_function_n(pm_upy_obj_t fun, size_t n, pm_upy_obj_t *args);
 pm_upy_obj_t pm_upy_call_method(pm_upy_obj_t obj, const char *name, size_t n, pm_upy_obj_t *args);
 pm_upy_obj_t pm_upy_fn_call_async(pm_upy_obj_t fun, size_t n, pm_upy_obj_t *args);
+/* Resolve "pkg.mod.attr" → GC-rooted handle (0 = fail). Str/n-arg: fn_call. */
 uint32_t pm_upy_fn_resolve(const char *dotted);
+pm_upy_obj_t pm_upy_fn_call(uint32_t fn_h, size_t n, pm_upy_obj_t *args);
 int pm_upy_fn_call_i32(uint32_t fn_h, int32_t a, int32_t b, int32_t *out);
 
 #ifdef __cplusplus
