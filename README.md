@@ -1,5 +1,8 @@
 # wasmmod
 
+> **Layout:** `dev/tools` and `dev/test` live in-tree (not separate repos). Former remotes: `pymergetic/wasmmod-tools`, `pymergetic/wasmmod-test`.
+
+
 **v0.1.4-alpha** — signed packs for Python (`.wasm` / `.aot` / `.elf`).
 
 > **Experimental.** This is a pre-release (`-alpha`). APIs, pack layout, verify/HTTP

@@ -1,0 +1,102 @@
+# Independent consumer: pack (or reuse wasmmod examples) and upload to metal-cdn.
+name: publish-cdn
+
+on:
+  workflow_dispatch:
+    inputs:
+      cdn_url:
+        description: metal-cdn base URL (e.g. https://cdn.example/cdn)
+        required: true
+      version:
+        description: Package version to publish
+        required: true
+        default: "0.1.0a1"
+      package:
+        description: CDN package name
+        required: true
+        default: "wasmmod-test-hello"
+      dry_run:
+        description: Build/stage only (skip CDN upload)
+        type: boolean
+        default: true
+      from_wasmmod_example:
+        description: Use prebuilt examples/packs/hello.wasm from wasmmod checkout
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  pack-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout wasmmod (WASMMOD_ROOT + example artifacts)
+        uses: actions/checkout@v4
+        with:
+          repository: pymergetic/wasmmod
+          path: _wasmmod
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install host tools + CDN client
+        run: |
+          python -m pip install -U pip
+          pip install --pre 'pymergetic-wasmmod-tools[cdn]>=0.1.0a1'
+          pip install --pre -e '.[cdn]' || pip install -e .
+          sudo apt-get update
+          sudo apt-get install -y openssl
+
+      - name: Stage artifacts
+        id: stage
+        env:
+          WASMMOD_ROOT: ${{ github.workspace }}/_wasmmod
+        run: |
+          set -euo pipefail
+          mkdir -p dist-pack
+          if [ "${{ inputs.from_wasmmod_example }}" = "true" ]; then
+            src="$WASMMOD_ROOT/examples/packs/hello.wasm"
+            test -f "$src" || { echo "missing $src"; ls -la "$WASMMOD_ROOT/examples/packs" || true; exit 1; }
+            cp -f "$src" dist-pack/hello.wasm
+            # Optional siblings
+            for f in hello.elf hello.aot6 hello.wasm.zlib; do
+              if [ -f "$WASMMOD_ROOT/examples/packs/$f" ]; then
+                cp -f "$WASMMOD_ROOT/examples/packs/$f" "dist-pack/$f"
+              fi
+            done
+          else
+            wasmmod pack examples/hello -o dist-pack/hello.wasm
+          fi
+          ls -la dist-pack
+
+      - name: Publish to metal-cdn
+        if: ${{ !inputs.dry_run }}
+        env:
+          METAL_CDN_URL: ${{ inputs.cdn_url }}
+          METAL_CDN_TOKEN: ${{ secrets.METAL_CDN_TOKEN }}
+          WASMMOD_ROOT: ${{ github.workspace }}/_wasmmod
+        run: |
+          set -euo pipefail
+          test -n "${METAL_CDN_TOKEN:-}" || {
+            echo "Set repo secret METAL_CDN_TOKEN (metal-cdn API token)" >&2
+            exit 1
+          }
+          wasmmod publish \
+            --from-artifacts dist-pack \
+            --package "${{ inputs.package }}" \
+            --version "${{ inputs.version }}" \
+            --cdn-url "$METAL_CDN_URL" \
+            --token "$METAL_CDN_TOKEN"
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "dry_run=true — artifacts in dist-pack (no upload)"
+          echo "cdn_url=${{ inputs.cdn_url }}"
+          echo "package=${{ inputs.package }} version=${{ inputs.version }}"
+          ls -la dist-pack

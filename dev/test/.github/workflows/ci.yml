@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          pip install --pre 'pymergetic-wasmmod-tools>=0.1.0a1'
+          pip install -e ".[dev]" || pip install -e .
+      - name: Import smoke
+        run: python -c "import pymergetic.wasmmod.test as t; print(t.__name__)"
