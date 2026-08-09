@@ -14,8 +14,8 @@
 | Component | Role | Repo |
 |-----------|------|------|
 | **wasmmod** | **This repo** — runtime + pack tree (`pymergetic-wasmmod`) | [pymergetic/wasmmod](https://github.com/pymergetic/wasmmod) · `main` |
-| wasmmod-tools | Host CLI (`pymergetic-wasmmod-tools`) | nested submodule [`dev/tools`](dev/tools) → [pymergetic/wasmmod-tools](https://github.com/pymergetic/wasmmod-tools) · `main` |
-| wasmmod-test | External pack/CDN consumer sample | nested submodule [`dev/test`](dev/test) → [pymergetic/wasmmod-test](https://github.com/pymergetic/wasmmod-test) · `main` |
+| wasmmod-tools | Host CLI (`pymergetic-wasmmod-tools`) | in-tree [`dev/tools`](dev/tools) (was [wasmmod-tools](https://github.com/pymergetic/wasmmod-tools)) |
+| wasmmod-test | External pack/CDN consumer sample | in-tree [`dev/test`](dev/test) (was [wasmmod-test](https://github.com/pymergetic/wasmmod-test)) |
 | metal-cdn | CDN server + client | [pymergetic/metal-cdn](https://github.com/pymergetic/metal-cdn) · `main` |
 | metalpython `wasmmod` | Clean upy host + submodule (upstream-shaped) | [metalpython/tree/wasmmod](https://github.com/pymergetic/metalpython/tree/wasmmod) |
 | metalpython `master` | Metal product µPy; **base = `wasmmod` tip** | [metalpython/tree/master](https://github.com/pymergetic/metalpython/tree/master) |
