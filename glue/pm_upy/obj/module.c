@@ -25,7 +25,14 @@ static size_t nmods;
 
 /* Dotted names need a non-empty fromlist so µPy returns the leaf module. */
 static mp_obj_t pm_upy_import_leaf(const char *name) {
-    mp_obj_t fromlist = strchr(name, '.') != NULL ? mp_const_true : mp_const_none;
+    int dotted = 0;
+    for (const char *p = name; *p; p++) {
+        if (*p == '.') {
+            dotted = 1;
+            break;
+        }
+    }
+    mp_obj_t fromlist = dotted ? mp_const_true : mp_const_none;
     return mp_import_name(qstr_from_str(name), fromlist, MP_OBJ_NEW_SMALL_INT(0));
 }
 

@@ -46,7 +46,13 @@ uint32_t pm_upy_fn_resolve(const char *dotted) {
     if (!dotted || !dotted[0]) {
         return 0;
     }
-    const char *last_dot = strrchr(dotted, '.');
+    /* Freestanding hosts may lack strrchr — scan manually. */
+    const char *last_dot = NULL;
+    for (const char *p = dotted; *p; p++) {
+        if (*p == '.') {
+            last_dot = p;
+        }
+    }
     if (!last_dot || last_dot == dotted || last_dot[1] == '\0') {
         return 0;
     }
@@ -56,7 +62,9 @@ uint32_t pm_upy_fn_resolve(const char *dotted) {
     if (mod_len >= sizeof(mod_buf)) {
         return 0;
     }
-    memcpy(mod_buf, dotted, mod_len);
+    for (size_t i = 0; i < mod_len; i++) {
+        mod_buf[i] = dotted[i];
+    }
     mod_buf[mod_len] = '\0';
     const char *attr = last_dot + 1;
 
