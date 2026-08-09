@@ -1130,25 +1130,8 @@ static mp_obj_t mod_wasm_install_hook(size_t n_args, const mp_obj_t *pos_args, m
 }
 MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_install_hook_obj, 0, mod_wasm_install_hook);
 
-// wasm.cdn(url, token=None) → driver name string
-static mp_obj_t mod_wasm_cdn(size_t n_args, const mp_obj_t *args) {
-    if (n_args < 1 || !mp_obj_is_str(args[0])) {
-        mp_raise_TypeError(MP_ERROR_TEXT("cdn(url, token=None)"));
-    }
-    const char *url = mp_obj_str_get_str(args[0]);
-    if (!mp_wasm_uri_is_http(url)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("cdn: url must be http(s)"));
-    }
-    const char *token = NULL;
-    if (n_args >= 2 && args[1] != mp_const_none) {
-        if (!mp_obj_is_str(args[1])) {
-            mp_raise_TypeError(MP_ERROR_TEXT("cdn: token must be str"));
-        }
-        token = mp_obj_str_get_str(args[1]);
-    }
-    mp_wasm_cdn_configure(url, token);
-    // Metal uses /artifacts/… only — drop this base from wasm.path if present
-    // (avoids flat probes on {base}/<name>.wasm that can 200 non-pack bodies).
+// Drop metal-cdn bases from wasm.path (artifacts-only resolve).
+static void wasm_cdn_scrub_path_bases(void) {
     mp_wasm_path_ensure();
     mp_obj_list_t *list = &MP_STATE_VM(mp_wasm_path_obj);
     size_t n;
@@ -1163,10 +1146,53 @@ static mp_obj_t mod_wasm_cdn(size_t n_args, const mp_obj_t *args) {
             mp_obj_list_remove(MP_OBJ_FROM_PTR(list), items[idx]);
         }
     }
+}
+
+static const char *wasm_cdn_token_arg(size_t n_args, const mp_obj_t *args) {
+    if (n_args < 2 || args[1] == mp_const_none) {
+        return NULL;
+    }
+    if (!mp_obj_is_str(args[1])) {
+        mp_raise_TypeError(MP_ERROR_TEXT("cdn: token must be str"));
+    }
+    return mp_obj_str_get_str(args[1]);
+}
+
+// wasm.cdn(url, token=None) → replace list with one base (compat / explicit replace)
+static mp_obj_t mod_wasm_cdn(size_t n_args, const mp_obj_t *args) {
+    if (n_args < 1 || !mp_obj_is_str(args[0])) {
+        mp_raise_TypeError(MP_ERROR_TEXT("cdn(url, token=None)"));
+    }
+    const char *url = mp_obj_str_get_str(args[0]);
+    if (!mp_wasm_uri_is_http(url)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("cdn: url must be http(s)"));
+    }
+    mp_wasm_cdn_configure(url, wasm_cdn_token_arg(n_args, args));
+    wasm_cdn_scrub_path_bases();
     const char *name = mp_wasm_cdn_driver_name();
     return mp_obj_new_str(name, strlen(name));
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_cdn_obj, 1, 2, mod_wasm_cdn);
+
+// wasm.cdn_prepend(url, token=None) → site/session ADD (keep home)
+static mp_obj_t mod_wasm_cdn_prepend(size_t n_args, const mp_obj_t *args) {
+    if (n_args < 1 || !mp_obj_is_str(args[0])) {
+        mp_raise_TypeError(MP_ERROR_TEXT("cdn_prepend(url, token=None)"));
+    }
+    const char *url = mp_obj_str_get_str(args[0]);
+    if (!mp_wasm_uri_is_http(url)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("cdn_prepend: url must be http(s)"));
+    }
+    if (mp_wasm_cdn_base_count() == 0) {
+        mp_wasm_cdn_configure(url, wasm_cdn_token_arg(n_args, args));
+    } else {
+        (void)mp_wasm_cdn_prepend(url, wasm_cdn_token_arg(n_args, args));
+    }
+    wasm_cdn_scrub_path_bases();
+    const char *name = mp_wasm_cdn_driver_name();
+    return mp_obj_new_str(name, strlen(name));
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_cdn_prepend_obj, 1, 2, mod_wasm_cdn_prepend);
 
 // wasm.catalog(channel="lead") → list of package name strings
 static mp_obj_t mod_wasm_catalog(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
@@ -1376,6 +1402,11 @@ void mp_wasm_fixup_packload_fun_objs(void)
 	fv->base.type = &mp_type_fun_builtin_var;
 	fv->sig = MP_OBJ_FUN_MAKE_SIG(1, 2, false);
 	fv->fun.var = mod_wasm_cdn;
+
+	fv = (mp_obj_fun_builtin_var_t *)&mod_wasm_cdn_prepend_obj;
+	fv->base.type = &mp_type_fun_builtin_var;
+	fv->sig = MP_OBJ_FUN_MAKE_SIG(1, 2, false);
+	fv->fun.var = mod_wasm_cdn_prepend;
 }
 
 #endif // MICROPY_PY_WASM

@@ -43,7 +43,8 @@
 #endif
 
 static mp_wasm_cdn_driver_t g_driver = MP_WASM_CDN_DRIVER_PATH;
-static char g_base[MP_WASM_CDN_BASE_MAX];
+static char g_bases[MP_WASM_CDN_BASES_MAX][MP_WASM_CDN_BASE_MAX];
+static unsigned g_n_bases;
 static char g_token[MP_WASM_CDN_TOKEN_MAX];
 #ifndef MP_WASM_CDN_SESSION_ID_MAX
 #define MP_WASM_CDN_SESSION_ID_MAX (64)
@@ -58,38 +59,8 @@ static size_t url_len_no_slash(const char *url) {
     return n;
 }
 
-bool mp_wasm_cdn_url_is_base(const char *url) {
-    if (url == NULL || g_base[0] == '\0') {
-        return false;
-    }
-    size_t un = url_len_no_slash(url);
-    size_t bn = url_len_no_slash(g_base);
-    return un == bn && un > 0 && strncmp(url, g_base, bn) == 0;
-}
-
-void mp_wasm_cdn_reset(void) {
-    g_driver = MP_WASM_CDN_DRIVER_PATH;
-    g_base[0] = '\0';
+static void set_token(const char *token) {
     g_token[0] = '\0';
-    g_session_id[0] = '\0';
-    mp_wasm_fetch_set_auth_bearer(NULL);
-}
-
-void mp_wasm_cdn_configure(const char *base_url, const char *token) {
-    g_base[0] = '\0';
-    g_token[0] = '\0';
-    if (base_url != NULL && base_url[0] != '\0') {
-        size_t n = url_len_no_slash(base_url);
-        if (n >= MP_WASM_CDN_BASE_MAX) {
-            n = MP_WASM_CDN_BASE_MAX - 1;
-        }
-        memcpy(g_base, base_url, n);
-        g_base[n] = '\0';
-        // Explicit bind via wasm.cdn() — always metal-cdn (artifacts/index).
-        g_driver = MP_WASM_CDN_DRIVER_METAL;
-    } else {
-        g_driver = MP_WASM_CDN_DRIVER_PATH;
-    }
     if (token != NULL && token[0] != '\0') {
         size_t n = strlen(token);
         if (n >= MP_WASM_CDN_TOKEN_MAX) {
@@ -98,9 +69,123 @@ void mp_wasm_cdn_configure(const char *base_url, const char *token) {
         memcpy(g_token, token, n);
         g_token[n] = '\0';
         mp_wasm_fetch_set_auth_bearer(g_token);
-    } else {
+    } else if (g_n_bases == 0) {
         mp_wasm_fetch_set_auth_bearer(NULL);
     }
+}
+
+static bool store_base_at(unsigned idx, const char *base_url) {
+    size_t n;
+    if (idx >= MP_WASM_CDN_BASES_MAX || base_url == NULL || base_url[0] == '\0') {
+        return false;
+    }
+    n = url_len_no_slash(base_url);
+    if (n >= MP_WASM_CDN_BASE_MAX) {
+        n = MP_WASM_CDN_BASE_MAX - 1;
+    }
+    memcpy(g_bases[idx], base_url, n);
+    g_bases[idx][n] = '\0';
+    return true;
+}
+
+static bool already_have(const char *base_url) {
+    size_t un;
+    unsigned i;
+    if (base_url == NULL || base_url[0] == '\0') {
+        return false;
+    }
+    un = url_len_no_slash(base_url);
+    for (i = 0; i < g_n_bases; ++i) {
+        size_t bn = url_len_no_slash(g_bases[i]);
+        if (un == bn && un > 0 && strncmp(base_url, g_bases[i], bn) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool mp_wasm_cdn_url_is_base(const char *url) {
+    size_t un;
+    unsigned i;
+    if (url == NULL || g_n_bases == 0) {
+        return false;
+    }
+    un = url_len_no_slash(url);
+    for (i = 0; i < g_n_bases; ++i) {
+        size_t bn = url_len_no_slash(g_bases[i]);
+        if (un == bn && un > 0 && strncmp(url, g_bases[i], bn) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void mp_wasm_cdn_reset(void) {
+    unsigned i;
+    g_driver = MP_WASM_CDN_DRIVER_PATH;
+    g_n_bases = 0;
+    for (i = 0; i < MP_WASM_CDN_BASES_MAX; ++i) {
+        g_bases[i][0] = '\0';
+    }
+    g_token[0] = '\0';
+    g_session_id[0] = '\0';
+    mp_wasm_fetch_set_auth_bearer(NULL);
+}
+
+void mp_wasm_cdn_configure(const char *base_url, const char *token) {
+    unsigned i;
+    g_n_bases = 0;
+    for (i = 0; i < MP_WASM_CDN_BASES_MAX; ++i) {
+        g_bases[i][0] = '\0';
+    }
+    g_driver = MP_WASM_CDN_DRIVER_PATH;
+    g_token[0] = '\0';
+    mp_wasm_fetch_set_auth_bearer(NULL);
+    if (base_url != NULL && base_url[0] != '\0' && store_base_at(0, base_url)) {
+        g_n_bases = 1;
+        g_driver = MP_WASM_CDN_DRIVER_METAL;
+    }
+    set_token(token);
+}
+
+bool mp_wasm_cdn_add(const char *base_url, const char *token) {
+    if (base_url == NULL || base_url[0] == '\0' || already_have(base_url)) {
+        return false;
+    }
+    if (g_n_bases >= MP_WASM_CDN_BASES_MAX) {
+        return false;
+    }
+    if (!store_base_at(g_n_bases, base_url)) {
+        return false;
+    }
+    g_n_bases++;
+    g_driver = MP_WASM_CDN_DRIVER_METAL;
+    if (token != NULL && token[0] != '\0') {
+        set_token(token);
+    }
+    return true;
+}
+
+bool mp_wasm_cdn_prepend(const char *base_url, const char *token) {
+    unsigned i;
+    if (base_url == NULL || base_url[0] == '\0' || already_have(base_url)) {
+        return false;
+    }
+    if (g_n_bases >= MP_WASM_CDN_BASES_MAX) {
+        return false;
+    }
+    for (i = g_n_bases; i > 0; --i) {
+        memcpy(g_bases[i], g_bases[i - 1], MP_WASM_CDN_BASE_MAX);
+    }
+    if (!store_base_at(0, base_url)) {
+        return false;
+    }
+    g_n_bases++;
+    g_driver = MP_WASM_CDN_DRIVER_METAL;
+    if (token != NULL && token[0] != '\0') {
+        set_token(token);
+    }
+    return true;
 }
 
 mp_wasm_cdn_driver_t mp_wasm_cdn_driver(void) {
@@ -108,7 +193,15 @@ mp_wasm_cdn_driver_t mp_wasm_cdn_driver(void) {
 }
 
 const char *mp_wasm_cdn_base(void) {
-    return g_base[0] != '\0' ? g_base : NULL;
+    return g_n_bases > 0 ? g_bases[0] : NULL;
+}
+
+unsigned mp_wasm_cdn_base_count(void) {
+    return g_n_bases;
+}
+
+const char *mp_wasm_cdn_base_at(unsigned index) {
+    return index < g_n_bases ? g_bases[index] : NULL;
 }
 
 bool mp_wasm_cdn_require_explicit_deps(void) {
@@ -184,14 +277,40 @@ static bool try_fetch_uri(const char *uri, uint8_t **out_bytes, uint32_t *out_le
     return true;
 }
 
+static bool metal_fetch_one(const char *base, const char *name, const char *version,
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *out_origin, size_t origin_len,
+    char *errbuf, size_t errbuf_len);
+
 static bool metal_fetch(const char *name, const char *version,
     uint8_t **out_bytes, uint32_t *out_len,
     char *out_origin, size_t origin_len,
     char *errbuf, size_t errbuf_len) {
-    if (g_base[0] == '\0') {
+    unsigned bi;
+    if (g_n_bases == 0) {
         if (errbuf && errbuf_len) {
             snprintf(errbuf, errbuf_len, "cdn: no base URL");
         }
+        return false;
+    }
+    for (bi = 0; bi < g_n_bases; ++bi) {
+        if (metal_fetch_one(g_bases[bi], name, version, out_bytes, out_len,
+                out_origin, origin_len, errbuf, errbuf_len)) {
+            return true;
+        }
+    }
+    if (errbuf && errbuf_len) {
+        const char *ver = (version != NULL) ? version : "";
+        snprintf(errbuf, errbuf_len, "cdn: package %s@%s not found", name, ver);
+    }
+    return false;
+}
+
+static bool metal_fetch_one(const char *base, const char *name, const char *version,
+    uint8_t **out_bytes, uint32_t *out_len,
+    char *out_origin, size_t origin_len,
+    char *errbuf, size_t errbuf_len) {
+    if (base == NULL || base[0] == '\0') {
         return false;
     }
     const char *ver = (version != NULL) ? version : "";
@@ -329,7 +448,7 @@ static bool metal_fetch(const char *name, const char *version,
     char uri[MP_WASM_CDN_BASE_MAX + 128];
     if (ver[0] != '\0') {
         for (const char **e = exts; *e != NULL; ++e) {
-            snprintf(uri, sizeof(uri), "%s/artifacts/pin/%s/%s%s", g_base, ver, name, *e);
+            snprintf(uri, sizeof(uri), "%s/artifacts/pin/%s/%s%s", base, ver, name, *e);
             if (try_fetch_uri(uri, out_bytes, out_len, errbuf, errbuf_len)) {
                 if (out_origin != NULL && origin_len > 0) {
                     strncpy(out_origin, uri, origin_len - 1);
@@ -340,7 +459,7 @@ static bool metal_fetch(const char *name, const char *version,
         }
     }
     for (const char **e = exts; *e != NULL; ++e) {
-        snprintf(uri, sizeof(uri), "%s/artifacts/lead/%s%s", g_base, name, *e);
+        snprintf(uri, sizeof(uri), "%s/artifacts/lead/%s%s", base, name, *e);
         if (try_fetch_uri(uri, out_bytes, out_len, errbuf, errbuf_len)) {
             if (out_origin != NULL && origin_len > 0) {
                 strncpy(out_origin, uri, origin_len - 1);
@@ -348,9 +467,6 @@ static bool metal_fetch(const char *name, const char *version,
             }
             return true;
         }
-    }
-    if (errbuf && errbuf_len) {
-        snprintf(errbuf, errbuf_len, "cdn: package %s@%s not found", name, ver);
     }
     return false;
 }
@@ -450,42 +566,49 @@ bool mp_wasm_cdn_fetch_index(const char *channel,
     }
     *out_bytes = NULL;
     *out_len = 0;
-    if (g_base[0] == '\0' || g_driver != MP_WASM_CDN_DRIVER_METAL) {
+    if (g_n_bases == 0 || g_driver != MP_WASM_CDN_DRIVER_METAL) {
         if (errbuf && errbuf_len) {
             snprintf(errbuf, errbuf_len, "cdn: configure metal-cdn base first (wasm.cdn)");
         }
         return false;
     }
-    const char *ch = (channel != NULL && channel[0] != '\0') ? channel : "lead";
-    char uri[MP_WASM_CDN_BASE_MAX + 96];
-    if (ch[0] == '@') {
-        snprintf(uri, sizeof(uri), "%s/index/pin/%s", g_base, ch + 1);
-    } else if (strncmp(ch, "pin/", 4) == 0) {
-        snprintf(uri, sizeof(uri), "%s/index/pin/%s", g_base, ch + 4);
-    } else {
-        snprintf(uri, sizeof(uri), "%s/index/%s", g_base, ch);
-    }
-    vstr_t tmp;
-    vstr_init(&tmp, 256);
-    if (!mp_wasm_fetch(uri, &tmp, errbuf, errbuf_len)) {
-        vstr_clear(&tmp);
-        return false;
-    }
-    uint8_t *buf = MICROPY_WASM_MALLOC(tmp.len ? tmp.len : 1);
-    if (buf == NULL) {
-        vstr_clear(&tmp);
-        if (errbuf && errbuf_len) {
-            snprintf(errbuf, errbuf_len, "cdn: oom");
+    {
+        const char *ch = (channel != NULL && channel[0] != '\0') ? channel : "lead";
+        char uri[MP_WASM_CDN_BASE_MAX + 96];
+        unsigned bi;
+        for (bi = 0; bi < g_n_bases; ++bi) {
+            const char *base = g_bases[bi];
+            vstr_t tmp;
+            if (ch[0] == '@') {
+                snprintf(uri, sizeof(uri), "%s/index/pin/%s", base, ch + 1);
+            } else if (strncmp(ch, "pin/", 4) == 0) {
+                snprintf(uri, sizeof(uri), "%s/index/pin/%s", base, ch + 4);
+            } else {
+                snprintf(uri, sizeof(uri), "%s/index/%s", base, ch);
+            }
+            vstr_init(&tmp, 256);
+            if (!mp_wasm_fetch(uri, &tmp, errbuf, errbuf_len)) {
+                vstr_clear(&tmp);
+                continue;
+            }
+            uint8_t *buf = MICROPY_WASM_MALLOC(tmp.len ? tmp.len : 1);
+            if (buf == NULL) {
+                vstr_clear(&tmp);
+                if (errbuf && errbuf_len) {
+                    snprintf(errbuf, errbuf_len, "cdn: oom");
+                }
+                return false;
+            }
+            if (tmp.len) {
+                memcpy(buf, tmp.buf, tmp.len);
+            }
+            *out_bytes = buf;
+            *out_len = (uint32_t)tmp.len;
+            vstr_clear(&tmp);
+            return true;
         }
         return false;
     }
-    if (tmp.len) {
-        memcpy(buf, tmp.buf, tmp.len);
-    }
-    *out_bytes = buf;
-    *out_len = (uint32_t)tmp.len;
-    vstr_clear(&tmp);
-    return true;
 }
 
 bool mp_wasm_cdn_publish(const char *name, const char *version,

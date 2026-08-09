@@ -95,6 +95,7 @@ MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_import_wasm_obj);
 MP_DECLARE_CONST_FUN_OBJ_KW(mod_wasm_install_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_uninstall_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_cdn_obj);
+MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_cdn_prepend_obj);
 
 /* PE/UEFI: rewrite const fun-obj fn ptrs before first Python call. */
 void mp_wasm_fixup_packload_fun_objs(void);
@@ -133,6 +134,9 @@ MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_source_from_bytes_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_host_package_name_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_host_source_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_host_set_self_image_obj);
+MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_host_pack_root_obj);
+MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_host_pack_files_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_host_pack_read_obj);
 #if MICROPY_PY_WASM_MATRIX
 MP_DECLARE_CONST_FUN_OBJ_VAR(mod_wasm_c_call_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_c_call_attr_obj);

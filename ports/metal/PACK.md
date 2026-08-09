@@ -31,6 +31,6 @@ Tree: `wasm → upy ok` / `selfcheck ok`.
 
 1. **Done (strangler):** Metal `forge pack` emits `wasmmod.pack` / `wasmmod.imports` (+ legacy `pm_metal_imports` dual-write)
 2. **Product load:** wasmmod proofs in Metal bringup (`mp_pack_load` / `import_wasm`); Metal `pm_metal_wasm_*` = `EXP2_STRESS` only
-3. **In progress:** AbstractNIC adapter (`pm_metal_net_upy_nic_register`); wasmmod consumes NICs
+3. **In progress:** AbstractNIC adapter (`pm_metal_net_nic_register`); wasmmod consumes NICs
 4. Keep upstream `metalpython` `wasmmod` branch vanilla
 5. See also: `HOST_ASYNC.md`, `NET.md`, Metal `docs/CONSTELLATION.md`

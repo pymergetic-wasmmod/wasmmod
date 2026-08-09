@@ -6,6 +6,8 @@ WASMMOD_EMSCRIPTEN = 1
 # Default stack is tight for REPL eval + catalog/import fetch; 64KiB is safer.
 JSFLAGS += -s ASYNCIFY
 JSFLAGS += -s ASYNCIFY_STACK_SIZE=65536
+# CDN heap selector (up to 128 MiB GC) needs growable linear memory.
+JSFLAGS += -s ALLOW_MEMORY_GROWTH
 
 CFLAGS += -DMICROPY_WASM_HTTP_NATIVE=0
 

@@ -542,6 +542,9 @@ static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_host_globals_table[]
     { MP_ROM_QSTR(MP_QSTR_package_name), MP_ROM_PTR(&mod_wasm_host_package_name_obj) },
     { MP_ROM_QSTR(MP_QSTR_source), MP_ROM_PTR(&mod_wasm_host_source_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_self_image), MP_ROM_PTR(&mod_wasm_host_set_self_image_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pack_root), MP_ROM_PTR(&mod_wasm_host_pack_root_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pack_files), MP_ROM_PTR(&mod_wasm_host_pack_files_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pack_read), MP_ROM_PTR(&mod_wasm_host_pack_read_obj) },
 };
 static MP_DEFINE_CONST_DICT(mp_module_pymergetic_wasmmod_host_globals,
     mp_module_pymergetic_wasmmod_host_globals_table);
@@ -574,6 +577,7 @@ static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_import_wasm), MP_ROM_PTR(&mod_wasm_import_wasm_obj) },
     { MP_ROM_QSTR(MP_QSTR_install_hook), MP_ROM_PTR(&mod_wasm_install_hook_obj) },
     { MP_ROM_QSTR(MP_QSTR_cdn), MP_ROM_PTR(&mod_wasm_cdn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cdn_prepend), MP_ROM_PTR(&mod_wasm_cdn_prepend_obj) },
     { MP_ROM_QSTR(MP_QSTR_catalog), MP_ROM_PTR(&mod_wasm_catalog_obj) },
     { MP_ROM_QSTR(MP_QSTR_session_id), MP_ROM_PTR(&mod_wasm_session_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_publish), MP_ROM_PTR(&mod_wasm_publish_obj) },
@@ -625,6 +629,11 @@ const mp_obj_module_t mp_module_pymergetic_wasmmod = {
 
 /* --- pymergetic (org root; subpackages via MICROPY_MODULE_BUILTIN_SUBPACKAGES) --- */
 
+#if defined(PM_METAL_CFG_FW_BROWSER) && PM_METAL_CFG_FW_BROWSER
+/* Metal browser seat: nest path-mirrored metal builtins under this root. */
+extern const mp_obj_module_t mp_module_pymergetic_metal;
+#endif
+
 static const mp_rom_map_elem_t mp_module_pymergetic_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic) },
     #if MICROPY_MODULE_BUILTIN_INIT
@@ -633,6 +642,9 @@ static const mp_rom_map_elem_t mp_module_pymergetic_globals_table[] = {
     #endif
     { MP_ROM_QSTR(MP_QSTR_wasmmod), MP_ROM_PTR(&mp_module_pymergetic_wasmmod) },
     { MP_ROM_QSTR(MP_QSTR_upy), MP_ROM_PTR(&mp_module_pymergetic_upy) },
+#if defined(PM_METAL_CFG_FW_BROWSER) && PM_METAL_CFG_FW_BROWSER
+    { MP_ROM_QSTR(MP_QSTR_metal), MP_ROM_PTR(&mp_module_pymergetic_metal) },
+#endif
 };
 static MP_DEFINE_CONST_DICT(mp_module_pymergetic_globals, mp_module_pymergetic_globals_table);
 

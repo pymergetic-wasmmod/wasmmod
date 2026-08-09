@@ -39,6 +39,12 @@ pm_status_t pm_wasmmod_host_self_path(char *buf, size_t buflen);
 void pm_wasmmod_host_set_self_image(const uint8_t *buf, uint32_t len, bool take_ownership);
 
 /**
+ * Borrowed pointer to the pinned self-image buffer (browser / set_self_image).
+ * NULL / *len_out=0 when unset. Does not load from filesystem.
+ */
+const uint8_t *pm_wasmmod_host_self_image_ptr(uint32_t *len_out);
+
+/**
  * Open wasmmod.source for the running host. Caller closes with
  * pm_wasmmod_source_close. NULL if the image cannot be resolved or has
  * no source section.

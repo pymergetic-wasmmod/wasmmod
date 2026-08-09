@@ -7,6 +7,9 @@
  *
  * Host-agnostic CDN resolve API (no MicroPython / CPython types).
  * Bindings call these from wasmmod.c / future cpy module.
+ *
+ * Multiple metal-cdn bases: try in order (first hit wins). Platform default
+ * is usually last; site/iPXE CDNs are prepended (add) or replace the list.
  */
 #ifndef MICROPY_INCLUDED_EXTMOD_WASMMOD_CDN_H
 #define MICROPY_INCLUDED_EXTMOD_WASMMOD_CDN_H
@@ -15,28 +18,35 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifndef MP_WASM_CDN_BASES_MAX
+#define MP_WASM_CDN_BASES_MAX (4)
+#endif
+
 typedef enum {
     MP_WASM_CDN_DRIVER_PATH = 0,
     MP_WASM_CDN_DRIVER_METAL = 1,
 } mp_wasm_cdn_driver_t;
 
-// Bind metal-cdn driver to base_url (artifacts/index under that prefix).
+// Reset list, then set primary base (compat: single-CDN bind).
 // token may be NULL (public lead/pin). Copies strings internally.
-// Flat HTTP pack mirrors belong on wasm.path via install_hook / path.append — not here.
 void mp_wasm_cdn_configure(const char *base_url, const char *token);
 void mp_wasm_cdn_reset(void);
+
+// Append a metal-cdn base (no-op if full or duplicate). Returns false if not added.
+bool mp_wasm_cdn_add(const char *base_url, const char *token);
+// Prepend (site CDN first). Shifts existing bases right. Returns false if not added.
+bool mp_wasm_cdn_prepend(const char *base_url, const char *token);
 
 mp_wasm_cdn_driver_t mp_wasm_cdn_driver(void);
 bool mp_wasm_cdn_require_explicit_deps(void);
 const char *mp_wasm_cdn_driver_name(void);
-// Configured base URL (no trailing slash), or NULL if unset.
+// Primary base URL (no trailing slash), or NULL if unset.
 const char *mp_wasm_cdn_base(void);
-// True if url equals the configured base (trailing slashes ignored).
+unsigned mp_wasm_cdn_base_count(void);
+const char *mp_wasm_cdn_base_at(unsigned index);
+// True if url equals any configured base (trailing slashes ignored).
 bool mp_wasm_cdn_url_is_base(const char *url);
 
-// Resolve name@version into artifact bytes (tries pin then lead / path candidates).
-// On success: *out_bytes is MICROPY_WASM_MALLOC'd; caller MICROPY_WASM_FREE(*out_bytes).
-// out_origin may be NULL; when non-NULL, receives the winning URI/path (truncated to origin_len).
 bool mp_wasm_cdn_fetch_pack(const char *name, const char *version,
     uint8_t **out_bytes, uint32_t *out_len,
     char *errbuf, size_t errbuf_len);
@@ -45,19 +55,15 @@ bool mp_wasm_cdn_fetch_pack_ex(const char *name, const char *version,
     char *out_origin, size_t origin_len,
     char *errbuf, size_t errbuf_len);
 
-// GET {base}/index/{channel} raw JSON bytes (metal driver only).
-// channel NULL/"lead" → lead; "@1.0" or "pin/1.0" → pin index. Caller frees *out_bytes.
 bool mp_wasm_cdn_fetch_index(const char *channel,
     uint8_t **out_bytes, uint32_t *out_len,
     char *errbuf, size_t errbuf_len);
 
-// Publish stub — returns false until io ops.request is wired (browser POST).
 bool mp_wasm_cdn_publish(const char *name, const char *version,
     const uint8_t *data, uint32_t data_len,
     bool lead, bool pin, const char *token,
     char *errbuf, size_t errbuf_len);
 
-// Process-global shell/loader session id (correlation header / autoexec bind).
 void mp_wasm_cdn_set_session_id(const char *session_id);
 const char *mp_wasm_cdn_session_id(void);
 

@@ -39,6 +39,13 @@ void pm_wasmmod_host_set_self_image(const uint8_t *buf, uint32_t len, bool take_
     s_image_owned = take_ownership;
 }
 
+const uint8_t *pm_wasmmod_host_self_image_ptr(uint32_t *len_out) {
+    if (len_out != NULL) {
+        *len_out = s_image_len;
+    }
+    return s_image;
+}
+
 pm_status_t pm_wasmmod_host_self_path(char *buf, size_t buflen) {
     if (buf == NULL || buflen < 2) {
         return PM_ERR_ARG;

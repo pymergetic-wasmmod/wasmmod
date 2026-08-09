@@ -1,0 +1,12 @@
+type = "package"
+name = "pymergetic.metal"
+version = "0.1.0"
+impl = ["c"]
+description = "Metal ASGI host / kernel face (Inspect only; Play off)."
+[python]
+keep_source = true
+freeze = false
+[source]
+embed = true
+[pack]
+compress = false

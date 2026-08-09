@@ -197,6 +197,8 @@ Host engine package name (self-desc embed): **`pymergetic.wasmmod`** (`role=host
 | `pm_wasmmod_host_self_path` | `pm::wasmmod::host::host_self_path` | — | — | `ok` | `/proc/self/exe` on Linux |
 | `pm_wasmmod_host_set_self_image` | `pm::wasmmod::host::host_set_self_image` | `pymergetic.wasmmod.host.set_self_image` | — | `ok` | browser / no path |
 | `pm_wasmmod_host_self_open` | `pm::wasmmod::host::host_self_open` | `pymergetic.wasmmod.host.source` | — | `ok` | running host `wasmmod.source` |
+| `pm_wasmmod_host_pack_root` | `pm::wasmmod::host::host_pack_root` | `pymergetic.wasmmod.host.pack_root` | — | `ok` | `/mods/pymergetic.wasmmod` |
+| `pm_wasmmod_host_self_pack_open` | `pm::wasmmod::host::host_self_pack_open` | `host.pack_files` / `host.pack_read` | — | `ok` | host `wasmmod.pack` as VFS paths |
 
 ## `pm_wasmmod/inspect/source`
 

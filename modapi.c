@@ -600,6 +600,7 @@ static mp_obj_t mod_wasm_source_from_bytes(mp_obj_t buf_in) {
 MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_source_from_bytes_obj, mod_wasm_source_from_bytes);
 
 #include "pm_wasmmod/host/self.h"
+#include "pm_wasmmod/host/pack.h"
 
 static mp_obj_t mod_wasm_host_package_name(void) {
     const char *name = pm_wasmmod_host_package_name();
@@ -670,6 +671,47 @@ static int path_list_cb(void *ctx, const char *path, size_t path_len) {
     mp_obj_list_append(c->list, mp_obj_new_str(path, path_len));
     return 0;
 }
+
+/* Pack VFS face: /mods/pymergetic.wasmmod/… (not host_self-only file browse). */
+static mp_obj_t mod_wasm_host_pack_root(void) {
+    const char *r = pm_wasmmod_host_pack_root();
+    return mp_obj_new_str(r, strlen(r));
+}
+MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_host_pack_root_obj, mod_wasm_host_pack_root);
+
+static mp_obj_t mod_wasm_host_pack_files(void) {
+    pm_wasmmod_host_pack_t *pack = pm_wasmmod_host_self_pack_open();
+    if (pack == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("host.pack_files: no pack on self image"));
+    }
+    path_list_ctx_t ctx = { .list = mp_obj_new_list(0, NULL) };
+    int rc = pm_wasmmod_host_pack_list(pack, &ctx, path_list_cb);
+    pm_wasmmod_host_pack_close(pack);
+    if (rc != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("host.pack_files: list failed"));
+    }
+    return ctx.list;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_host_pack_files_obj, mod_wasm_host_pack_files);
+
+static mp_obj_t mod_wasm_host_pack_read(mp_obj_t path_in) {
+    const char *path = mp_obj_str_get_str(path_in);
+    pm_wasmmod_host_pack_t *pack = pm_wasmmod_host_self_pack_open();
+    if (pack == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("host.pack_read: no pack on self image"));
+    }
+    uint8_t *data = NULL;
+    uint32_t len = 0;
+    bool ok = pm_wasmmod_host_pack_read(pack, path, &data, &len);
+    pm_wasmmod_host_pack_close(pack);
+    if (!ok) {
+        mp_raise_ValueError(MP_ERROR_TEXT("host.pack_read: path not found"));
+    }
+    mp_obj_t out = mp_obj_new_bytes(data, len);
+    MICROPY_WASM_FREE(data);
+    return out;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_host_pack_read_obj, mod_wasm_host_pack_read);
 
 static mp_obj_t source_files(mp_obj_t self_in) {
     mp_obj_wasm_source_t *self = MP_OBJ_TO_PTR(self_in);

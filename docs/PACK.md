@@ -1111,10 +1111,26 @@ wasmmod-read disasm hello.wasm 0 [OFFSET [LIMIT]]   # Wasm: index ignored; code 
 # CDN: GET …/artifacts/lead/hello.elf/files/mpy-disasm?path=…
 ```
 
+### One module law (wasmmod = metal = guest)
+
+Every first-party package is a normal wasmmod pack. **Including the engine.**
+
+| Face | Path |
+|------|------|
+| Import / exports | packload → `sys.modules` (guests; host FQN still not guest-loaded) |
+| Files | **fs_wasmmod** RO VFS at `/mods/<pack.name>/…` (pack-relative paths) |
+
+`pymergetic.wasmmod`, `pymergetic.metal`, and guests share this layout. Product file
+access for Inspect/ASGI goes through the pack VFS mount — not a parallel
+`host_self`-only store and not Metal ROM→tmpfs seeds. Format stays MPWP (this doc);
+`/mods` is **not** mtar.
+
 ### Host engine self-description (`pymergetic.wasmmod`)
 
 The main µPy+wasmmod binary can carry the **same** `wasmmod.pack` + `wasmmod.source`
-sections as guest packs (inspect/document only — **not** loaded as a runnable guest).
+sections as guest packs. Mount the pack at `/mods/pymergetic.wasmmod` for the file
+face; `host_self` / source APIs remain for process-image resolve and audit, not as a
+second packaging dialect.
 
 | | |
 |--|--|
@@ -1127,6 +1143,7 @@ sections as guest packs (inspect/document only — **not** loaded as a runnable 
 | **Tool** | `wasmmod embed-host` (`pymergetic-wasmmod-tools`) |
 | **CDN** | `dev-up` publishes signed `pymergetic.wasmmod` for Inspect |
 | **Self API** | `pm_wasmmod_host_self_open()` / `pymergetic.wasmmod.host.source()` resolves the running image; browser may call `host.set_self_image(bytes)` first |
+| **Pack VFS API** | `host.pack_root()` → `/mods/pymergetic.wasmmod`; `host.pack_files()` / `host.pack_read(path)` read MPWP via those VFS paths (product file face; not `host_self` alone) |
 | **Examples FQN** | `pymergetic.wasmmod_examples.*` (local dirs stay short: `hello/`, `ticks/`, …) |
 
 #### Cross-language naming (locked)
