@@ -17,6 +17,12 @@ Metal tree: `packages/metal/docs/CONSTELLATION.md`).
 Target: `forge pack` emits **wasmmod-format** packs; bringup/load only via wasmmod APIs.
 Do not dual-load the same guest on both paths while migrating.
 
+## Module SoT
+
+Pack **names** live in µPy `sys.modules` (`pm_mod_publish` / packload). The
+`forward.c` registry is **instance/lifecycle only** for guest→guest call
+wiring — `mp_wasm_registry_find` prefers `sys.modules[name].__pack__`.
+
 ## Wire-up (M1) — demo path (OK)
 
 1. io_ops + HTTP park + `proof_io_fetch`

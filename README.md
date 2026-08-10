@@ -200,6 +200,7 @@ wasmmod/
 │   └── packs/                               built <name>.{wasm,elf,aotN} artifacts
 ├── screenshots/                             README eye-catchers
 ├── docs/PACK.md                             section format
+├── docs/SOURCETREE.md                       module tree redesign (blank)
 ├── BRANCHES.md                              MetalPython host branch layout
 ├── VERSION                                  → wasm.version (always when built)
 └── third_party/wamr                         WAMR (Apache-2.0; not on PyPI — firmware only)
@@ -359,6 +360,7 @@ ALL ENGINES OK
 ```
 
 Details: [examples/README.md](examples/README.md) · pack format: [docs/PACK.md](docs/PACK.md) ·
+module tree redesign (blank): [docs/SOURCETREE.md](docs/SOURCETREE.md) ·
 browser port: [ports/micropython/webassembly/README.md](ports/micropython/webassembly/README.md) ·
 CDN channels / shell: [metal-cdn](https://github.com/pymergetic/metal-cdn).
 

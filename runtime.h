@@ -68,11 +68,17 @@ mp_pack_t *mp_pack_load_ex(const uint8_t *code, uint32_t code_len,
 
 void mp_pack_close(mp_pack_t *mod);
 
+// Plain C unload-by-name — the native mirror of mp_pack_load, for callers
+// (host or guest, any language) that need to unload without going through
+// mp_obj_t/Python calling convention. sys.modules' Python wrapper is
+// wasmmod.unload(); both end up here.
+void mp_pack_unload_by_name(const char *name);
+
 // Provenance (set at load from magic + path_hint).
 const char *mp_pack_kind_str(const mp_pack_t *mod);   // "wasm" | "aot" | "elf" | ""
 const char *mp_pack_origin(const mp_pack_t *mod);     // path/URL or ""
 const char *mp_pack_arch(const mp_pack_t *mod);       // filename infix or ""
-void mp_pack_parse_arch_from_path(const char *path, char *out, size_t out_len);
+void mp_pack_parse_arch_from_path(const char *path, const char *pack_name, char *out, size_t out_len);
 
 // True if kind is i32/i64/f32/f64.
 bool mp_wasm_valkind_is_numeric(wasm_valkind_t kind);

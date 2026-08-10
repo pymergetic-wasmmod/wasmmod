@@ -193,6 +193,9 @@ pymergetic.metal …              # later product packs
 ### D — Docs / cleanup
 Update ORCHESTRATION (lock #9 if M1), retire mirror inventory where obsolete, BRANCHES hygiene. Push only on explicit ask.
 
+**Post-plan redesign (blank):** [`SOURCETREE.md`](SOURCETREE.md) — fill from
+scratch; not a restatement of today’s tree.
+
 ---
 
 ## Explicit non-goals

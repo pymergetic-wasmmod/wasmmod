@@ -45,7 +45,10 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/wasmmod.c \
 	$(WASMMOD_DIR)/modobj.c \
 	$(WASMMOD_DIR)/modapi.c \
+	$(WASMMOD_DIR)/mod.c \
 	$(WASMMOD_DIR)/packload.c \
+	$(WASMMOD_DIR)/thunk.c \
+	$(WASMMOD_DIR)/pyexport.c \
 	$(WASMMOD_DIR)/fetch.c \
 	$(WASMMOD_DIR)/finder.c \
 	$(WASMMOD_DIR)/forward.c \

@@ -30,6 +30,8 @@ TOP ?= $(METALPYTHON_TOP)
 WASMMOD ?= $(WASMMOD_ROOT)/tools/wasmmod.py
 WASM_PACK ?= $(WASMMOD)
 WASM_SIGN ?= $(WASMMOD)
+# In-tree tools (no pip / PEP-668). Shim also adds this path.
+export PYTHONPATH := $(WASMMOD_ROOT)/dev/tools/src$(if $(PYTHONPATH),:$(PYTHONPATH),)
 # Public compile surface (pm_guest.h, pm_upy/*, pm_wasmmod/*).
 WASMMOD_INCLUDE ?= $(WASMMOD_ROOT)/include
 # ELF guests: no __wasm__ — force guest import prototypes.

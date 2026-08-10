@@ -85,17 +85,39 @@ unsafe extern "C" {
     fn mixed_i64(x: i64) -> i64;
 }
 
-// Guest→host
+// Guest→host: one plain named import per host callback, resolved once at
+// connect time via __pm_modules (see bridge.c's matching MP_WASM_IMPORT
+// block for the full rationale). matrix.host.* is test-only naming; a real
+// pack would use whatever module name its own pack.toml deps on.
+#[link(wasm_import_module = "matrix.host")]
+unsafe extern "C" {
+    fn host_double(x: i32) -> i32;
+    fn host_i64(x: i64) -> i64;
+    fn host_f32(x: f32) -> f32;
+    fn host_f64(x: f64) -> f64;
+    fn host_bytes(cookie: i32) -> i32;
+    fn host_obj(handle: i32) -> i32;
+    fn host_c_triple(x: i32) -> i32;
+    fn host_rs_triple(x: i32) -> i32;
+}
+
+// Same-pack self-import + peer-pack import of embedded Python (see
+// bridge/src/__init__.py and hello/src/util/__init__.py's wasm.export_py
+// calls).
+#[link(wasm_import_module = "pymergetic.wasmmod_examples.bridge")]
+unsafe extern "C" {
+    fn ping_code() -> i32;
+}
+
+#[link(wasm_import_module = "pymergetic.wasmmod_examples.hello.util")]
+unsafe extern "C" {
+    #[link_name = "ping_code"]
+    fn peer_ping_code() -> i32;
+}
+
+// wasmmod's own durable memory-cookie bridge (unrelated to host_slots).
 #[link(wasm_import_module = "wasmmod.host")]
 unsafe extern "C" {
-    fn call_i32(slot: i32, arg: i32) -> i32;
-    fn call_i64(slot: i32, arg: i64) -> i64;
-    fn call_f32(slot: i32, arg: f32) -> f32;
-    fn call_f64(slot: i32, arg: f64) -> f64;
-    fn call_buf(slot: i32, off: i32, len: i32) -> i32;
-    fn call_mem(slot: i32, cookie: i32) -> i32;
-    fn call_obj(slot: i32, handle: i32) -> i32;
-    fn call0_py(mod_off: i32, mod_len: i32, attr_off: i32, attr_len: i32) -> i32;
     fn mem_alloc(size: i32) -> i32;
     fn mem_free(cookie: i32);
     fn mem_copy_in(cookie: i32, src_off: i32, n: i32) -> i32;
@@ -154,22 +176,22 @@ pub unsafe extern "C" fn rs_via_loader_trust_count() -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_host(x: i32) -> i32 {
-    call_i32(0, x)
+    host_double(x)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_host_i64(x: i64) -> i64 {
-    call_i64(2, x)
+    host_i64(x)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_host_f32(x: f32) -> f32 {
-    call_f32(3, x)
+    host_f32(x)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_host_f64(x: f64) -> f64 {
-    call_f64(4, x)
+    host_f64(x)
 }
 
 #[no_mangle]
@@ -177,10 +199,23 @@ pub unsafe extern "C" fn rs_via_mixed_i64(x: i64) -> i64 {
     mixed_i64(x)
 }
 
+// Cookie-based (mem-cookie shape; a WAMR guest has no host-callable "raw
+// offset" shape since that needs the calling instance's exec_env — route
+// through the durable cookie table like rs_via_mem does).
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_buf() -> i32 {
     static MSG: [u8; 4] = *b"ping";
-    call_buf(5, MSG.as_ptr() as i32, 4)
+    let cookie = mem_alloc(4);
+    if cookie == 0 {
+        return -1;
+    }
+    if mem_copy_in(cookie, MSG.as_ptr() as i32, 4) != 0 {
+        mem_free(cookie);
+        return -1;
+    }
+    let r = host_bytes(cookie);
+    mem_free(cookie);
+    r
 }
 
 #[no_mangle]
@@ -194,38 +229,34 @@ pub unsafe extern "C" fn rs_via_mem() -> i32 {
         mem_free(cookie);
         return -1;
     }
-    let r = call_mem(5, cookie);
+    let r = host_bytes(cookie);
     mem_free(cookie);
     r
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_handle(handle: i32) -> i32 {
-    call_obj(6, handle)
+    host_obj(handle)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_host_c(x: i32) -> i32 {
-    call_i32(7, x)
+    host_c_triple(x)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_host_rs(x: i32) -> i32 {
-    call_i32(8, x)
+    host_rs_triple(x)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_pack_py() -> i32 {
-    static M: [u8; 34] = *b"pymergetic.wasmmod_examples.bridge";
-    static A: [u8; 9] = *b"ping_code";
-    call0_py(M.as_ptr() as i32, 34, A.as_ptr() as i32, 9)
+    ping_code()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rs_via_peer_py() -> i32 {
-    static M: [u8; 38] = *b"pymergetic.wasmmod_examples.hello.util";
-    static A: [u8; 9] = *b"ping_code";
-    call0_py(M.as_ptr() as i32, 38, A.as_ptr() as i32, 9)
+    peer_ping_code()
 }
 
 #[panic_handler]

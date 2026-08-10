@@ -32,6 +32,9 @@
  * want documented C defaults without relying on the make fragment:
  *
  *   #include "extmod/wasmmod/ports/micropython/mpconfig_wasm.h"
+ *
+ * Global `__pm_modules` is published from mp_init via pm_mod_init() (mod.c),
+ * not from this header — works on every port that links wasmmod.
  */
 #ifndef MICROPY_INCLUDED_WASMMOD_MPCONFIG_WASM_H
 #define MICROPY_INCLUDED_WASMMOD_MPCONFIG_WASM_H

@@ -1113,12 +1113,25 @@ wasmmod-read disasm hello.wasm 0 [OFFSET [LIMIT]]   # Wasm: index ignored; code 
 
 ### One module law (wasmmod = metal = guest)
 
-Every first-party package is a normal wasmmod pack. **Including the engine.**
+**µPy modules are the registry.** Every container — kernel resident, wasmmod
+itself, wasm / aot / elf pack — uses the **same** registration:
+
+1. Become a µPy module (`sys.modules` + package nesting)
+2. Register exports on that module (Py sees them automatically)
+3. Other faces **connect** once (cache call edge); hot path never re-looks up
 
 | Face | Path |
 |------|------|
-| Import / exports | packload → `sys.modules` (guests; host FQN still not guest-loaded) |
+| Identity / names | **`sys.modules`** (+ builtins) — face SoT |
+| Our metadata | **`__pm_modules`** (same dict shape as `sys.modules`) |
+| Native soft edges | `pm_mod_publish` / `PM_MOD_IMPORT` → cache ([`pm_mod.h`](../include/pm_mod.h)) |
+| Guest soft edges | `PM_MOD_NEED` → host `pm_mod_connect_guest` / border trampoline |
+| Container instance | pack lifecycle list in `forward.c` — **not** a second name registry |
 | Files | **fs_wasmmod** RO VFS at `/mods/<pack.name>/…` (pack-relative paths) |
+
+WASM / ELF / AOT / linked-in are **containers**, not module kinds. Hide guest
+i32 under the border (`pm_mod_border_*` + call trampolines). Metal RegMod ring
+is a **transitional façade** — do not grow it; starve then delete.
 
 `pymergetic.wasmmod`, `pymergetic.metal`, and guests share this layout. Product file
 access for Inspect/ASGI goes through the pack VFS mount — not a parallel

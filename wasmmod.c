@@ -102,13 +102,11 @@ mp_obj_t mod_wasm___init__(void) {
             mp_obj_new_str(MICROPY_WASM_PACK_ARCH, strlen(MICROPY_WASM_PACK_ARCH)));
     }
     MP_STATE_VM(mp_wasm_prev_import) = MP_OBJ_NULL;
-    MP_STATE_VM(mp_wasm_host_slots) = MP_OBJ_NULL;
     MP_STATE_VM(mp_wasm_handles) = MP_OBJ_NULL;
     mp_wasm_import_hook_depth = 0;
     mp_wasm_set_verify_enabled(true);
     mp_wasm_io_set(NULL);
     mp_wasm_trust_init_session(); // arm lazy baked-CA load; do not inflate yet
-    mp_wasm_host_clear_all();
     mp_wasm_mem_clear_all();
     mp_wasm_handle_clear_all();
     return mp_const_none;
@@ -623,9 +621,13 @@ static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_add_trust), MP_ROM_PTR(&mod_wasm_add_trust_obj) },
     { MP_ROM_QSTR(MP_QSTR_trust_clear), MP_ROM_PTR(&mod_wasm_trust_clear_obj) },
     { MP_ROM_QSTR(MP_QSTR_trust_count), MP_ROM_PTR(&mod_wasm_trust_count_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_set), MP_ROM_PTR(&mod_wasm_host_set_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_get), MP_ROM_PTR(&mod_wasm_host_get_obj) },
-    { MP_ROM_QSTR(MP_QSTR_host_clear), MP_ROM_PTR(&mod_wasm_host_clear_obj) },
+    { MP_ROM_QSTR(MP_QSTR_export_py), MP_ROM_PTR(&mod_wasm_export_py_obj) },
+    { MP_ROM_QSTR(MP_QSTR_export_py_i64), MP_ROM_PTR(&mod_wasm_export_py_i64_obj) },
+    { MP_ROM_QSTR(MP_QSTR_export_py_f32), MP_ROM_PTR(&mod_wasm_export_py_f32_obj) },
+    { MP_ROM_QSTR(MP_QSTR_export_py_f64), MP_ROM_PTR(&mod_wasm_export_py_f64_obj) },
+    { MP_ROM_QSTR(MP_QSTR_export_py_mem), MP_ROM_PTR(&mod_wasm_export_py_mem_obj) },
+    { MP_ROM_QSTR(MP_QSTR_export_py_obj), MP_ROM_PTR(&mod_wasm_export_py_handle_obj) },
+    { MP_ROM_QSTR(MP_QSTR_export_py_bufptr), MP_ROM_PTR(&mod_wasm_export_py_bufptr_obj) },
     #if MICROPY_PY_WASM_MATRIX
     { MP_ROM_QSTR(MP_QSTR_host_c_triple), MP_ROM_PTR(&mp_wasm_host_c_triple_obj) },
     { MP_ROM_QSTR(MP_QSTR_host_rs_triple), MP_ROM_PTR(&mp_wasm_host_rs_triple_obj) },

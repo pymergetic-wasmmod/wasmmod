@@ -29,5 +29,14 @@ def ping():
 
 
 def ping_code():
-    """Int-returning peer Python for guest native→Py (call0_py)."""
+    """Int-returning peer Python for guest native->Py, callable by any guest."""
     return 7
+
+
+# Self-export: see bridge/src/__init__.py's comment on ping_code. A peer
+# guest imports "pymergetic.wasmmod_examples.hello.util"/"ping_code" directly
+# once this submodule has been imported (must happen before a peer pack that
+# statically imports it is loaded/connected).
+import pymergetic.wasmmod as _wasm  # type: ignore[import-not-found]
+
+_wasm.export_py("pymergetic.wasmmod_examples.hello.util", "ping_code", ping_code, 0)

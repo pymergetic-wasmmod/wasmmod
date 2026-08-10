@@ -24,9 +24,8 @@ func = "c2_answer"
 [[exports]]
 func = "c2_rs_tag"
 
-[[imports]]
-module = "pymergetic.wasmmod_examples.test_a2.test_d2"
-func = "d2_value"
+# Imports (test_a2.test_d2.d2_value) are auto-discovered from the compiled
+# wasm's own import section — no manifest declaration needed.
 
 # Embed pack sources into wasmmod.source (CDN Inspect / locations).
 [source]

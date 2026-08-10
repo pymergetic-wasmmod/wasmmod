@@ -25,6 +25,28 @@
       <h2>Self</h2>
       <pre id="self"></pre>
     </section>
+    <section>
+      <h2>Registry ledger</h2>
+      <p class="hint">Cold-path multi-callee / caller completeness (not hot dispatch).</p>
+      <p id="reg-summary" class="hint"></p>
+      <table id="reg-table">
+        <thead>
+          <tr>
+            <th>module</th>
+            <th>func</th>
+            <th>callees</th>
+            <th>langs</th>
+            <th>callers</th>
+            <th>honesty</th>
+          </tr>
+        </thead>
+        <tbody id="reg-body"></tbody>
+      </table>
+      <details>
+        <summary>raw JSON</summary>
+        <pre id="reg"></pre>
+      </details>
+    </section>
   </main>
   <script src="js/inspect.js"></script>
 </body>

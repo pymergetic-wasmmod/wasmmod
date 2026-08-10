@@ -1,8 +1,10 @@
 # clangd for wasmmod — packages/wasmmod OR metalpython/extmod/wasmmod.
 # Paths are relative to this file's directory. Extra -I that miss are harmless.
 #
-# .clangd-include/extmod/wasmmod → ..  so #include "extmod/wasmmod/…" works
-# without needing MicroPython TOP (standalone packages/wasmmod view).
+# .clangd-include/:
+#   extmod/wasmmod → ..     so #include "extmod/wasmmod/…" works without TOP
+#   pm_*.h / pm_* dirs      → include/  so #include "pm_mod.h" works even if
+#                           -Iinclude is dropped by a merged parent config
 CompileFlags:
   # Prefer this file's flags over a root compile_commands that may point at
   CompilationDatabase: None

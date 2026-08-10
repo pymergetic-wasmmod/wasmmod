@@ -37,6 +37,7 @@
 #include "extmod/wasmmod/host.h"
 #include "extmod/wasmmod/inspect.h"
 #include "extmod/wasmmod/mod.h"
+#include "extmod/wasmmod/pyexport.h"
 #include "extmod/wasmmod/verify.h"
 // wasm.verify() → bool; wasm.verify(False) → session gate for all loads (VFS+HTTP).
 static mp_obj_t mod_wasm_verify(size_t n_args, const mp_obj_t *args) {
@@ -110,31 +111,75 @@ static mp_obj_t mod_wasm_trust_count(void) {
 }
 MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_trust_count_obj, mod_wasm_trust_count);
 
-static mp_obj_t mod_wasm_host_set(mp_obj_t slot_in, mp_obj_t callable) {
-    int32_t slot = (int32_t)mp_obj_get_int(slot_in);
-    if (!mp_wasm_host_set_slot(slot, callable)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("wasm.host_set: bad slot or callable"));
+// wasm.export_py(module, func, callable, nargs) — publish a native int32
+// trampoline for a pure-Python callable in __pm_modules, so any native
+// caller (C/Rust host, or a wasm/aot/elf guest via the normal import-connect
+// path) resolves and calls it exactly like a C/Rust or thunked-wasm export.
+static mp_obj_t mod_wasm_export_py(size_t n_args, const mp_obj_t *args) {
+    const char *module = mp_obj_str_get_str(args[0]);
+    const char *func = mp_obj_str_get_str(args[1]);
+    mp_obj_t callable = args[2];
+    uint32_t nargs = n_args > 3 ? (uint32_t)mp_obj_get_int(args[3]) : 0;
+    if (pm_mod_export_py(module, func, callable, nargs) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("wasm.export_py: bad callable, nargs, or pool full"));
     }
     return mp_const_none;
 }
-MP_DEFINE_CONST_FUN_OBJ_2(mod_wasm_host_set_obj, mod_wasm_host_set);
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_export_py_obj, 3, 4, mod_wasm_export_py);
 
-static mp_obj_t mod_wasm_host_get(mp_obj_t slot_in) {
-    return mp_wasm_host_get_slot((int32_t)mp_obj_get_int(slot_in));
-}
-MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_host_get_obj, mod_wasm_host_get);
-
-static mp_obj_t mod_wasm_host_clear(size_t n_args, const mp_obj_t *args) {
-    if (n_args == 0) {
-        mp_wasm_host_clear_all();
-        return mp_const_none;
-    }
-    if (!mp_wasm_host_set_slot((int32_t)mp_obj_get_int(args[0]), mp_const_none)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("wasm.host_clear: bad slot"));
+// wasm.export_py_i64/f32/f64(module, func, callable) — same idea, one arg of
+// the named type in and out (see pyexport.h).
+static mp_obj_t mod_wasm_export_py_i64(mp_obj_t module_in, mp_obj_t func_in, mp_obj_t callable) {
+    if (pm_mod_export_py_i64(mp_obj_str_get_str(module_in), mp_obj_str_get_str(func_in), callable) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("wasm.export_py_i64: bad callable or pool full"));
     }
     return mp_const_none;
 }
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_host_clear_obj, 0, 1, mod_wasm_host_clear);
+MP_DEFINE_CONST_FUN_OBJ_3(mod_wasm_export_py_i64_obj, mod_wasm_export_py_i64);
+
+static mp_obj_t mod_wasm_export_py_f32(mp_obj_t module_in, mp_obj_t func_in, mp_obj_t callable) {
+    if (pm_mod_export_py_f32(mp_obj_str_get_str(module_in), mp_obj_str_get_str(func_in), callable) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("wasm.export_py_f32: bad callable or pool full"));
+    }
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_3(mod_wasm_export_py_f32_obj, mod_wasm_export_py_f32);
+
+static mp_obj_t mod_wasm_export_py_f64(mp_obj_t module_in, mp_obj_t func_in, mp_obj_t callable) {
+    if (pm_mod_export_py_f64(mp_obj_str_get_str(module_in), mp_obj_str_get_str(func_in), callable) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("wasm.export_py_f64: bad callable or pool full"));
+    }
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_3(mod_wasm_export_py_f64_obj, mod_wasm_export_py_f64);
+
+// wasm.export_py_mem(module, func, callable) — callable(bytes-from-cookie) -> int.
+static mp_obj_t mod_wasm_export_py_mem(mp_obj_t module_in, mp_obj_t func_in, mp_obj_t callable) {
+    if (pm_mod_export_py_mem(mp_obj_str_get_str(module_in), mp_obj_str_get_str(func_in), callable) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("wasm.export_py_mem: bad callable or pool full"));
+    }
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_3(mod_wasm_export_py_mem_obj, mod_wasm_export_py_mem);
+
+// wasm.export_py_obj(module, func, callable) — callable(resolved-handle-object) -> int.
+static mp_obj_t mod_wasm_export_py_handle(mp_obj_t module_in, mp_obj_t func_in, mp_obj_t callable) {
+    if (pm_mod_export_py_obj(mp_obj_str_get_str(module_in), mp_obj_str_get_str(func_in), callable) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("wasm.export_py_obj: bad callable or pool full"));
+    }
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_3(mod_wasm_export_py_handle_obj, mod_wasm_export_py_handle);
+
+// wasm.export_py_bufptr(module, func, callable) — ELF/native-guest only
+// (see pyexport.h): callable(bytes-from-raw-pointer) -> int.
+static mp_obj_t mod_wasm_export_py_bufptr(mp_obj_t module_in, mp_obj_t func_in, mp_obj_t callable) {
+    if (pm_mod_export_py_bufptr(mp_obj_str_get_str(module_in), mp_obj_str_get_str(func_in), callable) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("wasm.export_py_bufptr: bad callable or pool full"));
+    }
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_3(mod_wasm_export_py_bufptr_obj, mod_wasm_export_py_bufptr);
 
 // mem_alloc(n: int) or mem_alloc(data: bytes-like)
 static mp_obj_t mod_wasm_mem_alloc(mp_obj_t arg) {

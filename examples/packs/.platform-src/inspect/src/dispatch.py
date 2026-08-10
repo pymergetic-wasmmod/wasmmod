@@ -7,7 +7,7 @@ under this port's MINIMUM ROM level (AttributeError in Response.__init__).
 import asyncio
 import json
 
-from microdot import Request
+from pymergetic.metal.net.microdot import Request
 
 from .app import create_app
 
@@ -15,7 +15,9 @@ _app = None
 
 
 async def _invoke(handler, req):
-    ret = handler(req)
+    # Path params from find_route (e.g. /inspect/reg/<module>/<method>).
+    kwargs = getattr(req, "url_args", None) or {}
+    ret = handler(req, **kwargs)
     if hasattr(ret, "send") and hasattr(ret, "throw"):
         ret = await ret
     return ret

@@ -44,7 +44,10 @@ list(APPEND MICROPY_SOURCE_EXTMOD
     ${MICROPY_WASMMOD_DIR}/wasmmod.c
     ${MICROPY_WASMMOD_DIR}/modobj.c
     ${MICROPY_WASMMOD_DIR}/modapi.c
+    ${MICROPY_WASMMOD_DIR}/mod.c
     ${MICROPY_WASMMOD_DIR}/packload.c
+    ${MICROPY_WASMMOD_DIR}/thunk.c
+    ${MICROPY_WASMMOD_DIR}/pyexport.c
     ${MICROPY_WASMMOD_DIR}/fetch.c
     ${MICROPY_WASMMOD_DIR}/finder.c
     ${MICROPY_WASMMOD_DIR}/forward.c

@@ -198,18 +198,12 @@ func = "matrix"
 [[exports]]
 func = "matrix_rich"
 
-# Guest→guest only (host imports are C/RS attributes, not listed here).
-[[imports]]
-module = "pymergetic.wasmmod_examples.hello"
-func = "hello"
-
-[[imports]]
-module = "pymergetic.wasmmod_examples.mixed"
-func = "mixed_answer"
-
-[[imports]]
-module = "pymergetic.wasmmod_examples.mixed"
-func = "mixed_i64"
+# Every import below (guest→guest peers, guest→host matrix.host.* named
+# callbacks, same-pack/peer-pack self-exported Python) is auto-discovered
+# from bridge.c/lib.rs's own MP_WASM_IMPORT declarations, straight out of
+# the compiled wasm's standard import section — no manifest bookkeeping to
+# keep in sync (wasmmod.host/wasmmod natives are WAMR-pre-registered at boot
+# and are filtered out at connect time regardless).
 
 # Embed pack sources into wasmmod.source (CDN Inspect / locations).
 [source]

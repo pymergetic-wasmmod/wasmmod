@@ -1,10 +1,10 @@
-# Pack: ELF guest → wasmmod.host / wasmmod (native pointers, no linear mem).
+# Pack: ELF guest → named host/peer imports (native pointers, no linear mem).
 
 type = "package"
 name = "pymergetic.wasmmod_examples.hostcall"
 version = "0.1.0"
 impl = ["c"]
-comment = "ELF pack that calls Python via wasmmod.host slots (buf/mem/py + loader version)."
+comment = "ELF pack that calls Python via named __pm_modules imports (buf/mem/py + loader version)."
 
 [[exports]]
 func = "via_host0"
@@ -35,20 +35,20 @@ func = "host_version_len"
 sig = "i32"
 
 [[imports]]
-module = "wasmmod.host"
-func = "call0_i32"
+module = "hostcall.host"
+func = "host_const"
 
 [[imports]]
-module = "wasmmod.host"
-func = "call_i32"
+module = "hostcall.host"
+func = "host_double"
 
 [[imports]]
-module = "wasmmod.host"
-func = "call_buf"
+module = "hostcall.host"
+func = "host_len_buf"
 
 [[imports]]
-module = "wasmmod.host"
-func = "call_mem"
+module = "hostcall.host"
+func = "host_len_mem"
 
 [[imports]]
 module = "wasmmod.host"
@@ -63,8 +63,8 @@ module = "wasmmod.host"
 func = "mem_free"
 
 [[imports]]
-module = "wasmmod.host"
-func = "call_py"
+module = "pymergetic.wasmmod_examples.hello"
+func = "_elf_abs"
 
 [[imports]]
 module = "wasmmod"

@@ -10,9 +10,8 @@ comment = "Wasm pack importing micropython.runtime.ticks_ms (host catalog)"
 func = "elapsed"
 sig = "i32"
 
-[[imports]]
-module = "micropython.runtime"
-func = "ticks_ms"
+# Imports (micropython.runtime.ticks_ms) are auto-discovered from the
+# compiled wasm's own import section — no manifest declaration needed.
 
 # Embed pack sources into wasmmod.source (CDN Inspect / locations).
 [source]

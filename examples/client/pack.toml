@@ -21,9 +21,8 @@ unload = "mp_pack_unload"
 [[exports]]
 func = "use_hello"
 
-[[imports]]
-module = "pymergetic.wasmmod_examples.hello"
-func = "hello"
+# Imports (hello.hello) are auto-discovered from the compiled wasm's own
+# import section — no manifest declaration needed.
 
 # Embed pack sources into wasmmod.source (CDN Inspect / locations).
 [source]

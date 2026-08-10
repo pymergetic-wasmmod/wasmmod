@@ -629,6 +629,87 @@ def build_imports_payload(imports: list[tuple[str, str]]) -> bytes:
     return bytes(out)
 
 
+def _wasm_read_uleb(buf: bytes, pos: list[int]) -> int:
+    v = 0
+    shift = 0
+    while True:
+        if pos[0] >= len(buf):
+            raise ValueError("truncated leb")
+        b = buf[pos[0]]
+        pos[0] += 1
+        v |= (b & 0x7F) << shift
+        if (b & 0x80) == 0:
+            return v
+        shift += 7
+        if shift > 35:
+            raise ValueError("leb overflow")
+
+
+def discover_wasm_imports(raw: bytes) -> list[tuple[str, str]]:
+    """Every func import (module, name) declared in the compiled wasm's own
+    standard import section (id=2) — this is what the C/Rust source's
+    MP_WASM_IMPORT / extern "matrix.host"-style declarations actually emit,
+    so it is always exactly as complete and accurate as the object code
+    itself. Manifest-side ``[[imports]]`` entries are redundant with this and
+    only risked drifting out of sync with the real source.
+    """
+    out: list[tuple[str, str]] = []
+    if len(raw) < 8 or raw[:4] != b"\x00asm":
+        return out
+    i = 8
+    while i < len(raw):
+        sid = raw[i]
+        i += 1
+        pos = [i]
+        try:
+            slen = _wasm_read_uleb(raw, pos)
+        except ValueError:
+            break
+        i = pos[0]
+        start = i
+        end = start + slen
+        if end > len(raw):
+            break
+        if sid == 2:  # import section
+            j = [start]
+            try:
+                n_imports = _wasm_read_uleb(raw, j)
+                for _ in range(n_imports):
+                    mlen = _wasm_read_uleb(raw, j)
+                    module = raw[j[0] : j[0] + mlen].decode("utf-8", errors="replace")
+                    j[0] += mlen
+                    flen = _wasm_read_uleb(raw, j)
+                    func = raw[j[0] : j[0] + flen].decode("utf-8", errors="replace")
+                    j[0] += flen
+                    if j[0] >= end:
+                        break
+                    kind = raw[j[0]]
+                    j[0] += 1
+                    if kind == 0:  # func import → typeidx
+                        _wasm_read_uleb(raw, j)
+                        out.append((module, func))
+                    elif kind == 1:  # table → reftype + limits
+                        j[0] += 1
+                        flags = _wasm_read_uleb(raw, j)
+                        _wasm_read_uleb(raw, j)
+                        if flags & 1:
+                            _wasm_read_uleb(raw, j)
+                    elif kind == 2:  # mem → limits
+                        flags = _wasm_read_uleb(raw, j)
+                        _wasm_read_uleb(raw, j)
+                        if flags & 1:
+                            _wasm_read_uleb(raw, j)
+                    elif kind == 3:  # global → valtype + mut
+                        j[0] += 2
+                    else:
+                        break
+            except (ValueError, IndexError):
+                pass
+            break
+        i = end
+    return out
+
+
 def build_deps_payload(deps: list[tuple[str, str]]) -> bytes:
     """CDN / install deps (exact name → version). Distinct from ``[[imports]]``."""
     out = bytearray()
@@ -949,14 +1030,16 @@ def manifest_to_build(
         if isinstance(fn, str) and fn and fn not in link_exports:
             link_exports.append(fn)
 
+    # [[imports]] manifest entries are obsolete: every func import is now
+    # auto-discovered straight from the compiled wasm's own standard import
+    # section (see discover_wasm_imports, called after compile_wasm below).
+    if data.get("imports"):
+        print(
+            "wasm_pack: warning: pack.toml [[imports]] is ignored — "
+            "imports are auto-discovered from the compiled wasm binary",
+            file=sys.stderr,
+        )
     imports: list[tuple[str, str]] = []
-    for item in data.get("imports") or []:
-        if not isinstance(item, dict):
-            continue
-        mod = item.get("module")
-        func = item.get("func")
-        if isinstance(mod, str) and mod and isinstance(func, str) and func:
-            imports.append((mod, func))
 
     mounts: list[Path] = []
     py = data.get("python") or {}
@@ -1217,6 +1300,10 @@ def main() -> int:
     compile_wasm(sources, out, link_exports, args.O)
 
     raw = out.read_bytes()
+    # Auto-discover every func import straight from the just-compiled wasm's
+    # own standard import section — always exactly what the C/Rust source
+    # actually declared, no manifest bookkeeping to keep in sync.
+    pack_imports = discover_wasm_imports(raw)
     want_section = (not args.no_pack_section) and (mounts or pkg_name or pack_exports)
     if want_section:
         name = pkg_name or out.stem

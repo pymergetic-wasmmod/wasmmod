@@ -215,20 +215,23 @@ def host_obj(obj):
     return obj * 3
 
 
-wasm.host_clear()
 wasm.mem_clear()
 wasm.handle_clear()
-wasm.host_set(0, host_double)
-wasm.host_set(1, host_const)
-wasm.host_set(2, host_i64)
-wasm.host_set(3, host_f32)
-wasm.host_set(4, host_f64)
-wasm.host_set(5, host_bytes)
-wasm.host_set(6, host_obj)
-# Host C / RS fun-objs (guest→host → C / RS)
-wasm.host_set(7, wasm.host_c_triple)
-wasm.host_set(8, wasm.host_rs_triple)
-print("  host slots 0..8: py*7 + host_c_triple + host_rs_triple")
+# One plain named export per host callback (matrix.host.*) — resolved once
+# when bridge.wasm is loaded/connected below, via the exact same
+# __pm_modules path as a C/Rust/wasm-thunk export. No slot number, no
+# rebind-after-load.
+wasm.export_py("matrix.host", "host_double", host_double, 1)
+wasm.export_py("matrix.host", "host_const", host_const, 0)
+wasm.export_py_i64("matrix.host", "host_i64", host_i64)
+wasm.export_py_f32("matrix.host", "host_f32", host_f32)
+wasm.export_py_f64("matrix.host", "host_f64", host_f64)
+wasm.export_py_mem("matrix.host", "host_bytes", host_bytes)
+wasm.export_py_obj("matrix.host", "host_obj", host_obj)
+# Host C / RS fun-objs (guest→host → C / RS) — any callable works, native or Python.
+wasm.export_py("matrix.host", "host_c_triple", wasm.host_c_triple, 1)
+wasm.export_py("matrix.host", "host_rs_triple", wasm.host_rs_triple, 1)
+print("  matrix.host.*: host_double/const/i64/f32/f64/bytes/obj + c/rs_triple")
 
 # Host modules for pack-Python → host Py / C / RS.
 import sys
@@ -308,7 +311,7 @@ case(
     "Py",
     "Py",
     "hello.util.ping() + hello.util.extra.twice(21)  [embedded .py]",
-    (hello.util.ping(), hello.util.extra.twice(21)),
+    (h.util.ping(), h.util.extra.twice(21)),
     ("util ping", 42),
 )
 case(
@@ -770,8 +773,8 @@ case(
     "H",
     "C",
     "C",
-    "wasm.c_call('pymergetic.wasmmod_examples.hello','pymergetic.wasmmod_examples.hello')  [host C → guest C export]",
-    wasm.c_call("pymergetic.wasmmod_examples.hello", "pymergetic.wasmmod_examples.hello"),
+    "wasm.c_call('pymergetic.wasmmod_examples.hello','hello')  [host C → guest C export]",
+    wasm.c_call("pymergetic.wasmmod_examples.hello", "hello"),
     42,
 )
 case(
@@ -786,16 +789,16 @@ case(
     "H",
     "C",
     "Py",
-    "wasm.c_call_attr('hello.util','ping')  [host C → pack Py]",
-    wasm.c_call_attr("hello.util", "ping"),
+    "wasm.c_call_attr('pymergetic.wasmmod_examples.hello.util','ping')  [host C → pack Py]",
+    wasm.c_call_attr("pymergetic.wasmmod_examples.hello.util", "ping"),
     "util ping",
 )
 case(
     "H",
     "RS",
     "C",
-    "wasm.rs_call('pymergetic.wasmmod_examples.hello','pymergetic.wasmmod_examples.hello')  [host RS → guest C]",
-    wasm.rs_call("pymergetic.wasmmod_examples.hello", "pymergetic.wasmmod_examples.hello"),
+    "wasm.rs_call('pymergetic.wasmmod_examples.hello','hello')  [host RS → guest C]",
+    wasm.rs_call("pymergetic.wasmmod_examples.hello", "hello"),
     42,
 )
 case(
@@ -847,7 +850,6 @@ section("Cleanup")
 wasm.unload("pymergetic.wasmmod_examples.bridge")
 wasm.unload("pymergetic.wasmmod_examples.mixed")
 wasm.unload("pymergetic.wasmmod_examples.hello")
-wasm.host_clear()
 wasm.mem_clear()
 wasm.handle_clear()
 print("%d cases OK" % len(CASES))

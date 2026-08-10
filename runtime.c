@@ -75,6 +75,8 @@ void *mp_wasm_upy_catalog_elf_lookup(const char *module, const char *func);
 // flag. WASMMOD_EMSCRIPTEN builds omit format/elf/load.c and set containers
 // to "wasm" only — see ports/micropython/micropython.mk.
 
+#include "pm_mod.h"
+
 #include "extmod/wasmmod/format/common/format.h"
 #if MICROPY_PY_WASM_ELF
 #include "extmod/wasmmod/format/elf/load.h"
@@ -264,14 +266,14 @@ mp_pack_t *mp_pack_load_ex(const uint8_t *code, uint32_t code_len,
     }
     memset(mod, 0, sizeof(*mod));
     mod->kind = kind;
-    if (path_hint != NULL && path_hint[0] != '\0') {
-        strncpy(mod->origin, path_hint, sizeof(mod->origin) - 1);
-        mp_pack_parse_arch_from_path(path_hint, mod->arch, sizeof(mod->arch));
-    }
     if (name != NULL) {
         strncpy(mod->name, name, sizeof(mod->name) - 1);
     } else {
         strncpy(mod->name, "wasm", sizeof(mod->name) - 1);
+    }
+    if (path_hint != NULL && path_hint[0] != '\0') {
+        strncpy(mod->origin, path_hint, sizeof(mod->origin) - 1);
+        mp_pack_parse_arch_from_path(path_hint, mod->name, mod->arch, sizeof(mod->arch));
     }
 
     mod->buf = MICROPY_WASM_MALLOC(code_len);
@@ -613,6 +615,19 @@ static void *elf_resolve_import(const char *name, void *ctx) {
         module[ml] = '\0';
         if (elf_is_host_module(module)) {
             addr = elf_resolve_native(module, name);
+            break;
+        }
+        /* __pm_modules is the SoT for named imports, checked before any
+         * peer-pack export/PLT lookup: a module name can be both a loaded
+         * wasm/elf pack *and* carry host-registered wasm.export_py callbacks
+         * or a self-exported Python function under the same name (e.g. a
+         * pack self-exporting one of its own embedded-Python functions) —
+         * those never show up as ELF symbols/Wasm exports on the peer pack
+         * itself, so they must win over the peer-pack branch below. Mirrors
+         * the same priority mp_wasm_connect_imports/mp_wasm_pm_connect_guest
+         * use for Wasm/WAMR guests. */
+        addr = pm_mod_resolve_native(module, name);
+        if (addr != NULL) {
             break;
         }
         mp_pack_t *peer = mp_wasm_registry_find(module);
@@ -1034,7 +1049,7 @@ const char *mp_pack_arch(const mp_pack_t *mod) {
     return mod ? mod->arch : "";
 }
 
-void mp_pack_parse_arch_from_path(const char *path, char *out, size_t out_len) {
+void mp_pack_parse_arch_from_path(const char *path, const char *pack_name, char *out, size_t out_len) {
     if (out == NULL || out_len == 0) {
         return;
     }
@@ -1088,6 +1103,35 @@ void mp_pack_parse_arch_from_path(const char *path, char *out, size_t out_len) {
     }
     if (!tagged || n == 0) {
         return;
+    }
+    // Pack names are themselves dotted (Python package paths, e.g.
+    // "pymergetic.wasmmod_examples.hello"), so "text after the last dot" is
+    // NOT reliably an arch tag — it's just the pack's own last segment when
+    // there is no arch infix at all. When the real pack name is known, strip
+    // it as a prefix first: whatever (optional) ".<arch>" remains after that
+    // is the real tag, never a guess.
+    if (pack_name != NULL && pack_name[0] != '\0') {
+        size_t pn_len = strlen(pack_name);
+        if (pn_len == n && memcmp(buf, pack_name, pn_len) == 0) {
+            // "<pack_name>.elf" — no arch infix.
+            return;
+        }
+        if (pn_len < n && memcmp(buf, pack_name, pn_len) == 0 && buf[pn_len] == '.') {
+            const char *arch = buf + pn_len + 1;
+            for (const char *p = arch; *p; ++p) {
+                char c = *p;
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                        || (c >= '0' && c <= '9') || c == '_' || c == '-')) {
+                    return;
+                }
+            }
+            strncpy(out, arch, out_len - 1);
+            out[out_len - 1] = '\0';
+            return;
+        }
+        // Filename doesn't start with the known pack name (e.g. a bare
+        // basename load where the caller-supplied name differs) — fall
+        // through to the best-effort heuristic below.
     }
     const char *dot = strrchr(buf, '.');
     if (dot == NULL || dot[1] == '\0') {

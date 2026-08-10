@@ -40,9 +40,15 @@
 #include "extmod/wasmmod/forward.h"
 #include "extmod/wasmmod/pack.h"
 #include "extmod/wasmmod/runtime.h"
+#include "extmod/wasmmod/mod.h"
+#include "pm_mod.h"
 #include "wasm_export.h"
 
 #include "extmod/wasmmod/alloc.h"
+
+#include "py/obj.h"
+#include "py/objmodule.h"
+#include "py/runtime.h"
 
 typedef struct mp_wasm_reg_entry_t {
     struct mp_wasm_reg_entry_t *next;
@@ -69,6 +75,8 @@ typedef struct mp_wasm_fwd_t {
     // Hot-path cache (invalidated when target pack is unloaded/replaced).
     mp_pack_t *cached_mod;
     wasm_function_inst_t cached_fn;
+    /* When set, call this host native instead of a peer pack export. */
+    void *native_fn;
 } mp_wasm_fwd_t;
 
 static mp_wasm_reg_entry_t *registry;
@@ -131,6 +139,23 @@ void mp_wasm_registry_remove(mp_pack_t *mod) {
 mp_pack_t *mp_wasm_registry_find(const char *name) {
     if (name == NULL) {
         return NULL;
+    }
+    /* SoT: sys.modules[name].__pack__ — instance list is lifecycle only. */
+    qstr q = qstr_from_str(name);
+    mp_map_elem_t *me =
+        mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map, MP_OBJ_NEW_QSTR(q), MP_MAP_LOOKUP);
+    if (me != NULL) {
+        mp_obj_dict_t *globals = mp_obj_module_get_globals(me->value);
+        if (globals != NULL) {
+            mp_map_elem_t *pe = mp_map_lookup(&globals->map,
+                MP_OBJ_NEW_QSTR(MP_QSTR___pack__), MP_MAP_LOOKUP);
+            if (pe != NULL && mp_obj_is_type(pe->value, &mp_type_pack_module)) {
+                mp_obj_pack_module_t *po = MP_OBJ_TO_PTR(pe->value);
+                if (po->mod != NULL) {
+                    return po->mod;
+                }
+            }
+        }
     }
     for (mp_wasm_reg_entry_t *e = registry; e != NULL; e = e->next) {
         if (e->mod != NULL && strcmp(mp_pack_name(e->mod), name) == 0) {
@@ -242,6 +267,111 @@ static void forward_raw(wasm_exec_env_t exec_env, uint64_t *args) {
     if (fwd == NULL) {
         return;
     }
+
+    /* Host native edge (__pm_modules): resolved via pm_mod_resolve_native, so
+     * fwd->native_fn may be a genuine i32-only resident (C/Rust) export *or*
+     * a wasm-export thunk (see thunk.c) whose real ABI is one of the shapes
+     * below — dispatch on the stored kinds instead of assuming i32. */
+    if (fwd->native_fn != NULL) {
+        bool i32_params = true;
+        for (uint32_t i = 0; i < fwd->nparams; ++i) {
+            if (fwd->param_kinds == NULL || fwd->param_kinds[i] != 0x7f) {
+                i32_params = false;
+                break;
+            }
+        }
+        bool i32_result = fwd->nresults == 0
+            || (fwd->result_kinds != NULL && fwd->result_kinds[0] == 0x7f);
+
+        if (i32_params && i32_result && fwd->nparams <= 4) {
+            int32_t a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+            uint64_t *p = args;
+            if (fwd->nparams >= 1) {
+                native_raw_get_arg(int32_t, v, p);
+                a0 = v;
+            }
+            if (fwd->nparams >= 2) {
+                native_raw_get_arg(int32_t, v, p);
+                a1 = v;
+            }
+            if (fwd->nparams >= 3) {
+                native_raw_get_arg(int32_t, v, p);
+                a2 = v;
+            }
+            if (fwd->nparams >= 4) {
+                native_raw_get_arg(int32_t, v, p);
+                a3 = v;
+            }
+            int32_t ri = 0;
+            switch (fwd->nparams) {
+                case 0:
+                    ri = ((int32_t (*)(void))fwd->native_fn)();
+                    break;
+                case 1:
+                    ri = ((int32_t (*)(int32_t))fwd->native_fn)(a0);
+                    break;
+                case 2:
+                    ri = ((int32_t (*)(int32_t, int32_t))fwd->native_fn)(a0, a1);
+                    break;
+                case 3:
+                    ri = ((int32_t (*)(int32_t, int32_t, int32_t))fwd->native_fn)(a0, a1, a2);
+                    break;
+                case 4:
+                    ri = ((int32_t (*)(int32_t, int32_t, int32_t, int32_t))fwd->native_fn)(a0, a1, a2, a3);
+                    break;
+                default:
+                    return;
+            }
+            if (fwd->nresults == 1) {
+                native_raw_return_type(int32_t, args);
+                native_raw_set_return(ri);
+            }
+            return;
+        }
+
+        if (fwd->nparams == 1 && fwd->nresults == 1
+            && fwd->param_kinds[0] == 0x7e && fwd->result_kinds[0] == 0x7e) {
+            uint64_t *p = args;
+            native_raw_get_arg(int64_t, v, p);
+            int64_t ri = ((int64_t (*)(int64_t))fwd->native_fn)(v);
+            native_raw_return_type(int64_t, args);
+            native_raw_set_return(ri);
+            return;
+        }
+        if (fwd->nparams == 1 && fwd->nresults == 1
+            && fwd->param_kinds[0] == 0x7d && fwd->result_kinds[0] == 0x7d) {
+            uint64_t *p = args;
+            native_raw_get_arg(float, v, p);
+            float ri = ((float (*)(float))fwd->native_fn)(v);
+            native_raw_return_type(float, args);
+            native_raw_set_return(ri);
+            return;
+        }
+        if (fwd->nparams == 1 && fwd->nresults == 1
+            && fwd->param_kinds[0] == 0x7c && fwd->result_kinds[0] == 0x7c) {
+            uint64_t *p = args;
+            native_raw_get_arg(double, v, p);
+            double ri = ((double (*)(double))fwd->native_fn)(v);
+            native_raw_return_type(double, args);
+            native_raw_set_return(ri);
+            return;
+        }
+        if (fwd->nparams == 3 && fwd->nresults == 1
+            && fwd->param_kinds[0] == 0x7c && fwd->param_kinds[1] == 0x7c && fwd->param_kinds[2] == 0x7c
+            && fwd->result_kinds[0] == 0x7c) {
+            uint64_t *p = args;
+            native_raw_get_arg(double, v0, p);
+            native_raw_get_arg(double, v1, p);
+            native_raw_get_arg(double, v2, p);
+            double ri = ((double (*)(double, double, double))fwd->native_fn)(v0, v1, v2);
+            native_raw_return_type(double, args);
+            native_raw_set_return(ri);
+            return;
+        }
+        /* Unsupported native shape (mirrors thunk.c's bounded coverage): no-op. */
+        return;
+    }
+
     if (fwd->types_provisional) {
         (void)fwd_apply_peer_types(fwd);
     }
@@ -342,13 +472,13 @@ static void forward_raw(wasm_exec_env_t exec_env, uint64_t *args) {
     }
 }
 
-static bool fwd_exists(const char *module, const char *func) {
+static mp_wasm_fwd_t *fwd_find(const char *module, const char *func) {
     for (mp_wasm_fwd_t *f = forwarders; f != NULL; f = f->next) {
         if (strcmp(f->module, module) == 0 && strcmp(f->func, func) == 0) {
-            return true;
+            return f;
         }
     }
-    return false;
+    return NULL;
 }
 
 static char *xstrdup(const char *s) {
@@ -363,8 +493,12 @@ static char *xstrdup(const char *s) {
 static bool register_one(const char *module, const char *func,
     uint32_t nparams, const uint8_t *param_kinds,
     uint32_t nresults, const uint8_t *result_kinds,
-    bool types_provisional, char *errbuf, size_t errbuf_len) {
-    if (fwd_exists(module, func)) {
+    bool types_provisional, void *native_fn, char *errbuf, size_t errbuf_len) {
+    mp_wasm_fwd_t *existing = fwd_find(module, func);
+    if (existing != NULL) {
+        if (native_fn != NULL) {
+            existing->native_fn = native_fn;
+        }
         return true;
     }
     // WAMR raw forwarders: 0 or 1 result (multi-result peer calls use Py→Wasm).
@@ -373,6 +507,28 @@ static bool register_one(const char *module, const char *func,
             snprintf(errbuf, errbuf_len, "forwarder %s.%s: multi-result not supported", module, func);
         }
         return false;
+    }
+    if (native_fn != NULL) {
+        if (nparams > 4) {
+            if (errbuf && errbuf_len) {
+                snprintf(errbuf, errbuf_len, "forwarder %s.%s: native arity > 4", module, func);
+            }
+            return false;
+        }
+        for (uint32_t i = 0; i < nparams; ++i) {
+            if (param_kinds != NULL && param_kinds[i] != 0x7f) {
+                if (errbuf && errbuf_len) {
+                    snprintf(errbuf, errbuf_len, "forwarder %s.%s: native needs i32 params", module, func);
+                }
+                return false;
+            }
+        }
+        if (nresults == 1 && result_kinds != NULL && result_kinds[0] != 0x7f) {
+            if (errbuf && errbuf_len) {
+                snprintf(errbuf, errbuf_len, "forwarder %s.%s: native needs i32 result", module, func);
+            }
+            return false;
+        }
     }
     for (uint32_t i = 0; i < nparams; ++i) {
         if (wamr_sig_char(param_kinds[i]) == 0) {
@@ -411,6 +567,7 @@ static bool register_one(const char *module, const char *func,
     fwd->nparams = nparams;
     fwd->nresults = nresults;
     fwd->types_provisional = types_provisional;
+    fwd->native_fn = native_fn;
     if (nparams > 0) {
         fwd->param_kinds = MICROPY_WASM_MALLOC(nparams);
         if (fwd->param_kinds == NULL) {
@@ -694,7 +851,7 @@ bool mp_wasm_register_forwarders(const uint8_t *wasm, uint32_t len, char *errbuf
             }
             results[0] = 0x7f;
         }
-        if (!register_one(module, func, nparams, params, nresults, results, provisional, errbuf, errbuf_len)) {
+        if (!register_one(module, func, nparams, params, nresults, results, provisional, NULL, errbuf, errbuf_len)) {
             ok = false;
             MICROPY_WASM_FREE(params);
             MICROPY_WASM_FREE(results);
@@ -724,21 +881,124 @@ bool mp_wasm_connect_imports(const uint8_t *wasm, uint32_t len, char *errbuf, si
     for (uint32_t i = 0; i < info.n_imports; ++i) {
         const mp_wasm_import_t *im = &info.imports[i];
         char module[MP_WASM_NAME_MAX + 1];
+        char func[MP_WASM_NAME_MAX + 1];
         size_t ml = im->module_len > MP_WASM_NAME_MAX ? MP_WASM_NAME_MAX : im->module_len;
+        size_t fl = im->func_len > MP_WASM_NAME_MAX ? MP_WASM_NAME_MAX : im->func_len;
         memcpy(module, im->module, ml);
         module[ml] = '\0';
+        memcpy(func, im->func, fl);
+        func[fl] = '\0';
         if (strncmp(module, "micropython.", 12) == 0
             || strcmp(module, MP_WASM_HOST_MODULE) == 0
             || strcmp(module, MP_WASM_MODULE) == 0) {
             continue;
         }
-        if (mp_wasm_registry_find(module) == NULL) {
+        if (mp_wasm_registry_find(module) != NULL) {
+            continue;
+        }
+        if (pm_mod_resolve_native(module, func) != NULL) {
+            continue;
+        }
+        /* __pm_modules is SoT for "known module" regardless of language/container —
+         * accept it even without a resolvable native yet (e.g. pure-Python resident
+         * with no thunk): the real failure, if any, surfaces at call time. */
+        if (pm_mod_has(module)) {
+            continue;
+        }
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "connect: peer '%s.%s' not in __pm_modules or pack", module, func);
+        }
+        ok = false;
+        break;
+    }
+    mp_wasm_imports_info_free(&info);
+    return ok;
+}
+
+bool mp_wasm_pm_connect_guest(mp_pack_t *pack, char *errbuf, size_t errbuf_len) {
+    if (pack == NULL) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "pm_connect_guest: null pack");
+        }
+        return false;
+    }
+    uint32_t meta_len = 0;
+    const uint8_t *meta = mp_pack_meta_bytes(pack, &meta_len);
+    uint32_t code_len = 0;
+    const uint8_t *code = mp_pack_bytes(pack, &code_len);
+    if (meta == NULL || meta_len == 0) {
+        /* No imports section possible — nothing to wire. */
+        return true;
+    }
+    const uint8_t *payload = NULL;
+    uint32_t payload_len = 0;
+    if (!mp_wasm_imports_find_section(meta, meta_len, &payload, &payload_len)) {
+        return true;
+    }
+    mp_wasm_imports_info_t info;
+    memset(&info, 0, sizeof(info));
+    if (!mp_wasm_imports_parse(payload, payload_len, &info)) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "pm_connect_guest: bad wasmmod.imports");
+        }
+        return false;
+    }
+    bool ok = true;
+    for (uint32_t i = 0; i < info.n_imports; ++i) {
+        const mp_wasm_import_t *im = &info.imports[i];
+        char module[MP_WASM_NAME_MAX + 1];
+        char func[MP_WASM_NAME_MAX + 1];
+        size_t ml = im->module_len > MP_WASM_NAME_MAX ? MP_WASM_NAME_MAX : im->module_len;
+        size_t fl = im->func_len > MP_WASM_NAME_MAX ? MP_WASM_NAME_MAX : im->func_len;
+        memcpy(module, im->module, ml);
+        module[ml] = '\0';
+        memcpy(func, im->func, fl);
+        func[fl] = '\0';
+        if (strncmp(module, "micropython.", 12) == 0
+            || strcmp(module, MP_WASM_HOST_MODULE) == 0
+            || strcmp(module, MP_WASM_MODULE) == 0) {
+            continue;
+        }
+
+        void *native = pm_mod_resolve_native(module, func);
+        mp_pack_t *peer_pack = mp_wasm_registry_find(module);
+        if (native == NULL && peer_pack == NULL) {
             if (errbuf && errbuf_len) {
-                snprintf(errbuf, errbuf_len, "connect: pack '%s' not registered", module);
+                snprintf(errbuf, errbuf_len, "pm_connect_guest: missing peer %s.%s", module, func);
             }
             ok = false;
             break;
         }
+
+        if (native != NULL) {
+            uint32_t nparams = 0, nresults = 0;
+            uint8_t *params = NULL, *results = NULL;
+            bool provisional = false;
+            if (code != NULL && code_len > 0
+                && import_func_types(code, code_len, module, func, &nparams, &params, &nresults, &results)) {
+                /* typed from Wasm */
+            } else {
+                provisional = true;
+                nparams = 0;
+                nresults = 1;
+                results = MICROPY_WASM_MALLOC(1);
+                if (results == NULL) {
+                    ok = false;
+                    break;
+                }
+                results[0] = 0x7f;
+            }
+            if (!register_one(module, func, nparams, params, nresults, results, provisional, native,
+                    errbuf, errbuf_len)) {
+                MICROPY_WASM_FREE(params);
+                MICROPY_WASM_FREE(results);
+                ok = false;
+                break;
+            }
+            MICROPY_WASM_FREE(params);
+            MICROPY_WASM_FREE(results);
+        }
+        /* Pack peers: forwarders already installed by mp_wasm_register_forwarders. */
     }
     mp_wasm_imports_info_free(&info);
     return ok;

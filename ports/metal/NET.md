@@ -11,7 +11,7 @@ Metal                  OWNS        early floor + optional servers (sshd/httpd)
 
 - **One stack:** µPy `lib/lwip` (NO_SYS) owned by Metal bring-up; `MICROPY_PY_LWIP=1` → `modlwip` / stdlib `socket` on the same netifs
 - L2: virtio-net / bge → lwIP `ethN`; loopback `lo`; WireGuard `wgN` (smartalock wireguard-lwip)
-- Metal async sockets + if-mgmt: `pm_metal_net_ip_*` / `cfg.h` / `sock.h` (C); `metalnet` module (Py); F7 dashboard
+- Metal async sockets + if-mgmt: `pm_metal_net_ip_*` / `cfg.h` / `sock.h` (C); `pymergetic.metal.net` (Py); F7 dashboard
 - L4: per-service TCP/UDP socks on real ports (ASGI `:80`, SSH `:22`, DNS/NTP/TFTP each own a DGRAM sock). Dual-slot TCP / singleton UDP faces deleted.
 - `network.LAN` is status/`ifconfig`/`resolve` over the default netif (not a second IP engine)
 

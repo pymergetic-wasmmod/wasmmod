@@ -42,17 +42,33 @@ MP_WASM_IMPORT("pymergetic.wasmmod_examples.hello", int, hello, void);
 MP_WASM_IMPORT("pymergetic.wasmmod_examples.mixed", int, mixed_answer, void);
 MP_WASM_IMPORT("pymergetic.wasmmod_examples.mixed", long long, mixed_i64, long long x);
 
-/* Guest→host (registered by the loader as wasmmod.host.*). */
-MP_WASM_IMPORT("wasmmod.host", int, call_i32, int slot, int arg);
-MP_WASM_IMPORT("wasmmod.host", int, call0_i32, int slot);
-MP_WASM_IMPORT("wasmmod.host", long long, call_i64, int slot, long long arg);
-MP_WASM_IMPORT("wasmmod.host", float, call_f32, int slot, float arg);
-MP_WASM_IMPORT("wasmmod.host", double, call_f64, int slot, double arg);
-MP_WASM_IMPORT("wasmmod.host", int, call_buf, int slot, int off, int len);
-MP_WASM_IMPORT("wasmmod.host", int, call_mem, int slot, int cookie);
-MP_WASM_IMPORT("wasmmod.host", int, call_obj, int slot, int handle);
-MP_WASM_IMPORT("wasmmod.host", int, call0_py, int mod_off, int mod_len, int attr_off, int attr_len);
-MP_WASM_IMPORT("wasmmod.host", int, call_py, int mod_off, int mod_len, int attr_off, int attr_len, int arg);
+/*
+ * Guest→host: one plain named import per host callback (matrix.host.* is a
+ * test-only module name — a host test registers each with wasm.export_py*
+ * before this pack is loaded; a real product host would use whatever module
+ * name a pack's pack.toml deps on). Resolved once at load/connect time via
+ * the same __pm_modules path as any other import — no slot number, no
+ * runtime name string.
+ */
+MP_WASM_IMPORT("matrix.host", int, host_double, int x);
+MP_WASM_IMPORT("matrix.host", int, host_const, void);
+MP_WASM_IMPORT("matrix.host", long long, host_i64, long long x);
+MP_WASM_IMPORT("matrix.host", float, host_f32, float x);
+MP_WASM_IMPORT("matrix.host", double, host_f64, double x);
+MP_WASM_IMPORT("matrix.host", int, host_bytes, int cookie);
+MP_WASM_IMPORT("matrix.host", int, host_obj, int handle);
+MP_WASM_IMPORT("matrix.host", int, host_c_triple, int x);
+MP_WASM_IMPORT("matrix.host", int, host_rs_triple, int x);
+
+/* Same-pack self-import + peer-pack import of embedded Python (see
+ * src/__init__.py and hello/src/util/__init__.py's wasm.export_py calls).
+ * Both are named "ping_code" on the wasm side; MP_WASM_IMPORT_AS keeps the
+ * two distinct as local C symbols. */
+MP_WASM_IMPORT("pymergetic.wasmmod_examples.bridge", int, ping_code, void);
+MP_WASM_IMPORT_AS("pymergetic.wasmmod_examples.hello.util", "ping_code", int, peer_ping_code, void);
+
+/* wasmmod's own durable memory-cookie bridge (unrelated to host_slots —
+ * stays regardless of this migration). */
 MP_WASM_IMPORT("wasmmod.host", int, mem_alloc, int size);
 MP_WASM_IMPORT("wasmmod.host", void, mem_free, int cookie);
 MP_WASM_IMPORT("wasmmod.host", int, mem_copy_in, int cookie, int src_off, int n);
@@ -92,15 +108,15 @@ double scale_add_f64(double x, double s, double b) {
 }
 
 long long via_host_i64(long long x) {
-    return call_i64(2, x);
+    return host_i64(x);
 }
 
 float via_host_f32(float x) {
-    return call_f32(3, x);
+    return host_f32(x);
 }
 
 double via_host_f64(double x) {
-    return call_f64(4, x);
+    return host_f64(x);
 }
 
 /* Guest→guest with i64 (forwarder introspects peer Wasm types). */
@@ -150,43 +166,55 @@ int via_mixed(void) {
 }
 
 int via_host(int x) {
-    return call_i32(0, x);
+    return host_double(x);
 }
 
 int via_host0(void) {
-    return call0_i32(1);
+    return host_const();
 }
 
-/* Guest→host → host C / host RS fun-objs (slots set by matrix). */
+/* Guest→host → host C / host RS fun-objs (host_c_triple/host_rs_triple are
+ * wasm.host_c_triple/host_rs_triple exported under matrix.host by name). */
 int via_host_c(int x) {
-    return call_i32(7, x);
+    return host_c_triple(x);
 }
 
 int via_host_rs(int x) {
-    return call_i32(8, x);
+    return host_rs_triple(x);
 }
 
-/* Same-pack C → pack Python via call0_py. */
+/* Same-pack C → pack Python: static import, resolved once at connect time
+ * (see src/__init__.py's wasm.export_py self-export of ping_code). */
 int via_pack_py(void) {
-    static const char m[] = "pymergetic.wasmmod_examples.bridge";
-    static const char a[] = "ping_code";
-    return call0_py(MP_WASM_PTR(m), (int)(sizeof(m) - 1), MP_WASM_PTR(a), (int)(sizeof(a) - 1));
+    return ping_code();
 }
 
-/* Guest→guest C → peer pack Python. */
+/* Guest→guest C → peer pack Python: static import of hello.util's
+ * self-exported ping_code (see hello/src/util/__init__.py). */
 int via_peer_py(void) {
-    static const char m[] = "pymergetic.wasmmod_examples.hello.util";
-    static const char a[] = "ping_code";
-    return call0_py(MP_WASM_PTR(m), (int)(sizeof(m) - 1), MP_WASM_PTR(a), (int)(sizeof(a) - 1));
+    return peer_ping_code();
 }
 
-/* Linear buffer → host as Python bytes (call_buf). */
+/* Linear buffer → host cookie → host_bytes(cookie) (mem-cookie shape; a
+ * WAMR guest has no host-callable "raw offset" shape since that needs the
+ * calling instance's exec_env — route through the durable cookie table like
+ * via_mem does, just with different message content). */
 int via_buf(void) {
     static const char msg[] = "ping";
-    return call_buf(5, MP_WASM_PTR(msg), 4);
+    int cookie = mem_alloc(4);
+    if (cookie == 0) {
+        return -1;
+    }
+    if (mem_copy_in(cookie, MP_WASM_PTR(msg), 4) != 0) {
+        mem_free(cookie);
+        return -1;
+    }
+    int r = host_bytes(cookie);
+    mem_free(cookie);
+    return r;
 }
 
-/* Host cookie: copy linear → cookie → call_mem(slot, cookie). */
+/* Host cookie: copy linear → cookie → host_bytes(cookie). */
 int via_mem(void) {
     static const char msg[] = "pong";
     int cookie = mem_alloc(4);
@@ -197,14 +225,14 @@ int via_mem(void) {
         mem_free(cookie);
         return -1;
     }
-    int r = call_mem(5, cookie);
+    int r = host_bytes(cookie);
     mem_free(cookie);
     return r;
 }
 
 /* Opaque Python object handle (registered on host, passed as i32). */
 int via_handle(int handle) {
-    return call_obj(6, handle);
+    return host_obj(handle);
 }
 
 /* Round-trip: host cookie written by Py, guest copies to linear and checksums. */
@@ -222,14 +250,14 @@ int matrix(int x) {
     int a = rs_square(x);     /* C→RS */
     int b = hello();          /* guest→guest → C */
     int c = mixed_answer();   /* guest→guest → C→RS */
-    int d = call_i32(0, x);   /* guest→host→Py */
+    int d = host_double(x);   /* guest→host→Py */
     return a + b + c + d;
 }
 
 /* Richer combo: multi-arg + i64 host + f64 scale + peer i64. */
 long long matrix_rich(long long x) {
     int a = rs_add3(1, 2, 3);                 /* 6 */
-    long long b = call_i64(2, x);             /* x+100 */
+    long long b = host_i64(x);                /* x+100 */
     double c = scale_add_f64(2.0, 3.0, 0.5);  /* 6.5 */
     long long d = mixed_i64(x);               /* x+7 */
     return a + b + (long long)c + d;          /* 6+(x+100)+6+(x+7) = 2x+119 */

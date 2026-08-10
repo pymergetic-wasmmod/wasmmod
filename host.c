@@ -47,96 +47,10 @@
 #include "extmod/wasmmod/runtime.h"
 #include "wasm_export.h"
 
-// Growable GC-rooted list of callables (index = slot).
-MP_REGISTER_ROOT_POINTER(mp_obj_t mp_wasm_host_slots);
 // Growable GC-rooted list of Python objects (index + 1 = handle).
 MP_REGISTER_ROOT_POINTER(mp_obj_t mp_wasm_handles);
 
 static int host_registered;
-
-// ---- Callable slots ----
-
-static void host_slots_ensure(void) {
-    if (MP_STATE_VM(mp_wasm_host_slots) != MP_OBJ_NULL
-        && mp_obj_is_type(MP_STATE_VM(mp_wasm_host_slots), &mp_type_list)) {
-        return;
-    }
-    mp_obj_list_t *list = m_new_obj(mp_obj_list_t);
-    mp_obj_list_init(list, 0);
-    MP_STATE_VM(mp_wasm_host_slots) = MP_OBJ_FROM_PTR(list);
-}
-
-static bool host_slots_grow_to(size_t need_len) {
-    host_slots_ensure();
-    mp_obj_list_t *list = MP_OBJ_TO_PTR(MP_STATE_VM(mp_wasm_host_slots));
-    while (list->len < need_len) {
-        mp_obj_list_append(MP_STATE_VM(mp_wasm_host_slots), mp_const_none);
-        list = MP_OBJ_TO_PTR(MP_STATE_VM(mp_wasm_host_slots));
-    }
-    return true;
-}
-
-void mp_wasm_host_clear_all(void) {
-    if (MP_STATE_VM(mp_wasm_host_slots) == MP_OBJ_NULL
-        || !mp_obj_is_type(MP_STATE_VM(mp_wasm_host_slots), &mp_type_list)) {
-        return;
-    }
-    mp_obj_list_t *list = MP_OBJ_TO_PTR(MP_STATE_VM(mp_wasm_host_slots));
-    for (size_t i = 0; i < list->len; ++i) {
-        list->items[i] = mp_const_none;
-    }
-}
-
-size_t mp_wasm_host_slot_count(void) {
-    if (MP_STATE_VM(mp_wasm_host_slots) == MP_OBJ_NULL
-        || !mp_obj_is_type(MP_STATE_VM(mp_wasm_host_slots), &mp_type_list)) {
-        return 0;
-    }
-    return ((mp_obj_list_t *)MP_OBJ_TO_PTR(MP_STATE_VM(mp_wasm_host_slots)))->len;
-}
-
-static mp_obj_t slot_callable(int32_t slot) {
-    if (slot < 0) {
-        return MP_OBJ_NULL;
-    }
-    host_slots_ensure();
-    mp_obj_list_t *list = MP_OBJ_TO_PTR(MP_STATE_VM(mp_wasm_host_slots));
-    if ((size_t)slot >= list->len) {
-        return MP_OBJ_NULL;
-    }
-    mp_obj_t cb = list->items[slot];
-    if (cb == mp_const_none || !mp_obj_is_callable(cb)) {
-        return MP_OBJ_NULL;
-    }
-    return cb;
-}
-
-bool mp_wasm_host_set_slot(int32_t slot, mp_obj_t callable) {
-    if (slot < 0) {
-        return false;
-    }
-    if (callable != mp_const_none && !mp_obj_is_callable(callable)) {
-        return false;
-    }
-    if (!host_slots_grow_to((size_t)slot + 1)) {
-        return false;
-    }
-    mp_obj_list_t *list = MP_OBJ_TO_PTR(MP_STATE_VM(mp_wasm_host_slots));
-    list->items[slot] = callable;
-    return true;
-}
-
-mp_obj_t mp_wasm_host_get_slot(int32_t slot) {
-    if (slot < 0) {
-        return mp_const_none;
-    }
-    host_slots_ensure();
-    mp_obj_list_t *list = MP_OBJ_TO_PTR(MP_STATE_VM(mp_wasm_host_slots));
-    if ((size_t)slot >= list->len) {
-        return mp_const_none;
-    }
-    return list->items[slot];
-}
 
 // ---- Mem cookies (host heap; not GC) ----
 
@@ -455,235 +369,7 @@ static mp_obj_t host_rs_triple(mp_obj_t x_in) {
 MP_DEFINE_CONST_FUN_OBJ_1(mp_wasm_host_rs_triple_obj, host_rs_triple);
 #endif
 
-// Guest linear names → sys.modules lookup / call (native → pack Python).
-static bool guest_name(wasm_exec_env_t exec_env, int32_t off, int32_t len,
-    char *buf, size_t buf_sz) {
-    if (len < 0 || (size_t)len >= buf_sz) {
-        return false;
-    }
-    void *p = NULL;
-    if (!mp_wasm_linear_from_exec(exec_env, (uint32_t)off, (uint32_t)len, &p)) {
-        return false;
-    }
-    memcpy(buf, p, (size_t)len);
-    buf[len] = '\0';
-    return true;
-}
-
-static int32_t host_call0_py(wasm_exec_env_t exec_env,
-    int32_t mod_off, int32_t mod_len, int32_t attr_off, int32_t attr_len) {
-    char mname[MP_WASM_HOST_NAME_MAX];
-    char aname[MP_WASM_HOST_NAME_MAX];
-    if (!guest_name(exec_env, mod_off, mod_len, mname, sizeof(mname))
-        || !guest_name(exec_env, attr_off, attr_len, aname, sizeof(aname))) {
-        return -1;
-    }
-    mp_obj_t out = MP_OBJ_NULL;
-    if (mp_wasm_host_call_attr(mname, strlen(mname), aname, strlen(aname), 0, 0, &out) != 0) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        int32_t v = (int32_t)mp_obj_get_int(out);
-        nlr_pop();
-        return v;
-    }
-    return -1;
-}
-
-static int32_t host_call_py(wasm_exec_env_t exec_env,
-    int32_t mod_off, int32_t mod_len, int32_t attr_off, int32_t attr_len, int32_t arg) {
-    char mname[MP_WASM_HOST_NAME_MAX];
-    char aname[MP_WASM_HOST_NAME_MAX];
-    if (!guest_name(exec_env, mod_off, mod_len, mname, sizeof(mname))
-        || !guest_name(exec_env, attr_off, attr_len, aname, sizeof(aname))) {
-        return -1;
-    }
-    mp_obj_t out = MP_OBJ_NULL;
-    if (mp_wasm_host_call_attr(mname, strlen(mname), aname, strlen(aname), 1, arg, &out) != 0) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        int32_t v = (int32_t)mp_obj_get_int(out);
-        nlr_pop();
-        return v;
-    }
-    return -1;
-}
-
 // ---- WAMR natives ----
-
-static int32_t host_call_i32(wasm_exec_env_t exec_env, int32_t slot, int32_t arg) {
-    (void)exec_env;
-    mp_obj_t cb = slot_callable(slot);
-    if (cb == MP_OBJ_NULL) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        mp_obj_t res = mp_call_function_1(cb, mp_obj_new_int(arg));
-        int32_t out = (int32_t)mp_obj_get_int(res);
-        nlr_pop();
-        return out;
-    }
-    return -1;
-}
-
-static int32_t host_call0_i32(wasm_exec_env_t exec_env, int32_t slot) {
-    (void)exec_env;
-    mp_obj_t cb = slot_callable(slot);
-    if (cb == MP_OBJ_NULL) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        mp_obj_t res = mp_call_function_0(cb);
-        int32_t out = (int32_t)mp_obj_get_int(res);
-        nlr_pop();
-        return out;
-    }
-    return -1;
-}
-
-static int64_t host_call_i64(wasm_exec_env_t exec_env, int32_t slot, int64_t arg) {
-#if MICROPY_LONGINT_IMPL != MICROPY_LONGINT_IMPL_NONE
-    (void)exec_env;
-    mp_obj_t cb = slot_callable(slot);
-    if (cb == MP_OBJ_NULL) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        mp_obj_t res = mp_call_function_1(cb, mp_obj_new_int_from_ll(arg));
-        int64_t out = mp_obj_get_ll(res);
-        nlr_pop();
-        return out;
-    }
-    return -1;
-#else
-    (void)exec_env;
-    (void)slot;
-    (void)arg;
-    return -1;
-#endif
-}
-
-static float host_call_f32(wasm_exec_env_t exec_env, int32_t slot, float arg) {
-#if MICROPY_FLOAT_IMPL != MICROPY_FLOAT_IMPL_NONE
-    (void)exec_env;
-    mp_obj_t cb = slot_callable(slot);
-    if (cb == MP_OBJ_NULL) {
-        return -1.0f;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        mp_obj_t res = mp_call_function_1(cb, mp_obj_new_float((mp_float_t)arg));
-        float out = mp_obj_get_float_to_f(res);
-        nlr_pop();
-        return out;
-    }
-    return -1.0f;
-#else
-    (void)exec_env;
-    (void)slot;
-    (void)arg;
-    return -1.0f;
-#endif
-}
-
-static double host_call_f64(wasm_exec_env_t exec_env, int32_t slot, double arg) {
-#if MICROPY_FLOAT_IMPL != MICROPY_FLOAT_IMPL_NONE
-    (void)exec_env;
-    mp_obj_t cb = slot_callable(slot);
-    if (cb == MP_OBJ_NULL) {
-        return -1.0;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        mp_obj_t res = mp_call_function_1(cb, mp_obj_new_float((mp_float_t)arg));
-        double out = mp_obj_get_float_to_d(res);
-        nlr_pop();
-        return out;
-    }
-    return -1.0;
-#else
-    (void)exec_env;
-    (void)slot;
-    (void)arg;
-    return -1.0;
-#endif
-}
-
-// Guest linear [off,len] → Python bytes → callable(bytes) → i32.
-static int32_t host_call_buf(wasm_exec_env_t exec_env, int32_t slot, int32_t off, int32_t len) {
-    if (len < 0) {
-        return -1;
-    }
-    void *p = NULL;
-    if (!mp_wasm_linear_from_exec(exec_env, (uint32_t)off, (uint32_t)len, &p)) {
-        return -1;
-    }
-    mp_obj_t cb = slot_callable(slot);
-    if (cb == MP_OBJ_NULL) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        mp_obj_t buf = mp_obj_new_bytes(p, (size_t)len);
-        mp_obj_t res = mp_call_function_1(cb, buf);
-        int32_t out = (int32_t)mp_obj_get_int(res);
-        nlr_pop();
-        return out;
-    }
-    return -1;
-}
-
-// Cookie → Python bytes → callable(bytes) → i32.
-static int32_t host_call_mem(wasm_exec_env_t exec_env, int32_t slot, int32_t cookie) {
-    (void)exec_env;
-    mp_wasm_cookie_t *cslot = cookie_get(cookie);
-    if (cslot == NULL) {
-        return -1;
-    }
-    mp_obj_t cb = slot_callable(slot);
-    if (cb == MP_OBJ_NULL) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        mp_obj_t buf = mp_obj_new_bytes(cslot->data, (size_t)cslot->len);
-        mp_obj_t res = mp_call_function_1(cb, buf);
-        int32_t out = (int32_t)mp_obj_get_int(res);
-        nlr_pop();
-        return out;
-    }
-    return -1;
-}
-
-// Handle → resolved Python object → callable(obj) → i32.
-static int32_t host_call_obj(wasm_exec_env_t exec_env, int32_t slot, int32_t handle) {
-    (void)exec_env;
-    if (handle <= 0) {
-        return -1;
-    }
-    mp_obj_t obj = mp_wasm_handle_resolve(handle);
-    if (obj == mp_const_none) {
-        return -1; // free / invalid (None is not a registerable value)
-    }
-    mp_obj_t cb = slot_callable(slot);
-    if (cb == MP_OBJ_NULL) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        mp_obj_t res = mp_call_function_1(cb, obj);
-        int32_t out = (int32_t)mp_obj_get_int(res);
-        nlr_pop();
-        return out;
-    }
-    return -1;
-}
 
 static int32_t host_mem_alloc(wasm_exec_env_t exec_env, int32_t size) {
     (void)exec_env;
@@ -801,16 +487,6 @@ static int32_t host_mem_copy_out_at(wasm_exec_env_t exec_env, int32_t cookie, in
 }
 
 static NativeSymbol host_symbols[] = {
-    { "call_i32", (void *)host_call_i32, "(ii)i", NULL },
-    { "call0_i32", (void *)host_call0_i32, "(i)i", NULL },
-    { "call_i64", (void *)host_call_i64, "(iI)I", NULL },
-    { "call_f32", (void *)host_call_f32, "(if)f", NULL },
-    { "call_f64", (void *)host_call_f64, "(iF)F", NULL },
-    { "call_buf", (void *)host_call_buf, "(iii)i", NULL },
-    { "call_mem", (void *)host_call_mem, "(ii)i", NULL },
-    { "call_obj", (void *)host_call_obj, "(ii)i", NULL },
-    { "call0_py", (void *)host_call0_py, "(iiii)i", NULL },
-    { "call_py", (void *)host_call_py, "(iiiii)i", NULL },
     { "mem_alloc", (void *)host_mem_alloc, "(i)i", NULL },
     { "mem_free", (void *)host_mem_free, "(i)", NULL },
     { "mem_len", (void *)host_mem_len, "(i)i", NULL },
@@ -827,26 +503,15 @@ bool mp_wasm_host_register(void) {
         return true;
     }
     /* PE/UEFI: static fn-ptr initializers can be wrong; assign at runtime. */
-    host_symbols[0].func_ptr = (void *)host_call_i32;
-    host_symbols[1].func_ptr = (void *)host_call0_i32;
-    host_symbols[2].func_ptr = (void *)host_call_i64;
-    host_symbols[3].func_ptr = (void *)host_call_f32;
-    host_symbols[4].func_ptr = (void *)host_call_f64;
-    host_symbols[5].func_ptr = (void *)host_call_buf;
-    host_symbols[6].func_ptr = (void *)host_call_mem;
-    host_symbols[7].func_ptr = (void *)host_call_obj;
-    host_symbols[8].func_ptr = (void *)host_call0_py;
-    host_symbols[9].func_ptr = (void *)host_call_py;
-    host_symbols[10].func_ptr = (void *)host_mem_alloc;
-    host_symbols[11].func_ptr = (void *)host_mem_free;
-    host_symbols[12].func_ptr = (void *)host_mem_len;
-    host_symbols[13].func_ptr = (void *)host_mem_valid;
-    host_symbols[14].func_ptr = (void *)host_mem_set;
-    host_symbols[15].func_ptr = (void *)host_mem_copy_in;
-    host_symbols[16].func_ptr = (void *)host_mem_copy_out;
-    host_symbols[17].func_ptr = (void *)host_mem_copy_in_at;
-    host_symbols[18].func_ptr = (void *)host_mem_copy_out_at;
-    host_slots_ensure();
+    host_symbols[0].func_ptr = (void *)host_mem_alloc;
+    host_symbols[1].func_ptr = (void *)host_mem_free;
+    host_symbols[2].func_ptr = (void *)host_mem_len;
+    host_symbols[3].func_ptr = (void *)host_mem_valid;
+    host_symbols[4].func_ptr = (void *)host_mem_set;
+    host_symbols[5].func_ptr = (void *)host_mem_copy_in;
+    host_symbols[6].func_ptr = (void *)host_mem_copy_out;
+    host_symbols[7].func_ptr = (void *)host_mem_copy_in_at;
+    host_symbols[8].func_ptr = (void *)host_mem_copy_out_at;
     handles_ensure();
     if (!wasm_runtime_register_natives(MP_WASM_HOST_MODULE, host_symbols,
             sizeof(host_symbols) / sizeof(host_symbols[0]))) {
@@ -858,29 +523,8 @@ bool mp_wasm_host_register(void) {
 
 #if MICROPY_PY_WASM_ELF
 // System V entrypoints for in-tree ELF guests (no wasm_exec_env_t).
-// Pointer args replace Wasm linear offsets (call_buf / call_py / mem_copy_*).
+// Pointer args replace Wasm linear offsets (mem_copy_*).
 
-static int32_t elf_host_call_i32(int32_t slot, int32_t arg) {
-    return host_call_i32(NULL, slot, arg);
-}
-static int32_t elf_host_call0_i32(int32_t slot) {
-    return host_call0_i32(NULL, slot);
-}
-static int64_t elf_host_call_i64(int32_t slot, int64_t arg) {
-    return host_call_i64(NULL, slot, arg);
-}
-static float elf_host_call_f32(int32_t slot, float arg) {
-    return host_call_f32(NULL, slot, arg);
-}
-static double elf_host_call_f64(int32_t slot, double arg) {
-    return host_call_f64(NULL, slot, arg);
-}
-static int32_t elf_host_call_mem(int32_t slot, int32_t cookie) {
-    return host_call_mem(NULL, slot, cookie);
-}
-static int32_t elf_host_call_obj(int32_t slot, int32_t handle) {
-    return host_call_obj(NULL, slot, handle);
-}
 static int32_t elf_host_mem_alloc(int32_t size) {
     return host_mem_alloc(NULL, size);
 }
@@ -898,77 +542,6 @@ static int32_t elf_host_mem_set(int32_t cookie, const void *data, int32_t n) {
         return 0;
     }
     return mp_wasm_mem_set(cookie, (const uint8_t *)data, (uint32_t)n) ? 1 : 0;
-}
-
-static bool elf_guest_name(const void *ptr, int32_t len, char *buf, size_t buf_sz) {
-    if (ptr == NULL || len < 0 || (size_t)len >= buf_sz) {
-        return false;
-    }
-    memcpy(buf, ptr, (size_t)len);
-    buf[len] = '\0';
-    return true;
-}
-
-// Guest native [ptr,len] → Python bytes → callable(bytes) → i32.
-static int32_t elf_host_call_buf(int32_t slot, const void *ptr, int32_t len) {
-    if (len < 0 || (len > 0 && ptr == NULL)) {
-        return -1;
-    }
-    mp_obj_t cb = slot_callable(slot);
-    if (cb == MP_OBJ_NULL) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        mp_obj_t buf = mp_obj_new_bytes(ptr, (size_t)len);
-        mp_obj_t res = mp_call_function_1(cb, buf);
-        int32_t out = (int32_t)mp_obj_get_int(res);
-        nlr_pop();
-        return out;
-    }
-    return -1;
-}
-
-static int32_t elf_host_call0_py(const void *mod, int32_t mod_len,
-    const void *attr, int32_t attr_len) {
-    char mname[MP_WASM_HOST_NAME_MAX];
-    char aname[MP_WASM_HOST_NAME_MAX];
-    if (!elf_guest_name(mod, mod_len, mname, sizeof(mname))
-        || !elf_guest_name(attr, attr_len, aname, sizeof(aname))) {
-        return -1;
-    }
-    mp_obj_t out = MP_OBJ_NULL;
-    if (mp_wasm_host_call_attr(mname, strlen(mname), aname, strlen(aname), 0, 0, &out) != 0) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        int32_t v = (int32_t)mp_obj_get_int(out);
-        nlr_pop();
-        return v;
-    }
-    return -1;
-}
-
-static int32_t elf_host_call_py(const void *mod, int32_t mod_len,
-    const void *attr, int32_t attr_len, int32_t arg) {
-    char mname[MP_WASM_HOST_NAME_MAX];
-    char aname[MP_WASM_HOST_NAME_MAX];
-    if (!elf_guest_name(mod, mod_len, mname, sizeof(mname))
-        || !elf_guest_name(attr, attr_len, aname, sizeof(aname))) {
-        return -1;
-    }
-    mp_obj_t out = MP_OBJ_NULL;
-    if (mp_wasm_host_call_attr(mname, strlen(mname), aname, strlen(aname), 1, arg, &out) != 0) {
-        return -1;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        int32_t v = (int32_t)mp_obj_get_int(out);
-        nlr_pop();
-        return v;
-    }
-    return -1;
 }
 
 static int32_t elf_host_mem_copy_in(int32_t cookie, const void *src, int32_t n) {
@@ -1039,16 +612,6 @@ typedef struct {
 } mp_wasm_elf_native_t;
 
 static const mp_wasm_elf_native_t elf_host_natives[] = {
-    { "call_i32", (void *)elf_host_call_i32 },
-    { "call0_i32", (void *)elf_host_call0_i32 },
-    { "call_i64", (void *)elf_host_call_i64 },
-    { "call_f32", (void *)elf_host_call_f32 },
-    { "call_f64", (void *)elf_host_call_f64 },
-    { "call_buf", (void *)elf_host_call_buf },
-    { "call_mem", (void *)elf_host_call_mem },
-    { "call_obj", (void *)elf_host_call_obj },
-    { "call0_py", (void *)elf_host_call0_py },
-    { "call_py", (void *)elf_host_call_py },
     { "mem_alloc", (void *)elf_host_mem_alloc },
     { "mem_free", (void *)elf_host_mem_free },
     { "mem_len", (void *)elf_host_mem_len },

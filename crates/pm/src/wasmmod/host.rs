@@ -12,11 +12,6 @@ pub fn host_call_export_i32(pack: *const core::ffi::c_char, pack_len: usize, fun
     check_status(unsafe { ffi::pm_wasmmod_host_call_export_i32(pack, pack_len, func, func_len, nargs, args, out) })
 }
 
-/// `pm_wasmmod_host_clear_all`.
-pub fn host_clear_all() -> () {
-    unsafe { ffi::pm_wasmmod_host_clear_all() }
-}
-
 /// `pm_wasmmod_host_package_name`.
 pub fn host_package_name() -> &'static str {
     unsafe {
@@ -38,14 +33,4 @@ pub fn host_self_path(buf: *mut core::ffi::c_char, buflen: usize) -> pm_status_t
 /// `pm_wasmmod_host_set_self_image`.
 pub fn host_set_self_image(buf: *const u8, len: u32, take_ownership: bool) -> () {
     unsafe { ffi::pm_wasmmod_host_set_self_image(buf, len, take_ownership) }
-}
-
-/// `pm_wasmmod_host_set_slot_c`.
-pub fn host_set_slot_c(slot: i32, fn_: Option<unsafe extern "C" fn(arg: i32) -> i32>, userdata: *mut core::ffi::c_void) -> bool {
-    unsafe { ffi::pm_wasmmod_host_set_slot_c(slot, fn_, userdata) }
-}
-
-/// `pm_wasmmod_host_slot_count`.
-pub fn host_slot_count() -> usize {
-    unsafe { ffi::pm_wasmmod_host_slot_count() }
 }

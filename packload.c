@@ -47,6 +47,8 @@
 #include "extmod/wasmmod/pack.h"
 #include "extmod/wasmmod/zlibutil.h"
 #include "extmod/wasmmod/alloc.h"
+#include "extmod/wasmmod/thunk.h"
+#include "pm_mod.h"
 
 int mp_wasm_import_hook_depth;
 
@@ -135,6 +137,7 @@ static bool replace_suffix(const char *path, const char *old_suf, const char *ne
 typedef struct {
     mp_obj_t py_mod;
     mp_pack_t *wasm;
+    const char *pack_name;
 } bind_ctx_t;
 
 static void bind_export_cb(const char *name, uint32_t nparams, uint32_t nresults, void *ctx_in) {
@@ -147,6 +150,8 @@ static void bind_export_cb(const char *name, uint32_t nparams, uint32_t nresults
     mp_obj_t f = mp_wasm_func_new(ctx->wasm, qstr_from_str(name));
     mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(ctx->py_mod)),
         MP_OBJ_NEW_QSTR(qstr_from_str(name)), f);
+    /* No aliasing possible on the auto-discovery path — same name both ways. */
+    pm_mod_thunk_export(ctx->wasm, ctx->pack_name, name, name);
 }
 
 // Logical module path length: strip host tags / extensions.
@@ -358,7 +363,31 @@ static void ensure_parent_packages(const char *full_name) {
             continue;
         }
         qstr parent = qstr_from_strn(full_name, i);
+        bool already_loaded = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
+            MP_OBJ_NEW_QSTR(parent), MP_MAP_LOOKUP) != NULL;
         mp_obj_t pmod = mp_obj_new_module(parent);
+        if (!already_loaded) {
+            // A dotted pack/example name whose first segment collides with a
+            // real built-in top-level package (e.g. "pymergetic") must not
+            // silently lose access to that real module's own submodules —
+            // seed the fresh writable shell with the builtin's attrs first,
+            // so both `import pymergetic.wasmmod` (real) and
+            // `import pymergetic.wasmmod_examples...` (pack tree) resolve
+            // through this one sys.modules entry from here on.
+            mp_obj_t real = mp_module_get_builtin(parent, false);
+            if (real == MP_OBJ_NULL) {
+                real = mp_module_get_builtin(parent, true);
+            }
+            if (real != MP_OBJ_NULL && real != pmod) {
+                mp_map_t *src = &mp_obj_module_get_globals(real)->map;
+                for (size_t j = 0; j < src->alloc; ++j) {
+                    if (src->table[j].key != MP_OBJ_NULL) {
+                        mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(pmod)),
+                            src->table[j].key, src->table[j].value);
+                    }
+                }
+            }
+        }
         // MicroPython packages use a str __path__ (not a list like CPython).
         mp_map_elem_t *el = mp_map_lookup(&mp_obj_module_get_globals(pmod)->map,
             MP_OBJ_NEW_QSTR(MP_QSTR___path__), MP_MAP_LOOKUP);
@@ -371,19 +400,29 @@ static void ensure_parent_packages(const char *full_name) {
 }
 
 static void link_module_to_parent(const char *dotted_name) {
-    const char *dot = strrchr(dotted_name, '.');
-    if (dot == NULL) {
-        return;
-    }
-    qstr qparent = qstr_from_strn(dotted_name, (size_t)(dot - dotted_name));
-    qstr qleaf = qstr_from_str(dot + 1);
-    mp_map_elem_t *pel = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
-        MP_OBJ_NEW_QSTR(qparent), MP_MAP_LOOKUP);
-    mp_map_elem_t *cel = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
-        MP_OBJ_NEW_QSTR(qstr_from_str(dotted_name)), MP_MAP_LOOKUP);
-    if (pel != NULL && cel != NULL && pel->value != MP_OBJ_NULL && cel->value != MP_OBJ_NULL) {
-        mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(pel->value)),
-            MP_OBJ_NEW_QSTR(qleaf), cel->value);
+    /* Link every component onto its parent so `import a.b.c as c` works.
+     * MicroPython resolves the `as` binding via attribute walk from the
+     * top-level package; sys.modules alone is not enough. */
+    size_t len = strlen(dotted_name);
+    for (size_t i = 0; i < len; ++i) {
+        if (dotted_name[i] != '.') {
+            continue;
+        }
+        const char *leaf_start = dotted_name + i + 1;
+        const char *next_dot = strchr(leaf_start, '.');
+        size_t leaf_len = next_dot != NULL ? (size_t)(next_dot - leaf_start) : strlen(leaf_start);
+        size_t child_len = i + 1 + leaf_len;
+        qstr qparent = qstr_from_strn(dotted_name, i);
+        qstr qleaf = qstr_from_strn(leaf_start, leaf_len);
+        qstr qchild = qstr_from_strn(dotted_name, child_len);
+        mp_map_elem_t *pel = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
+            MP_OBJ_NEW_QSTR(qparent), MP_MAP_LOOKUP);
+        mp_map_elem_t *cel = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
+            MP_OBJ_NEW_QSTR(qchild), MP_MAP_LOOKUP);
+        if (pel != NULL && cel != NULL && pel->value != MP_OBJ_NULL && cel->value != MP_OBJ_NULL) {
+            mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(pel->value)),
+                MP_OBJ_NEW_QSTR(qleaf), cel->value);
+        }
     }
 }
 
@@ -460,6 +499,23 @@ static mp_obj_t module_for_export_suffix(const char *pack_name, const char *suff
     return mod;
 }
 
+// Same dotted-name rule as module_for_export_suffix, but as a stable qstr
+// (interned) rather than a Python module object — this is the __pm_modules
+// key an [[exports]] module= route lands under, same as the face module.
+static qstr export_target_module_qstr(const char *pack_name, const char *suffix, uint16_t suffix_len) {
+    if (suffix_len == 0 || (suffix_len == 1 && suffix[0] == '.')) {
+        return qstr_from_str(pack_name);
+    }
+    vstr_t dotted;
+    vstr_init(&dotted, strlen(pack_name) + suffix_len + 2);
+    vstr_add_str(&dotted, pack_name);
+    vstr_add_char(&dotted, '.');
+    vstr_add_strn(&dotted, suffix, suffix_len);
+    qstr q = qstr_from_strn(dotted.buf, dotted.len);
+    vstr_clear(&dotted);
+    return q;
+}
+
 static void bind_pack_exports(mp_obj_t root, mp_pack_t *wmod, const char *pack_name, const mp_pack_manifest_t *info) {
     if (info != NULL && info->n_exports > 0) {
         for (uint32_t i = 0; i < info->n_exports; ++i) {
@@ -481,14 +537,22 @@ static void bind_pack_exports(mp_obj_t root, mp_pack_t *wmod, const char *pack_n
 
             mp_obj_t target = module_for_export_suffix(pack_name, ex->module, ex->module_len);
             mp_obj_t f = mp_wasm_func_new(wmod, qexport);
+            qstr qfunc = qstr_from_strn(ex->func, ex->func_len);
             mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(target)),
-                MP_OBJ_NEW_QSTR(qstr_from_strn(ex->func, ex->func_len)), f);
+                MP_OBJ_NEW_QSTR(qfunc), f);
             (void)root;
+
+            // export_name is the real wasm symbol (what mp_pack_func_types
+            // introspects / mp_pack_call_fn calls); func is the public
+            // name other code resolves via pm_mod_resolve_native — these
+            // only differ under a manifest module=/func!=export alias.
+            qstr qtarget = export_target_module_qstr(pack_name, ex->module, ex->module_len);
+            pm_mod_thunk_export(wmod, qstr_str(qtarget), qstr_str(qexport), qstr_str(qfunc));
         }
         return;
     }
     // No export table: bind all numeric exports on the pack root.
-    bind_ctx_t bctx = { .py_mod = root, .wasm = wmod };
+    bind_ctx_t bctx = { .py_mod = root, .wasm = wmod, .pack_name = pack_name };
     mp_pack_foreach_numeric_export(wmod, bind_export_cb, &bctx);
 }
 
@@ -499,6 +563,7 @@ static mp_obj_t finish_pack_after_load(mp_pack_t *wmod, const uint8_t *meta, uin
     (void)mp_pack_call0(wmod, "mp_pack_load", &lc, NULL, 0);
 
     qstr qpack = qstr_from_str(pack_name);
+    ensure_parent_packages(pack_name);
     mp_obj_t root = mp_obj_new_module(qpack);
     mp_obj_t wasm_obj = mp_wasm_wrap_loaded(wmod);
     ((mp_obj_pack_module_t *)MP_OBJ_TO_PTR(wasm_obj))->pack_name = qpack;
@@ -508,6 +573,22 @@ static mp_obj_t finish_pack_after_load(mp_pack_t *wmod, const uint8_t *meta, uin
     mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(root)),
         MP_OBJ_NEW_QSTR(MP_QSTR___path__),
         mp_obj_new_str(pack_name, strlen(pack_name)));
+    link_module_to_parent(pack_name);
+
+    /* µPy SoT: same publish path as resident muscles (container tag only here;
+     * export callables are bound below). */
+    {
+        pm_mod_container_t c = PM_MOD_WASM;
+        const char *kind = mp_pack_kind_str(wmod);
+        if (kind != NULL) {
+            if (strcmp(kind, "elf") == 0) {
+                c = PM_MOD_ELF;
+            } else if (strcmp(kind, "aot") == 0) {
+                c = PM_MOD_AOT;
+            }
+        }
+        (void)pm_mod_publish(pack_name, c, NULL, 0);
+    }
 
     mp_pack_manifest_t info;
     memset(&info, 0, sizeof(info));
@@ -634,6 +715,17 @@ static mp_obj_t load_closure_from_root(const char *root_name, const char *root_v
             root_obj = obj;
         }
     }
+
+    // Phase: pm_mod native wiring — must run after every node's embedded Python
+    // has executed (self-exports via wasm.export_py land in __pm_modules only
+    // during finish_pack_after_load above), so a pack's own/peer Python-backed
+    // imports resolve to a real native_fn instead of staying on the provisional
+    // wasm-to-wasm forward path.
+    for (uint32_t i = 0; i < cl.n_nodes; ++i) {
+        if (pm_mod_connect_guest(mods[i]) != PM_OK) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("pm_mod_connect_guest failed"));
+        }
+    }
     return root_obj;
 }
 
@@ -715,6 +807,11 @@ static mp_obj_t load_pack_from_parts(const uint8_t *code, uint32_t code_len,
             }
         }
         mp_obj_t root = finish_pack_after_load(wmod, bytes, blen, pack_name);
+        if (pm_mod_connect_guest(wmod) != PM_OK) {
+            MICROPY_WASM_FREE(code_owned);
+            MICROPY_WASM_FREE(meta_owned);
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("pm_mod_connect_guest failed"));
+        }
         MICROPY_WASM_FREE(code_owned);
         MICROPY_WASM_FREE(meta_owned);
         return root;
@@ -884,8 +981,12 @@ static mp_obj_t mod_wasm_load_pack(size_t n_args, const mp_obj_t *args) {
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_load_pack_obj, 1, 2, mod_wasm_load_pack);
 
-static mp_obj_t mod_wasm_unload(mp_obj_t name_in) {
-    const char *name = mp_obj_str_get_str(name_in);
+// Plain C entry point — unload by name without going through the Python
+// calling convention (mp_obj_t argument, mp_obj_t return). Native (host or
+// guest) callers can unload the same way they load, via mp_pack_load's
+// mirror. mod_wasm_unload below is now a thin Python-facing wrapper over
+// this exact same body.
+void mp_pack_unload_by_name(const char *name) {
     size_t nlen = strlen(name);
     mp_map_t *map = &MP_STATE_VM(mp_loaded_modules_dict).map;
 
@@ -896,6 +997,10 @@ static mp_obj_t mod_wasm_unload(mp_obj_t name_in) {
         if (w != NULL && mp_obj_is_type(w->value, (mp_obj_type_t *)&mp_type_pack_module)) {
             mp_obj_pack_module_t *wo = MP_OBJ_TO_PTR(w->value);
             if (wo->mod) {
+                // Free this pack's thunk slots before the handle they point
+                // at goes away — symmetric with thunk-guest-exports installing
+                // them right after load.
+                pm_mod_thunk_release_pack(wo->mod);
                 int32_t lc = 0;
                 (void)mp_pack_call0(wo->mod, "mp_pack_unload", &lc, NULL, 0);
             }
@@ -917,9 +1022,17 @@ static mp_obj_t mod_wasm_unload(mp_obj_t name_in) {
         }
     }
     for (size_t i = 0; i < nrem; ++i) {
+        /* Symmetric with load: same (name + every dotted submodule) set
+         * that just left sys.modules also leaves __pm_modules — no
+         * metadata record is allowed to outlive its face module. */
+        pm_mod_unpublish(qstr_str(MP_OBJ_QSTR_VALUE(keys[i])));
         mp_map_lookup(map, keys[i], MP_MAP_LOOKUP_REMOVE_IF_FOUND);
     }
     m_del(mp_obj_t, keys, map->alloc);
+}
+
+static mp_obj_t mod_wasm_unload(mp_obj_t name_in) {
+    mp_pack_unload_by_name(mp_obj_str_get_str(name_in));
     return mp_const_none;
 }
 MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_unload_obj, mod_wasm_unload);

@@ -1,5 +1,8 @@
 // QSTR definitions for wasmmod APIs (not a C header — QSTR_DEFS / makeqstrdata only).
 // Wired via ports/micropython/micropython.mk / .cmake.
+#ifndef Q
+#define Q(x)
+#endif
 
 Q(pymergetic)
 Q(pymergetic.wasmmod)
@@ -65,7 +68,9 @@ Q(host_package_name)
 Q(host_source)
 Q(host_set_self_image)
 Q(engine_source)
-# glue/pm_upy/lib (SRC_QSTR excludes glue/ — declare method names here)
+// Pack module attribute (forward.c / packload.c / source.c)
+Q(__pack__)
+// glue/pm_upy/lib (SRC_QSTR excludes glue/ — declare method names here)
 Q(socket)
 Q(connect)
 Q(bind)

@@ -35,3 +35,28 @@ pre {
   overflow: auto;
   border-radius: 4px;
 }
+.hint {
+  color: var(--muted);
+  margin: 0.35rem 0 0.75rem;
+}
+#reg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+#reg-table th,
+#reg-table td {
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+}
+#reg-table tr.gap td {
+  color: #d4a15c;
+}
+details {
+  margin-top: 1rem;
+}
+summary {
+  cursor: pointer;
+  color: var(--muted);
+}

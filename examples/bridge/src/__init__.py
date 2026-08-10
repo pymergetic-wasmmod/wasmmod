@@ -29,19 +29,29 @@ def ping():
 
 
 def ping_code():
-    """Int-returning pack Python for native→Py (call0_py)."""
+    """Int-returning pack Python for native→Py, callable by any guest."""
     return 8
+
+
+# Self-export: publish this pack's own ping_code as a native __pm_modules
+# entry so bridge.c/lib.rs can import it directly by (module, func) name —
+# same mechanism a host would use (wasm.export_py), just called by the pack
+# itself instead of by test setup code. No slot/name-string dispatch at call
+# time; resolved once when this module is first imported.
+import pymergetic.wasmmod as _wasm  # type: ignore[import-not-found]
+
+_wasm.export_py("pymergetic.wasmmod_examples.bridge", "ping_code", ping_code, 0)
 
 
 def via_native(x):
     """Python in the pack calling this pack's native export."""
-    import pymergetic.wasmmod_examples.bridge  # type: ignore[import-not-found]
+    import pymergetic.wasmmod_examples.bridge as bridge  # type: ignore[import-not-found]
     return bridge.via_rs(x)
 
 
 def via_native_rich(x):
     """Pack Python exercising richer numeric native exports."""
-    import pymergetic.wasmmod_examples.bridge  # type: ignore[import-not-found]
+    import pymergetic.wasmmod_examples.bridge as bridge  # type: ignore[import-not-found]
     i = bridge.via_i64(x)
     f = bridge.via_f32(1.5)
     d = bridge.scale_add_f64(2.0, 3.0, 0.5)

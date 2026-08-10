@@ -1,11 +1,46 @@
 """Route adapter: Inspect stubs → Microdot (framework-independent registry)."""
 
+import json
+
 from .stubs import ENDPOINT_STUBS, capabilities as make_capabilities, self_description
 
 try:
-    from microdot import Microdot
+    from pymergetic.metal.net.microdot import Microdot
 except ImportError:  # pragma: no cover — host tooling
     Microdot = None
+
+
+def _ledger_snapshot():
+    try:
+        from pymergetic.metal.reg import ledger_json
+
+        return json.loads(ledger_json())
+    except Exception:
+        return {
+            "schema": 1,
+            "method_count": 0,
+            "gap_count": 0,
+            "methods": [],
+            "note": "reg_ledger_unavailable",
+        }
+
+
+def _ledger_module(module):
+    try:
+        from pymergetic.metal.reg import ledger_module_json
+
+        return json.loads(ledger_module_json(module))
+    except Exception:
+        return {"error": "not_found", "module": module}
+
+
+def _ledger_method(module, func):
+    try:
+        from pymergetic.metal.reg import ledger_method_json
+
+        return json.loads(ledger_method_json(module, func))
+    except Exception:
+        return {"error": "not_found", "module": module, "func": func}
 
 
 class MicrodotAdapter:
@@ -38,6 +73,37 @@ class MicrodotAdapter:
         @app.get("/inspect/self")
         async def inspect_self(request):
             return adapter.self_desc()
+
+        @app.get("/inspect/reg")
+        async def inspect_reg(request):
+            return _ledger_snapshot()
+
+        @app.get("/inspect/reg/seats")
+        async def inspect_reg_seats(request):
+            try:
+                from pymergetic.metal.reg import seats_json
+
+                return json.loads(seats_json())
+            except Exception:
+                return {"error": "reg_seats_unavailable"}
+
+        # Static segment before <module> so "method" is not captured.
+        @app.get("/inspect/reg/method")
+        async def inspect_reg_method(request):
+            args = getattr(request, "args", None) or {}
+            module = args.get("module", "") if hasattr(args, "get") else ""
+            func = args.get("func", "") if hasattr(args, "get") else ""
+            if not module or not func:
+                return {"error": "need module and func query"}, 400
+            return _ledger_method(module, func)
+
+        @app.get("/inspect/reg/<module>")
+        async def inspect_reg_module(request, module):
+            return _ledger_module(module)
+
+        @app.get("/inspect/reg/<module>/<method>")
+        async def inspect_reg_method_path(request, module, method):
+            return _ledger_method(module, method)
 
         for method, path, implemented in ENDPOINT_STUBS:
             if implemented:

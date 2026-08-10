@@ -15,6 +15,18 @@ Columns: **C** · **Rust** (`pm::upy::ffi` / `pm::wasmmod::ffi` once bound) · *
 
 Errors: `PM_ERR_FEATURE` → Rust `FeatureError` → Python raise.
 
+### Module SoT (`pm_mod_*`)
+
+| C | Status |
+|---|--------|
+| `pm_mod_publish` | `ok` |
+| `pm_mod_export_set` | `ok` |
+| `pm_mod_resolve_native` | `ok` |
+| `pm_mod_connect_import` | `ok` |
+| `pm_mod_import_get` | `ok` |
+| `pm_mod_border_malloc` / `free` / `realloc` | `ok` |
+| `pm_mod_connect_guest` | `ok` |
+
 ### Guest imports
 
 | Module | Field | Host C | Status |
@@ -22,8 +34,6 @@ Errors: `PM_ERR_FEATURE` → Rust `FeatureError` → Python raise.
 | `micropython.runtime` | `features` | `pm_upy_features` | `ok` |
 | `micropython.runtime` | `has` | `pm_upy_has` | `ok` |
 | `micropython.runtime` | `ticks_ms` | `pm_upy_ticks_ms` | `ok` |
-| `wasmmod.host` | `call0_i32` | `host slot 0-arg` | `ok` |
-| `wasmmod.host` | `call_i32` | `pm_wasmmod_host_call_export_i32` | `ok` |
 | `wasmmod.host` | `mem_alloc` | `pm_wasmmod_mem_alloc` | `ok` |
 | `wasmmod.host` | `mem_free` | `pm_wasmmod_mem_free` | `ok` |
 | `wasmmod.host` | `mem_len` | `pm_wasmmod_mem_len` | `ok` |
@@ -98,14 +108,6 @@ Later runs: `rg '`missing`' include/SYMBOLS.md` (or filter Status column).
 | `pm_wasmmod_pack_mem_free` | `pm::wasmmod::pack::pack_mem_free` | `pack.memory_free` | — | `ok` | |
 | `pm_wasmmod_pack_mem_read` | `pm::wasmmod::pack::pack_mem_read` | `pack.memory_read` | — | `ok` | |
 | `pm_wasmmod_pack_mem_write` | `pm::wasmmod::pack::pack_mem_write` | `pack.memory_write` | — | `ok` | |
-
-## `pm_wasmmod/host/slots`
-
-| C | Rust | Python | Guest | Status | Notes |
-|---|------|--------|-------|--------|-------|
-| `pm_wasmmod_host_clear_all` | `pm::wasmmod::host::host_clear_all` | `wasm.host_clear` | — | `ok` | |
-| `pm_wasmmod_host_set_slot_c` | `pm::wasmmod::host::host_set_slot_c` | `wasm.host_set` | — | `ok` | |
-| `pm_wasmmod_host_slot_count` | `pm::wasmmod::host::host_slot_count` | — | — | `ok` | |
 
 ## `pm_wasmmod/host/cookie`
 

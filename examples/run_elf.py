@@ -22,19 +22,26 @@ assert u.__pack__ is p
 c = wasm.import_wasm(f"{EX}.client")
 assert c.use_hello() == 42
 assert c.__pack__.kind == "elf"
-wasm.host_set(0, lambda: 99)
+
+# Register every host callback hostcall.elf imports *before* loading it —
+# one plain named export each (wasm.export_py / wasm.export_py_bufptr /
+# wasm.export_py_mem), resolved once at load time. No slot number, no
+# rebinding after load (unlike the old wasm.host_set(0, ...) reassignment).
+wasm.export_py("hostcall.host", "host_const", lambda: 99, 0)
+wasm.export_py("hostcall.host", "host_double", lambda x: x * 3, 1)
+wasm.export_py_bufptr("hostcall.host", "host_len_buf", lambda b: len(b))
+wasm.export_py_mem("hostcall.host", "host_len_mem", lambda b: len(b))
+# Self-export: hand hello's face module a natively-callable "_elf_abs" —
+# same wasm.export_py path a pack uses to self-export its own Python (see
+# bridge/src/__init__.py), just invoked externally by test setup instead.
+wasm.export_py("pymergetic.wasmmod_examples.hello", "_elf_abs", abs, 1)
+
 hc = wasm.import_wasm(f"{EX}.hostcall")
 assert hc.via_host0() == 99
 assert hc.__pack__.kind == "elf" and hc.__pack__.name == f"{EX}.hostcall"
-wasm.host_set(0, lambda x: x * 3)
 assert hc.via_host(7) == 21
-wasm.host_set(0, lambda b: len(b))
 assert hc.via_buf() == 3
-wasm.host_set(0, lambda b: len(b))
 assert hc.via_mem() == 6
-import pymergetic.wasmmod_examples.hello as _h
-
-setattr(_h, "_elf_abs", abs)
 assert hc.via_py(-7) == 7
 assert hc.host_version_len() > 0
 tk = wasm.import_wasm(f"{EX}.ticks")

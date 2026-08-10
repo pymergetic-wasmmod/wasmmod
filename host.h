@@ -48,13 +48,6 @@ bool mp_wasm_host_register(void);
 void *mp_wasm_host_elf_lookup(const char *func);
 #endif
 
-// ---- Callable slots (guest → Python) ----
-
-void mp_wasm_host_clear_all(void);
-bool mp_wasm_host_set_slot(int32_t slot, mp_obj_t callable);
-mp_obj_t mp_wasm_host_get_slot(int32_t slot);
-size_t mp_wasm_host_slot_count(void);
-
 // ---- Host mem cookies (opaque i32; durable host heap, Metal-style) ----
 // 0 is never a valid cookie.
 

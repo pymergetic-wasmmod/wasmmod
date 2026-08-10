@@ -32,7 +32,10 @@
 
 #include "extmod/wasmmod/runtime.h"
 
-// Publish / withdraw a loaded instance for guest→guest resolution.
+// Publish / withdraw a loaded instance for guest→guest *call* wiring.
+// Module *identity* SoT is µPy sys.modules (see pm_mod.h / PACK.md).
+// This list is instance/lifecycle only — prefer mp_wasm_registry_find
+// which resolves via sys.modules["name"].__pack__ first.
 void mp_wasm_registry_add(mp_pack_t *mod);
 void mp_wasm_registry_remove(mp_pack_t *mod);
 mp_pack_t *mp_wasm_registry_find(const char *name);
@@ -42,6 +45,12 @@ mp_pack_t *mp_wasm_registry_find(const char *name);
 bool mp_wasm_register_forwarders(const uint8_t *wasm, uint32_t len, char *errbuf, size_t errbuf_len);
 
 // After peers are registry_add'd, ensure every guest MPWI target is present.
+// Peer may be a pack (__pack__ / instance list) or a __pm_modules native.
 bool mp_wasm_connect_imports(const uint8_t *wasm, uint32_t len, char *errbuf, size_t errbuf_len);
+
+// Full guest connect for a loaded pack: resolve each wasmmod.imports NEED
+// via pm_mod_resolve_native and/or pack registry; install native trampolines
+// for __pm_modules peers; fail if any peer is missing.
+bool mp_wasm_pm_connect_guest(mp_pack_t *pack, char *errbuf, size_t errbuf_len);
 
 #endif // MICROPY_INCLUDED_EXTMOD_WASMMOD_FORWARD_H

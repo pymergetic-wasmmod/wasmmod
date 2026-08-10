@@ -1,5 +1,6 @@
 # wasmmod OWN: freestanding WAMR (interp) for Metal.
 # Metal supplies platform GLUE includes + links the resulting .a.
+# Metal does not optionally stub this — boards that nest wamr_host link this.
 #
 # Required:
 #   WAMR_DIR          — path to WAMR tree (default: $(WASMMOD_DIR)/third_party/wamr)
@@ -11,14 +12,16 @@
 #   METAL_INCLUDE_INC — packages/metal/include
 #
 # Optional:
-#   UEFI=0|1          — Windows-gnu vs none-elf target (default 0)
+#   ARCH=x86_64|x86_32  — default x86_64
+#   UEFI=0|1            — Windows-gnu vs none-elf target (default 0)
 #   CC / AR
-#   WASMMOD_DIR       — this wasmmod root (auto from this mk location)
+#   WASMMOD_DIR         — this wasmmod root (auto from this mk location)
 #
 # Output: $(OUT_DIR)/libwasmmod_wamr_freestanding.a
 
 WASMMOD_DIR ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 WAMR_DIR ?= $(WASMMOD_DIR)/third_party/wamr
+ARCH ?= x86_64
 UEFI ?= 0
 # clang required for --target= (host CC=gcc breaks freestanding).
 CC := clang
@@ -32,6 +35,11 @@ $(error METAL_PLAT_INC is required)
 endif
 ifeq ($(wildcard $(WAMR_DIR)/core/iwasm/include/wasm_export.h),)
 $(error WAMR missing at $(WAMR_DIR) — wasmmod OWN third_party/wamr only)
+endif
+ifneq ($(ARCH),x86_64)
+ifneq ($(ARCH),x86_32)
+$(error ARCH must be x86_64 or x86_32 (got $(ARCH)))
+endif
 endif
 
 CORE := $(WAMR_DIR)/core
@@ -70,10 +78,30 @@ SRCS := \
 	$(IWASM)/interpreter/wasm_loader.c \
 	$(IWASM)/interpreter/wasm_runtime.c
 
+ifeq ($(ARCH),x86_32)
+# No mingw-ia32 trampoline in-tree; general C tramp works for both BIOS/UEFI.
+SRCS += $(IWASM)/common/arch/invokeNative_general.c
+BUILD_TARGET_FLAG := -DBUILD_TARGET_X86_32
+ifeq ($(UEFI),1)
+CLANG_TARGET := i686-unknown-windows-gnu
+UEFI_CFLAGS := -fshort-wchar -mno-mmx -mno-sse -mno-sse2
+else
+CLANG_TARGET := i686-unknown-none-elf
+UEFI_CFLAGS :=
+endif
+else
+BUILD_TARGET_FLAG := -DBUILD_TARGET_X86_64
 ifeq ($(UEFI),1)
 SRCS += $(IWASM)/common/arch/invokeNative_mingw_x64.s
+CLANG_TARGET := x86_64-unknown-windows-gnu
+UEFI_CFLAGS := -fshort-wchar -mno-red-zone -mno-mmx -mno-sse -mno-sse2
+CPPFLAGS_EXTRA := -DPM_METAL_WASM_TRAMP_WIN64
 else
 SRCS += $(IWASM)/common/arch/invokeNative_em64.s
+CLANG_TARGET := x86_64-unknown-none-elf
+UEFI_CFLAGS :=
+CPPFLAGS_EXTRA :=
+endif
 endif
 
 # Unique object names (WAMR-relative path with / → _).
@@ -94,7 +122,7 @@ CPPFLAGS := \
 	-I$(SHARED)/utils/uncommon \
 	-I$(CORE) \
 	-DBH_PLATFORM_METAL \
-	-DBUILD_TARGET_X86_64 \
+	$(BUILD_TARGET_FLAG) \
 	-DWASM_ENABLE_INTERP=1 \
 	-DWASM_ENABLE_FAST_INTERP=1 \
 	-DWASM_ENABLE_AOT=0 \
@@ -110,7 +138,8 @@ CPPFLAGS := \
 	-DWASM_DISABLE_STACK_HW_BOUND_CHECK=1 \
 	-DWASM_ENABLE_BULK_MEMORY=1 \
 	-DBH_MALLOC=wasm_runtime_malloc \
-	-DBH_FREE=wasm_runtime_free
+	-DBH_FREE=wasm_runtime_free \
+	$(CPPFLAGS_EXTRA)
 
 CFLAGS := \
 	-std=c11 -O2 \
@@ -122,18 +151,13 @@ CFLAGS := \
 	-Wno-sign-compare \
 	-Wno-missing-field-initializers \
 	-Wno-format \
-	-U__linux__ -Ulinux -U__gnu_linux__
+	-Wno-unused-command-line-argument \
+	-U__linux__ -Ulinux -U__gnu_linux__ \
+	--target=$(CLANG_TARGET) \
+	$(UEFI_CFLAGS)
 
-ifeq ($(UEFI),1)
-CFLAGS += \
-	--target=x86_64-unknown-windows-gnu \
-	-fshort-wchar \
-	-mno-red-zone \
-	-mno-mmx -mno-sse -mno-sse2
-CPPFLAGS += -DPM_METAL_WASM_TRAMP_WIN64
-else
-CFLAGS += --target=x86_64-unknown-none-elf
-endif
+# Asm trampolines: do not pass C -D/-I (clang spam: argument unused).
+ASFLAGS := --target=$(CLANG_TARGET)
 
 .PHONY: all
 all: $(LIB)
@@ -145,7 +169,11 @@ $(LIB): $(OBJS)
 define COMPILE_one
 $(OBJDIR)/$(subst /,_,$(subst $(WAMR_DIR)/,,$(1))).o: $(1)
 	@mkdir -p $$(dir $$@)
+ifeq ($(suffix $(1)),.s)
+	$$(CC) $$(ASFLAGS) -c $$< -o $$@
+else
 	$$(CC) $$(CPPFLAGS) $$(CFLAGS) -c $$< -o $$@
+endif
 endef
 $(foreach s,$(SRCS),$(eval $(call COMPILE_one,$(s))))
 
