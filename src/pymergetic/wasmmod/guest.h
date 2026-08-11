@@ -5,6 +5,9 @@
  *
  * Copyright (c) 2026 Rouven Raudzus <raudzus@pymergetic.com>
  *
+ * pymergetic.wasmmod.guest — umbrella header (path == module).
+ * Guests: #include "src/pymergetic/wasmmod/guest.h" with -I = crate root.
+ *
  * Guest pack ABI macros (Wasm / AOT-as-Wasm / ELF).
  *
  * PM_WASMMOD_GUEST:

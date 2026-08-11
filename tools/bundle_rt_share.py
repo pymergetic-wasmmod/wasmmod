@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Populate python/pymergetic/wasmmod/rt/share/ for a release build.
+"""Populate src/pymergetic/wasmmod/rt/share/ for a release build.
 
 Copies the *tracked* (``git ls-files``) contents of a curated set of
 top-level dirs/files into the wheel's bundled source tree, so
@@ -9,6 +9,8 @@ recognizes (see ``pymergetic.wasmmod.rt``). Deliberately excludes
 from a bundled tree isn't the point here; packing/inspecting Wasm guests
 against the reference examples is) and dev-only dirs (``dev/``, ``tools/``,
 tests, CI).
+
+Share lives under the unified ``src/`` tree (no parallel ``python/``).
 
 Run from anywhere; always resolves paths relative to this script's repo.
 
@@ -28,7 +30,6 @@ BUNDLED_TOP_LEVEL = (
     "Cargo.lock",
     "src",
     "examples",
-    "include",
     "docs",
 )
 
@@ -38,7 +39,7 @@ def repo_root() -> Path:
 
 
 def share_dir() -> Path:
-    return repo_root() / "python" / "pymergetic" / "wasmmod" / "rt" / "share"
+    return repo_root() / "src" / "pymergetic" / "wasmmod" / "rt" / "share"
 
 
 def tracked_files(root: Path, top_level: tuple[str, ...]) -> list[str]:
@@ -49,7 +50,9 @@ def tracked_files(root: Path, top_level: tuple[str, ...]) -> list[str]:
         capture_output=True,
         text=True,
     ).stdout
-    return [line for line in out.splitlines() if line]
+    # Never nest the generated share tree into itself.
+    skip_prefix = "src/pymergetic/wasmmod/rt/share/"
+    return [line for line in out.splitlines() if line and not line.startswith(skip_prefix)]
 
 
 def main() -> int:

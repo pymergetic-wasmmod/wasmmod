@@ -26,7 +26,7 @@
 
 /* Minimal freestanding WASM guest for MicroPython's wasm module. */
 
-#include "pm_guest.h"
+#include "src/pymergetic/wasmmod/guest.h"
 
 int hello(void) {
     return 42;

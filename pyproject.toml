@@ -2,7 +2,7 @@
 name = "pymergetic-wasmmod"
 dynamic = ["version"]
 description = "wasmmod — tools + bundled source tree in one install (native runtime is the sibling Rust crate, consumed via Cargo)"
-readme = "README.md"
+readme = "docs/PYPI.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Rouven Raudzus", email = "raudzus@pymergetic.com" }]
@@ -18,19 +18,21 @@ Documentation = "https://github.com/pymergetic-wasmmod/wasmmod#readme"
 requires = ["setuptools>=68", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
+# Only ship pymergetic.wasmmod.rt from the unified src/ tree — not the
+# guest-tree __init__.py / C / Rust under src/pymergetic/wasmmod/ (those
+# stay checkout/Cargo material). Parents stay PEP 420 namespaces.
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["pymergetic*"]
+where = ["src"]
+include = ["pymergetic.wasmmod.rt*"]
 namespaces = true
 
 [tool.setuptools.package-data]
 "pymergetic.wasmmod.rt" = ["py.typed", "share/**/*"]
 
 [tool.setuptools_scm]
-# pyproject lives in python/; git root is the parent repo.
-root = ".."
+root = "."
 search_parent_directories = false
-version_file = "pymergetic/wasmmod/rt/_version.py"
+version_file = "src/pymergetic/wasmmod/rt/_version.py"
 fallback_version = "0.2.0a1"
 
 [tool.ruff]
