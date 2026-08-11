@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "src/pymergetic/util/zlib/__types__.h"
+#include "src/pymergetic/util/zlib/__types__.h" // IWYU pragma: keep — ERR_* codes are part of this face
 
 #ifdef __cplusplus
 extern "C" {

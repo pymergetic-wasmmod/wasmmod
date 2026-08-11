@@ -59,6 +59,46 @@ pub struct pm_wasmmod_registry_handle_t {
 
 const INVALID_HANDLE: pm_wasmmod_registry_handle_t = pm_wasmmod_registry_handle_t { index: u32::MAX, generation: 0 };
 
+/// The four primitive shapes a value crossing a container boundary can
+/// be — deliberately the same four as wasm's own core value types
+/// (WAMR's own `wasm_val_t` uses this exact kind+union shape), not a
+/// separate encoding invented for the registry. See `__types__.h`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum pm_wasmmod_registry_valkind_t {
+    I32 = 0,
+    I64 = 1,
+    F32 = 2,
+    F64 = 3,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union pm_wasmmod_registry_value_of_t {
+    pub i32: i32,
+    pub i64: i64,
+    pub f32: f32,
+    pub f64: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct pm_wasmmod_registry_value_t {
+    pub kind: pm_wasmmod_registry_valkind_t,
+    pub of: pm_wasmmod_registry_value_of_t,
+}
+
+/// The fixed prototype every cross-container `Fn` export conforms to
+/// once resolved via `resolve_native`/`pm_wasmmod_registry_call`.
+/// Same-artifact native-to-native calls never go through this — those
+/// stay a direct, really-typed function pointer via `connect_import`.
+pub type pm_wasmmod_registry_fn_t = unsafe extern "C" fn(
+    args: *const pm_wasmmod_registry_value_t,
+    nargs: u32,
+    results: *mut pm_wasmmod_registry_value_t,
+    nresults: u32,
+) -> i32;
+
 struct Export {
     name: String,
     kind: pm_wasmmod_registry_export_kind_t,
@@ -274,6 +314,34 @@ pub unsafe extern "C" fn pm_wasmmod_registry_connect_import(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_call(
+    fqn_ptr: *const u8,
+    fqn_len: u32,
+    export_name_ptr: *const u8,
+    export_name_len: u32,
+    args: *const pm_wasmmod_registry_value_t,
+    nargs: u32,
+    results: *mut pm_wasmmod_registry_value_t,
+    nresults: u32,
+) -> i32 {
+    let (Some(fqn), Some(export_name)) =
+        (str_from_raw(fqn_ptr, fqn_len), str_from_raw(export_name_ptr, export_name_len))
+    else {
+        return -1;
+    };
+    let ptr = TABLE.lock().resolve_native(fqn, export_name);
+    if ptr.is_null() {
+        return -1;
+    }
+    // SAFETY: every ptr stored under PM_WASMMOD_REGISTRY_EXPORT_FN is
+    // contracted (by whoever called export_set — the loader, for wasm
+    // exports) to be a pm_wasmmod_registry_fn_t. The registry itself
+    // never calls through a ptr of any other export kind.
+    let f: pm_wasmmod_registry_fn_t = unsafe { core::mem::transmute(ptr) };
+    unsafe { f(args, nargs, results, nresults) }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn pm_wasmmod_registry_gc_visit(visit: extern "C" fn(*mut c_void, *mut c_void), ctx: *mut c_void) {
     TABLE.lock().gc_visit(visit, ctx);
 }
@@ -315,11 +383,84 @@ mod tests {
     }
 
     #[test]
+    fn call_roundtrips_through_the_fn_t_convention() {
+        unsafe extern "C" fn add_one(
+            args: *const pm_wasmmod_registry_value_t,
+            nargs: u32,
+            results: *mut pm_wasmmod_registry_value_t,
+            nresults: u32,
+        ) -> i32 {
+            assert_eq!(nargs, 1);
+            assert_eq!(nresults, 1);
+            let arg = unsafe { &*args };
+            let sum = unsafe { arg.of.i32 } + 1;
+            unsafe {
+                (*results).kind = pm_wasmmod_registry_valkind_t::I32;
+                (*results).of.i32 = sum;
+            }
+            0
+        }
+
+        let handle = publish("test.call", pm_wasmmod_registry_container_kind_t::Resident);
+        assert!(TABLE.lock().export_set(
+            handle,
+            "add_one",
+            pm_wasmmod_registry_export_kind_t::Fn,
+            add_one as *mut c_void,
+        ));
+
+        let arg = pm_wasmmod_registry_value_t {
+            kind: pm_wasmmod_registry_valkind_t::I32,
+            of: pm_wasmmod_registry_value_of_t { i32: 41 },
+        };
+        let mut result = pm_wasmmod_registry_value_t {
+            kind: pm_wasmmod_registry_valkind_t::I32,
+            of: pm_wasmmod_registry_value_of_t { i32: 0 },
+        };
+        let status = unsafe {
+            pm_wasmmod_registry_call(
+                "test.call".as_ptr(),
+                "test.call".len() as u32,
+                "add_one".as_ptr(),
+                "add_one".len() as u32,
+                &arg,
+                1,
+                &mut result,
+                1,
+            )
+        };
+        assert_eq!(status, 0);
+        assert_eq!(unsafe { result.of.i32 }, 42);
+    }
+
+    #[test]
+    fn call_is_negative_one_for_unknown_module_or_export() {
+        let status = unsafe {
+            pm_wasmmod_registry_call(
+                "test.call_missing".as_ptr(),
+                "test.call_missing".len() as u32,
+                "f".as_ptr(),
+                1,
+                core::ptr::null(),
+                0,
+                core::ptr::null_mut(),
+                0,
+            )
+        };
+        assert_eq!(status, -1);
+    }
+
+    #[test]
     fn gc_visit_only_sees_live_obj_exports() {
         let handle = publish("test.gc", pm_wasmmod_registry_container_kind_t::Resident);
         let token = 0x9999usize as *mut c_void;
         assert!(TABLE.lock().export_set(handle, "o", pm_wasmmod_registry_export_kind_t::Obj, token));
-        assert!(TABLE.lock().export_set(handle, "f", pm_wasmmod_registry_export_kind_t::Fn, 0x1 as *mut c_void));
+        assert!(TABLE.lock().export_set(
+            handle,
+            "f",
+            pm_wasmmod_registry_export_kind_t::Fn,
+            std::ptr::dangling_mut::<c_void>()
+        ));
 
         // No static needed: `ctx` is exactly for this — a caller-owned
         // pointer round-tripped back into the callback, here a `Vec` the

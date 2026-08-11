@@ -8,3 +8,11 @@ description = "wasmmod: the pm_mod registry, wasm/aot/elf containers, and the py
 [lib]
 name = "pymergetic_wasmmod"
 path = "src/lib.rs"
+
+# build.rs's job: compile pymergetic.util.mem's C impl (+ vendored TLSF) and
+# build WAMR's `vmlib` (third_party/wamr) as a static lib for
+# pymergetic.wasmmod.loader to link against. Neither pm_util_mem's C nor
+# WAMR is otherwise part of a normal `cargo build` — see build.rs.
+[build-dependencies]
+cc = "1"
+cmake = "0.1"

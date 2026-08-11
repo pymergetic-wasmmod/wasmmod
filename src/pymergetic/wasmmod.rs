@@ -6,3 +6,6 @@
 //! independent of what this node's own `impl` is.
 #[path = "wasmmod/registry.rs"]
 pub mod registry;
+
+#[path = "wasmmod/loader.rs"]
+pub mod loader;

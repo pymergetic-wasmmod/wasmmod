@@ -30,6 +30,12 @@ pub struct pm_util_lock_t {
     locked: AtomicU32,
 }
 
+impl Default for pm_util_lock_t {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl pm_util_lock_t {
     pub const fn new() -> Self {
         Self { locked: AtomicU32::new(UNLOCKED) }

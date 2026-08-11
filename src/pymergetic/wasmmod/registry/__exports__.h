@@ -55,6 +55,16 @@ int32_t pm_wasmmod_registry_connect_import(const uint8_t *fqn_ptr, uint32_t fqn_
     const uint8_t *export_name_ptr, uint32_t export_name_len,
     void **out_slot);
 
+/* Resolve + call in one step, using the pm_wasmmod_registry_fn_t
+ * convention (see __types__.h). Returns -1 if the module/export isn't
+ * found; otherwise whatever the resolved function itself returns. This
+ * is the one call path every cross-container Fn export is reached
+ * through — the loader's claimed wasm trampolines today. */
+int32_t pm_wasmmod_registry_call(const uint8_t *fqn_ptr, uint32_t fqn_len,
+    const uint8_t *export_name_ptr, uint32_t export_name_len,
+    const pm_wasmmod_registry_value_t *args, uint32_t nargs,
+    pm_wasmmod_registry_value_t *results, uint32_t nresults);
+
 /* Calls `visit(token, ctx)` once per live PM_WASMMOD_REGISTRY_EXPORT_OBJ export's token,
  * while the table's internal lock is held. The registry never
  * interprets the token itself — it's an opaque void* end to end;

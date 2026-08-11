@@ -56,6 +56,127 @@ cares about unload being symmetric and correct.
   — the "soft connect" pattern: resolve once at load/link time, cache
   into a slot, reuse the slot afterward instead of re-resolving by name
   on every call.
+- `pm_wasmmod_registry_call(fqn, export_name, args, nargs, results, nresults) -> int32_t`
+  — resolve + call in one step against the `Value` convention below;
+  the one path a cross-container `Fn` export is reached through.
+
+## Value convention
+
+`resolve_native`/`export_set` never changed shape for this — they still
+hand back/store a bare `void*`. What's new is a **documented contract**
+every cross-container `Fn` export's `ptr` must conform to once it's
+genuinely reached across a container boundary (today: the loader's
+claimed wasm trampolines; later: elf/aot), so a caller on the other end
+of `resolve_native` has something uniform to call through no matter
+which impl language or container produced the export:
+
+```c
+typedef enum {
+    PM_WASMMOD_REGISTRY_VALKIND_I32 = 0,
+    PM_WASMMOD_REGISTRY_VALKIND_I64 = 1,
+    PM_WASMMOD_REGISTRY_VALKIND_F32 = 2,
+    PM_WASMMOD_REGISTRY_VALKIND_F64 = 3,
+} pm_wasmmod_registry_valkind_t;
+
+typedef struct {
+    pm_wasmmod_registry_valkind_t kind;
+    union { int32_t i32; int64_t i64; float f32; double f64; } of;
+} pm_wasmmod_registry_value_t;
+
+typedef int32_t (*pm_wasmmod_registry_fn_t)(const pm_wasmmod_registry_value_t *args, uint32_t nargs,
+    pm_wasmmod_registry_value_t *results, uint32_t nresults);
+```
+
+Deliberately the same four primitive kinds as wasm's own core value
+types — WAMR's own `wasm_val_t` uses this exact kind+union shape, so the
+loader's trampolines build/read these directly against WAMR's call API
+with no translation step at the one boundary (host↔wasm) where it would
+actually cost something. Same-artifact native-to-native calls **never**
+go through this: those stay a direct, really-typed function pointer via
+`connect_import`, exactly as before — the `Value` convention only exists
+for the genuinely cross-container/dynamic case.
+
+`pm_wasmmod_registry_call(fqn, export_name, args, nargs, results, nresults) -> int32_t`
+is resolve+call in one step against this convention: `-1` if the
+module/export isn't found, otherwise whatever the resolved function
+itself returns (by convention, `0` == success). This is the one call
+path a `Fn` export claimed by the loader is ever reached through from
+outside `wasmmod`.
+
+## The loader: WAMR, and buffer/string marshaling
+
+`pymergetic.wasmmod.loader` is the one module in this tree that knows
+WAMR (`third_party/wamr`) exists — the registry itself never does, and
+never will; every other module reaches wasm only through
+`resolve_native`/`pm_wasmmod_registry_call`.
+
+**Load path:** `wasm_runtime_get_file_package_type` (real detection —
+sniffs the buffer's own magic number for `.wasm` vs `.aot`, so
+`publish`'s container kind is never a hardcoded guess) → `wasm_runtime_load`
+→ `wasm_runtime_instantiate` → `wasm_runtime_attach_shared_heap` →
+`wasm_runtime_create_exec_env` → enumerate exports via
+`wasm_runtime_get_export_count`/`get_export_type` straight from the
+loaded module binary (no manifest duplication, same "source is truth"
+rule as every other face in this tree) → for each `Fn` export,
+`wasm_runtime_lookup_function` + claim one slot from a small fixed pool
+of hand-written trampoline adapters + `pm_wasmmod_registry_publish`/
+`_export_set`. `pm_wasmmod_loader_load` returns a
+`pm_wasmmod_registry_handle_t` directly — a loaded module *is* one
+registry entry, there's no separate "loader handle" to keep in sync
+with it.
+
+**AOT is a real, proven container kind, not just a reserved enum
+value.** `wasm_runtime_load`/`instantiate`/`call_wasm_a` are the exact
+same calls for both `.wasm` bytecode and `.aot` — WAMR dispatches
+internally, so nothing else about the load path above branches on
+which kind it is; only the `publish` call's container argument does.
+Proven end-to-end against a real `.aot` file compiled at test-time by
+`wamrc` (WAMR's own AOT compiler, built by `build.rs` against the
+*system* LLVM — see `SOURCETREE.md`'s decision log), not a hand-rolled
+byte array — unlike the `.wasm` fixture, AOT's compiled-native-code
+format isn't something to hand-assemble byte-for-byte.
+
+**Trampoline adapters.** A bare C function pointer can't close over
+*which* wasm instance/function it should call — so instead of one
+generic trampoline, the loader hand-writes a small fixed pool (8 today)
+of distinct `extern "C" fn` addresses sharing one identical body
+(convert incoming `Value`s to WAMR's `wasm_val_t`s, call
+`wasm_runtime_call_wasm_a`, convert results back). "Claim a slot" means
+handing out one of those addresses and recording which `exec_env`/
+function it now means, in a slot-indexed side table — until `unload`
+releases it back to the pool. What's genuinely per-export is the *slot
+assignment*, not the logic; a macro generates the N addresses, it isn't
+N different implementations.
+
+**Buffer/string marshaling: WAMR shared heap**, backed by one
+`pymergetic.util.mem` arena reserved once at `pm_wasmmod_loader_init`:
+a `Box<[u8]>` (ordinary `alloc`, never freed — this is a once-per-process
+reservation) gives `pm_util_mem_arena_create` its backing bytes; the
+actual shared-heap block is then carved out of that arena via
+`pm_util_mem_alloc` and handed to `wasm_runtime_create_shared_heap` as
+`SharedHeapInitArgs::pre_allocated_addr`. Every loaded instance attaches
+the same heap (`wasm_runtime_attach_shared_heap`); WAMR's own
+`wasm_runtime_shared_heap_malloc`/`_free` do the per-call
+sub-allocation inside that one reserved block — `pymergetic.util.mem`'s
+job here is only "reserve the fixed-size backing block once", not
+per-call allocation.
+
+**Callable from any thread.** Every adapter call starts with an
+unconditional `wasm_runtime_init_thread_env()` — `wasm_runtime_init()`
+only sets up WAMR's hardware-bound-check signal env for the one OS
+thread that called it, so a *different* thread later calling through
+`pm_wasmmod_registry_call` would otherwise fail with `"thread signal
+env not inited"`. This is a thread-local idempotent check on WAMR's own
+side, not a real per-call re-init cost — found the hard way, via a
+genuinely flaky (not one-off) `cargo test --lib` before this was added.
+
+**Unload path:** `pm_wasmmod_registry_unpublish` (stale handles rejected
+here, before touching anything WAMR-side) → release every adapter slot
+the module's exports had claimed → `wasm_runtime_destroy_exec_env` →
+`wasm_runtime_detach_shared_heap` → `wasm_runtime_deinstantiate` →
+`wasm_runtime_unload`. The same teardown sequence is also the rollback
+path for a `load()` that fails partway through — never a half-published
+module left behind.
 
 ## GC and the `obj` export kind
 
@@ -84,12 +205,27 @@ nothing about deferring the *attachment* required deferring the *shape*.
 ## What v1 deliberately doesn't do yet
 
 - No per-entry fine-grained locking (single table-wide lock only).
-- No thunk/trampoline generation — that's `pymergetic.wasmmod.thunk`'s job,
-  built on top of `resolve_native`/`connect_import`, not inside the
-  registry itself.
-- No pack/container parsing — `pymergetic.wasmmod.pack.format.*` publishes
-  into this table, the registry doesn't know wasm/elf/aot exist as file
-  formats.
+- No *generic*, engine-agnostic thunk/codegen story — that's still
+  `pymergetic.wasmmod.thunk`'s eventual job, if/when a second engine
+  needs one. What exists today (the loader's small fixed adapter pool)
+  is WAMR-specific plumbing that belongs with the module that owns
+  WAMR, not a preview of that generic story.
+- No pack/container parsing beyond what the loader itself does for wasm
+  — `pymergetic.wasmmod.pack.format.*` (elf/aot) still needs to publish
+  into this table the same way; the registry doesn't know any container
+  format exists, wasm included.
+- No ELF container support in the loader yet. AOT *is* supported
+  (interpreter + AOT both on in `vmlib`, real container-kind detection
+  at load time, proven against a `wamrc`-compiled fixture) — see the
+  decision log.
+- No fast-jit. Not a scope choice — WAMR's own build system rejects
+  `WAMR_BUILD_SHARED_HEAP=1` + `WAMR_BUILD_FAST_JIT=1` together, and
+  shared heap is load-bearing for this loader. Root cause (see
+  `SOURCETREE.md`'s decision log): fast-jit's own codegen
+  (`core/iwasm/fast-jit/fe/jit_emit_memory.c`) never learned the
+  shared-heap address-translation rule that both interpreters and AOT's
+  LLVM-IR codegen have — a real upstream gap, not fixable from our side
+  without patching vendored WAMR's own JIT backend.
 - No `MICROPY_WASM_MALLOC`/TLSF wiring for the table's own storage — it
   uses whatever global allocator the crate is built against; a
   wasmmod-standalone build and a metal build get this for free from the
@@ -104,3 +240,6 @@ nothing about deferring the *attachment* required deferring the *shape*.
 | 2026-08-11 | Concurrency: real lock required (multithreaded + cooperative expected), backed by reactivated `pymergetic.util.lock` (`Mutex<T>` == `SpinLock<T>`, pure spin, no OS blocking call) |
 | 2026-08-11 | Handles are index + generation, by value, never a pointer — stale-after-unpublish is a checked error, never a silent alias |
 | 2026-08-11 | `Obj` export kind + GC support included in v1, not deferred — registry stays GC-agnostic (opaque `void*` token, one `pm_wasmmod_registry_gc_visit` callback hook) while being GC-*compatible* by construction, so `wasmmod` never links against MicroPython yet upstream attachment still gets a correct root set |
+| 2026-08-11 | Added the `Value`/`pm_wasmmod_registry_fn_t` convention + `pm_wasmmod_registry_call` resolve+call helper — reused WAMR's own `wasm_val_t` kind+union shape rather than inventing a parallel one, since the loader's trampolines build/read these directly against WAMR's call API |
+| 2026-08-11 | `pymergetic.wasmmod.loader` added — WAMR-backed, first "wasm actually running" milestone: load → instantiate → attach shared heap → enumerate exports → claim adapter → publish, proven end-to-end against a hand-assembled `.wasm` fixture in the loader's own tests. See `SOURCETREE.md`'s decision log for the build-system/WAMR-flags/shared-heap-sizing details this session also settled |
+| 2026-08-11 | AOT enabled (`WAMR_BUILD_AOT=1` in `vmlib`, real `wasm_runtime_get_file_package_type` detection replacing the loader's hardcoded `Wasm` container kind) and proven end-to-end against a real `wamrc`-compiled `.aot` file. Fast-jit was attempted in the same pass and dropped — WAMR 2.4.3 hard-rejects `SHARED_HEAP=1` + `FAST_JIT=1` at configure time; traced the root cause to fast-jit's codegen never having learned the shared-heap address-translation rule the interpreters and AOT's LLVM-IR codegen both have. See `SOURCETREE.md`'s decision log for the full build-system/investigation details |

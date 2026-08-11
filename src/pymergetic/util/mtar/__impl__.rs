@@ -167,8 +167,8 @@ mod tests {
         let size_oct = format!("{:011o}\0", size);
         h[SIZE_OFF..SIZE_OFF + size_oct.len()].copy_from_slice(size_oct.as_bytes());
         h[TYPEFLAG_OFF] = typeflag;
-        for i in CHKSUM_OFF..CHKSUM_OFF + CHKSUM_LEN {
-            h[i] = b' ';
+        for b in h.iter_mut().skip(CHKSUM_OFF).take(CHKSUM_LEN) {
+            *b = b' ';
         }
         let mut sum: u64 = 0;
         for &b in h.iter() {

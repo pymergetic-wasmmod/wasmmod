@@ -43,6 +43,42 @@ typedef struct {
     uint32_t generation;
 } pm_wasmmod_registry_handle_t;
 
+/* The four primitive shapes a value crossing a container boundary can
+ * be — deliberately the same four as wasm's own core value types
+ * (WAMR's own wasm_val_t uses this exact kind+union shape), not a
+ * separate encoding invented for the registry: the loader's wasm
+ * trampolines build/read these directly against WAMR's call API, no
+ * translation step at the one boundary where it would actually cost
+ * something. See docs/REGISTRY.md "Value convention". */
+typedef enum {
+    PM_WASMMOD_REGISTRY_VALKIND_I32 = 0,
+    PM_WASMMOD_REGISTRY_VALKIND_I64 = 1,
+    PM_WASMMOD_REGISTRY_VALKIND_F32 = 2,
+    PM_WASMMOD_REGISTRY_VALKIND_F64 = 3,
+} pm_wasmmod_registry_valkind_t;
+
+typedef struct {
+    pm_wasmmod_registry_valkind_t kind;
+    union {
+        int32_t i32;
+        int64_t i64;
+        float f32;
+        double f64;
+    } of;
+} pm_wasmmod_registry_value_t;
+
+/* The fixed prototype every cross-container `Fn` export conforms to
+ * once resolved via pm_wasmmod_registry_resolve_native — args in,
+ * results out, i32 status (0 == ok, matching every other status return
+ * in this module). Same-artifact native-to-native calls never go
+ * through this: those stay a direct, really-typed function pointer
+ * resolved once via pm_wasmmod_registry_connect_import (see
+ * SOURCETREE.md "Same-artifact cross-module calls"). This is only for
+ * the genuinely cross-container case — today the loader's claimed wasm
+ * trampolines, later elf/aot. */
+typedef int32_t (*pm_wasmmod_registry_fn_t)(const pm_wasmmod_registry_value_t *args, uint32_t nargs,
+    pm_wasmmod_registry_value_t *results, uint32_t nresults);
+
 #ifdef __cplusplus
 }
 #endif
