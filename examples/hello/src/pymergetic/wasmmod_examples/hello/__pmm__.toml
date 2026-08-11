@@ -1,0 +1,30 @@
+# Module card (see ../../../../../../docs/SOURCETREE.md "Schema reference").
+#
+# fqn is always first: path == module is a checked assertion, not just a
+# convention — pmm-parser hard-errors if this disagrees with the real path
+# (src/pymergetic/wasmmod_examples/hello).
+
+fqn = "pymergetic.wasmmod_examples.hello"
+impl = "c"
+build = ["wasm"]
+version = "0.1.0"
+
+# mount is data-plane only: the pack's Python-visible surface (__init__.py +
+# util/) lives in a sibling ../../../../mount/ dir, not under this fqn-anchored
+# src/ tree — it's embedded pack payload, not a node in the fqn/impl tree, so
+# it's exempt from "one defining lang" even though this card is impl = "c".
+[build_cfg]
+mount = "mount"
+keep_source = true
+# TESTING: all bytecode targets enabled (trim / set freeze=false later).
+freeze = true
+targets = [
+  "upy:mpy6:sib31",
+  "upy:mpy6:sib63",
+  "cpy:cp312",
+  "cpy:cp313",
+  "cpy:cp314",
+]
+embed_source = true
+compress_source = true
+compress_pack = true

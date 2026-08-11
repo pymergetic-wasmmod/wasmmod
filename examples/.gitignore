@@ -1,0 +1,8 @@
+# Pack build outputs (rebuild with: make -C hello)
+*.wasm
+*.aot
+*.elf
+*.mpack
+*.sig
+*.crt
+.*.o

@@ -796,6 +796,107 @@ mod tests {
         assert_eq!(status_after_unload, -1);
     }
 
+    /// Packs `examples/hello` for real via the new `*.pmm.toml`-based packer
+    /// (`dev/tools/src/pymergetic/wasmmod/tools/pack.py` + `pmm.py` +
+    /// `faces.py`) and returns the resulting `.wasm` bytes. Panics with the
+    /// packer's own stderr on failure — same "surface real regressions, no
+    /// silent skip" stance as `compile_to_aot`.
+    fn pack_hello_example() -> Vec<u8> {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let tools_src = manifest_dir.join("dev/tools/src");
+        let card_dir = manifest_dir.join("examples/hello/src/pymergetic/wasmmod_examples/hello");
+
+        let pid = std::process::id();
+        let out_path = std::env::temp_dir().join(alloc::format!("pm_wasmmod_pmm_pack_test_{pid}.wasm"));
+
+        let output = std::process::Command::new("python3")
+            .arg("-m")
+            .arg("pymergetic.wasmmod.tools")
+            .arg("pack")
+            .arg(&card_dir)
+            .arg("-o")
+            .arg(&out_path)
+            .env("PYTHONPATH", &tools_src)
+            .output()
+            .expect("spawn python3 -m pymergetic.wasmmod.tools (dev/tools packer)");
+        assert!(
+            output.status.success(),
+            "pmm packer failed to build examples/hello: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let wasm_bytes = std::fs::read(&out_path).expect("read packer's .wasm output");
+        let _ = std::fs::remove_file(&out_path);
+        wasm_bytes
+    }
+
+    #[test]
+    fn load_call_unload_roundtrips_through_real_pmm_pack() {
+        init_once();
+        let wasm_bytes = pack_hello_example();
+        assert_eq!(
+            unsafe { wamr::wasm_runtime_get_file_package_type(wasm_bytes.as_ptr(), wasm_bytes.len() as u32) },
+            wamr::WASM_MODULE_BYTECODE
+        );
+
+        let fqn = "test.loader.pmm_pack_e2e";
+        let handle = unsafe { pm_wasmmod_loader_load(fqn.as_ptr(), fqn.len() as u32, wasm_bytes.as_ptr(), wasm_bytes.len() as u32) };
+        assert_ne!(handle.index, u32::MAX, "load should succeed on a real pmm-packed .wasm");
+
+        // hello() -> 42
+        let mut result = pm_wasmmod_registry_value_t {
+            kind: pm_wasmmod_registry_valkind_t::I32,
+            of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 0 },
+        };
+        let status = unsafe {
+            crate::wasmmod::registry::pm_wasmmod_registry_call(
+                fqn.as_ptr(),
+                fqn.len() as u32,
+                "hello".as_ptr(),
+                "hello".len() as u32,
+                core::ptr::null(),
+                0,
+                &mut result,
+                1,
+            )
+        };
+        assert_eq!(status, 0);
+        assert_eq!(unsafe { result.of.i32 }, 42);
+
+        // add(41, 1) -> 42
+        let args = [
+            pm_wasmmod_registry_value_t {
+                kind: pm_wasmmod_registry_valkind_t::I32,
+                of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 41 },
+            },
+            pm_wasmmod_registry_value_t {
+                kind: pm_wasmmod_registry_valkind_t::I32,
+                of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 1 },
+            },
+        ];
+        let mut result2 = pm_wasmmod_registry_value_t {
+            kind: pm_wasmmod_registry_valkind_t::I32,
+            of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 0 },
+        };
+        let status2 = unsafe {
+            crate::wasmmod::registry::pm_wasmmod_registry_call(
+                fqn.as_ptr(),
+                fqn.len() as u32,
+                "add".as_ptr(),
+                "add".len() as u32,
+                args.as_ptr(),
+                args.len() as u32,
+                &mut result2,
+                1,
+            )
+        };
+        assert_eq!(status2, 0);
+        assert_eq!(unsafe { result2.of.i32 }, 42);
+
+        assert_eq!(unsafe { pm_wasmmod_loader_unload(handle) }, 0);
+        assert_eq!(unsafe { crate::wasmmod::registry::pm_wasmmod_registry_has(fqn.as_ptr(), fqn.len() as u32) }, 0);
+    }
+
     #[test]
     fn load_call_unload_roundtrips_through_real_aot() {
         init_once();

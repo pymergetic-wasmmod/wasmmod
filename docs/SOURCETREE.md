@@ -5,6 +5,19 @@
 Purpose: one import tree that behaves like normal Python packages, whether the
 muscle is Python, C, or Rust.
 
+### Two `wasmmod` trees — don't confuse them
+
+- `packages/metalpython/extmod/wasmmod/` — **old, read-only reference.**
+  Pinned to `metalpython`'s `master` branch's own submodule commit. Still has
+  the real `pack.toml`-based packer (`dev/tools/.../tools/pack.py`,
+  `pack_elf.py`, `pack_tree.py`), every example package (`hello`, `mixed`,
+  `client`, `ticks`, `ticks_elf`, `host_elf`, `bridge`, `tree/*`, ...), and the
+  `run_matrix.py`/`run_elf.py`/`Makefile` test runners. Port **from** here;
+  never edit it as part of this redesign.
+- `packages/metalpython-wasmmod/extmod/wasmmod/` (this tree) — **the
+  destination.** Blank-main rewrite this doc's own decisions apply to. Port
+  **to** here.
+
 ---
 
 ## Locked
@@ -208,7 +221,7 @@ card of whichever node is a deliverable root:
 | `[[exports]]`, `[[imports]]` (incl. ELF's `sig`) | gone — see "Exports/imports come from faces" below |
 | `lifecycle.load` / `.unload` | → card keys `on_load` / `on_unload` (any module, not just roots) |
 | `[deps]` | → card key `deps` (table); only meaningful where `build` is set |
-| `python.freeze` / `.targets` / `.keep_source`, `[source]`, `[pack]` | → nest under `[build]` on the root card only (see below) |
+| `python.mount` / `.freeze` / `.targets` / `.keep_source`, `[source]`, `[pack]` | → nest under `[build_cfg]` on the root card only (see below) |
 
 Optional card keys, all still just fields in the same one `*.pmm.toml`:
 
@@ -230,7 +243,9 @@ impl = "c"
 build = ["wasm", "elf"]   # array: one source tree, N container twins
 version = "0.1.0"         # only meaningful for a root (deps resolution)
 
-[build]
+[build_cfg]
+mount = "mount"           # dir of raw files (incl. .py) embedded as pack payload —
+                           # data-plane only, not a node in the fqn/impl tree
 freeze = true
 targets = ["upy:mpy6:sib31", "cpy:cp312"]
 keep_source = true
@@ -238,6 +253,20 @@ embed_source = true
 compress_source = true
 compress_pack = true
 ```
+
+(Named `[build_cfg]`, not `[build]` — `build = [...]` above is already a
+top-level array assignment to the key `build`; a `[build]` *table* header
+would try to redeclare that same key, which is a real TOML parse error
+(`Cannot declare ('build',) twice`), found while implementing `pmm-parser`.)
+
+`mount` is a `[build_cfg]`-only knob, not a module-tree concept: the files
+under it (typically the pack's own `__init__.py` + whatever it imports) are
+embedded verbatim into the pack's payload section for the Python VM to
+mount at runtime, same as `pack.toml`'s old `python.mount` — this is a
+data-plane relationship, not a node in the fqn/`impl` tree, so it doesn't
+have to (and shouldn't) satisfy "one defining lang" — the mount tree can
+happily contain the pack's Python-visible surface even though the same
+root's own card is `impl = "c"`.
 
 `build` being an array (not a string) matters in practice: `examples/ticks/`
 and `examples/ticks_elf/` are two hand-duplicated directories today (own
@@ -249,6 +278,32 @@ prototype under an ELF build — ELF has no import section, `elf_resolve_import`
 resolves it directly) — same declared dependency, different low-level
 plumbing. Not automatic; the face generator has to know which target it's
 emitting for.
+
+### Recursive build boundary
+
+A node inside a `build`-marked root's own subtree can itself carry a
+`build` key — this isn't an edge case to design around, it's a real,
+already-existing shape: once `tree/test_a_test_d/` becomes a real nested
+directory (`test_a/test_d/`, per `fqn`-must-match-path), it sits *inside*
+`test_a`'s own subtree while remaining its own separate `.wasm` artifact
+(own exports `d_value`/`d_rs_value`, nothing to do with `test_a`'s own
+`a_ping`/`a_rs_ping`) — exactly as today's flat `tree/test_a/` and
+`tree/test_a_test_d/` are already two independent pack builds, just about
+to become path-nested instead of name-dashed.
+
+Rule: a nested `build` key is a **hard boundary**, not an invitation to
+bundle. When a packer run is producing the artifact for root *R*, it walks
+*R*'s subtree unioning faces/sources/deps as normal, but **stops descending
+the instant it reaches a child card that itself has a `build` key** — that
+child's whole subtree belongs to its *own* build, not *R*'s. `R`'s own
+compiled output never contains a byte of it. The nested root is built
+entirely separately (its own invocation, own artifact, own `deps`/`version`)
+and merely happens to live at that path because `fqn`/path-nesting says so,
+not because of any compiled relationship between the two. If the outer
+root's own faces need something from the nested one at runtime, that's an
+ordinary cross-artifact `deps` + import-face relationship (guest-guest),
+identical in shape to depending on a root that isn't nested under you at
+all.
 
 ### Exports/imports come from faces, not lists
 
@@ -646,24 +701,134 @@ into 9 crates for what the new tree treats as one subtree,
   `use crate::...` paths (Rust's own module system), never a Cargo
   `[dependencies]` entry.
 - Target for `metal`: roughly one crate for the whole native tree, plus one
-  per Rust-containing wasm/ELF pack — not 28.
+per Rust-containing wasm/ELF pack — not 28.
+
+### Schema reference (consolidated)
+
+Everything below is already decided above; this is the flat lookup table
+`pmm-parser` gets implemented against, so it doesn't have to be re-derived
+from the rationale prose each time.
+
+**Card keys** (`*.pmm.toml` / `__pmm__.toml`):
+
+| Key | Required? | Type | Notes |
+|---|---|---|---|
+| `fqn` | required, always first | string (dotted) | checked assertion against the real path, not an independent declaration |
+| `pep420` | required if this is a namespace node | bool | mutually exclusive with `impl`; namespace nodes have no muscle file |
+| `impl` | required unless `pep420 = true` | `"c"` \| `"rs"` \| `"py"` | exactly one defining language per module |
+| `on_load` / `on_unload` | optional | string | lifecycle hook function name; any module, not just roots |
+| `deps` | optional | table (`{ "dotted.fqn" = "version" }`) | **`build`-marked roots only** — non-root modules have no independent existence to depend on/pin a version of |
+| `version` | optional | string | **`build`-marked roots only** — a non-root module always ships baked into whichever root's artifact contains it, at that root's own commit/checkout; there's no way for it to be "at a different version" than its own siblings |
+| `build` | optional, presence marks a deliverable root | array of `"wasm"` \| `"elf"` | one source subtree, N compiled container twins; **cannot nest** — see "Recursive build boundary" below |
+| `[build_cfg]` sub-table | only meaningful with `build` set | — | `mount` (path, data-plane only — see "Deliverable root"), `freeze` (bool), `targets` (list of `upy:mpyN:sibM` / `cpy:cpNNN` strings), `keep_source` (bool), `embed_source` (bool), `compress_source` (bool), `compress_pack` (bool) |
+
+No `[[exports]]`, `[[imports]]`, `sig`, `name`, `type`, `comment`,
+`description`, `license`, `native.dir`/`native.sources` — all retired (see
+table earlier in this doc for where each one's job went).
+
+**Face files**, by `impl`:
+
+| `impl` | Muscle (SoT) | Types | Export | Import | Py stub |
+|---|---|---|---|---|---|
+| `c` | `__impl__.c` | `__types__.h` (human) | `__exports__.h` (human) + `__exports__.rs` (bindgen) | `__imports__.h` (human) + `__imports__.rs` (bindgen or hand) | `__init__.pyi` (generated) |
+| `rs` | `__impl__.rs` (types SoT too) | `__types__.h` (cbindgen) | `__exports__.h` (cbindgen) | `__imports__.h` (emitted or hand) | `__init__.pyi` (generated) |
+| `py` | `__init__.py` (types = the function's own hints, via `ast`) | — (hints are the SoT) | `__exports__.h` + `__exports__.rs` (generated from hints) | — (Py has no import face; `sys.modules` already location-transparent) | n/a (it *is* the source) |
+| `pep420` | — (no muscle file) | — | — | — | — |
+
+Every `impl` also needs, as **direct siblings** of the module's folder (or
+the module folder itself, for `pep420`): the card (folder case:
+`__pmm__.toml` inside; folder-less trivial leaf: bare sibling `x.pmm.toml`),
+an umbrella `<name>.h` (C canonical include, skip only if no C/RS consumer
+ever needs to reach this module), and a barrel `<name>.rs` (Rust module
+resolution — not optional the moment any Rust code, including a `pep420`
+node's own children, needs to resolve the path).
+
+**Exports/imports**: never declared in the card. The packer unions whatever
+`PM_MOD_EXPORT_C`/`PM_MOD_EXPORT_RS` macro invocations (or, for `py`,
+whatever functions get routed through `pm_wasmmod_pyexport_export_py*`) exist
+in a deliverable root's subtree. ELF's signature tag (`i32`, `i32_i32`, ...)
+is derived the same way — parsed straight from the literal C-type argument
+already passed to `PM_MOD_EXPORT_C`/`PM_MOD_EXPORT_RS` at each call site
+(e.g. `int(int, const ssh_opts_t *)`), reusing the same tag vocabulary the
+old `pack.py`'s `sig_tag()` had, just sourced from real code instead of a
+hand-typed string — never a new manifest field.
+
+**Guest→host imports** (module not under `pymergetic.*` — e.g.
+`wasmmod.host`, `wasmmod`, `micropython.runtime`) still get a normal import
+face (the module genuinely needs that host symbol), but never a `deps`
+entry: `deps`/`version` resolution is a pymergetic-pack-tree-only concept;
+host-intrinsic modules are resolved directly by the loader/registry, not by
+card-to-card dependency.
+
+### Target shapes for pending example conversions
+
+Dry-run mapping every real example under `packages/metalpython/extmod/wasmmod/examples/`
+onto the schema above, to catch gaps before `convert-*` work starts. (`bridge`
+already has its own decomposition sketch above — "No flat-dump exception".)
+
+- **`hello`** → one node, `build = ["wasm"]`. **Converted** — see
+  `examples/hello/`. Exports `hello`/`add` come from `PM_MOD_EXPORT_C`
+  invocations in `__impl__.c`, not a manifest list. `[build_cfg]` carries
+  today's `freeze = true` / `targets` / `keep_source = true` /
+  `embed_source = true` / `compress_source = true` / `compress_pack = true`
+  verbatim — nothing about those knobs changes, they just move under
+  `[build_cfg]` — plus a new `mount = "mount"` (today's flat `src/` held
+  both the C impl and the Python surface; the new tree's `src/` is
+  fqn-anchored to native only, so the Python surface moved to a sibling
+  `mount/` dir instead). `on_load`/`on_unload` both empty today, so both
+  keys just get omitted (no more empty-string ceremony). See decision log.
+- **`mixed`** → one node, `build = ["wasm"]`, `impl` split across a C child
+  (`mixed_answer`) and an RS child (`mixed_i64`) per "one defining lang" —
+  first real exercise of the slot-backed-wrapper + `PM_MOD_EXPORT_C`/`RS`
+  same-artifact call shape end to end, not just the `ssh_connect` sketch.
+- **`client`** → one node, `deps = { "pymergetic.wasmmod_examples.hello" =
+  "0.1.0" }`, `on_load`/`on_unload` = `mp_pack_load`/`mp_pack_unload`. Its
+  need for `hello.hello` becomes an ordinary import face, no `[[imports]]`.
+  **Finding:** `client_elf/` exists as a hand-duplicated twin exactly like
+  `ticks_elf/` — same merge opportunity, `build = ["wasm", "elf"]` on one
+  node, not called out explicitly before this pass.
+- **`ticks` + `ticks_elf`** → merge into one node, `build = ["wasm", "elf"]`
+  (already sketched above). `elapsed`'s `sig = "i32"` is now derived from
+  its `PM_MOD_EXPORT_C` call site instead of hand-typed. Its need for
+  `micropython.runtime.ticks_ms` is a guest→host import face — no `deps`
+  entry (see "Guest→host imports" above).
+- **`host_elf`** (`pymergetic.wasmmod_examples.hostcall`) → one node,
+  `build = ["elf"]` only. All 7 exports' `sig` tags (`i32`/`i32_i32`) derive
+  cleanly from each `PM_MOD_EXPORT_C` call site's literal return/arg types —
+  confirms the derivation approach on every real ELF sig tag that exists
+  today, not just a hypothetical. All 10 of its imports (`wasmmod.host.*`,
+  `wasmmod.mode`/`wasmmod.version`) are guest→host import faces, no `deps`.
+- **`tree/*`** → **real finding, not just a relabeling.** The "flat sibling"
+  layout (`tree/test_a_test_b_test_c/pack.toml`, one dashed directory per
+  dotted node) fails the new schema outright: `fqn` is a checked assertion
+  against the *real path*, and a flat dashed directory name doesn't spell
+  the nested path `fqn` claims. Only the "nested" layout
+  (`tree/nested/test_a2/test_b2/test_c2/`) is schema-compliant as-is — the
+  flat layout needs real directory restructuring during conversion, not
+  just a `pack.toml` → `__pmm__.toml` swap. A pure-namespace node with no
+  content of its own (`test_b`/`test_b2`) follows the already-locked
+  `wasmmod`-not-`pep420` precedent: `impl = "py"` with a trivial `__init__.py`,
+  not `pep420 = true` — it has children but isn't open to outside
+  contribution, so the namespace flag doesn't apply. `test_a.test_b.test_c`'s
+  `deps` on `test_a.test_d` and matching import face carry over unchanged.
+  **Second real finding:** once nested, `test_a/test_d/` physically sits
+  inside `test_a/`'s own subtree while staying its own separate `build`
+  root — the concrete, non-hypothetical case the "Recursive build boundary"
+  rule exists for; `test_a`'s own packer run must stop at `test_d`'s `build`
+  key, not fold its exports into `test_a`'s own artifact.
+
+No gaps found beyond the three flagged above (`client`/`client_elf` merge,
+`tree`'s flat-layout incompatibility, `tree`'s nested-build-root case) — the
+schema as locked, plus the recursive-build boundary rule, covers every real
+example in the reference tree.
 
 ---
 
 ## Open
 
-- How does a card's exports actually reach `__pm_modules`? Does the module
-  author hand-write `pm_wasmmod_registry_export_set`/`pm_wasmmod_registry_publish` calls against the
-  emitted `.export.h`/`.export.rs`, or does the generator also emit a
-  `*.reg.c`/`*.reg.rs` sibling so registration is never hand-written? This is
-  the load-bearing question for converting the 38 C + 43 Rust `RegMod` sites
-  — needs an answer before that migration starts.
-- ELF `sig` tagging (today: hand-typed `sig = "i32_i32"` per export) could
-  instead be derived by parsing the export face's real C/Rust signature.
-  More tooling than the rest of this doc; not required to unblock anything
-  yet.
-- Does `version` (deps resolution) live only on `build`-marked roots, or can
-  a non-root module be independently depended-on/versioned too?
+None currently — the three items previously here (registration-codegen
+reachability, ELF `sig` derivation, `version` scope) are all resolved; see
+Decision log below.
 
 ## Decision log
 
@@ -674,7 +839,8 @@ into 9 crates for what the new tree treats as one subtree,
 | 2026-08-10 | Card = `*.pmm.toml` with `impl` only; name from path |
 | 2026-08-10 | Retire `pack.toml`; one manifest system (`*.pmm.toml` everywhere) |
 | 2026-08-10 | `on_load`/`on_unload`/`deps` move onto the card; dead fields (`type`/`comment`/`description`/`license`) dropped |
-| 2026-08-10 | Deliverable root = card with `build` key (array — one tree, N container twins); build-only knobs nest under `[build]` |
+| 2026-08-10 | Deliverable root = card with `build` key (array — one tree, N container twins); build-only knobs nest under `[build_cfg]` |
+| 2026-08-11 | `pmm-parser` impl found `build = [...]` + `[build]` (same key, array then table) is a real TOML parse error (`Cannot declare ('build',) twice`) — renamed the sub-table to `[build_cfg]` everywhere above. Also added `mount` to its documented keys (carries the old `python.mount` — an oversight when the other `python.*`/`[source]`/`[pack]` knobs were first moved under it): the mounted tree is pack payload data, not a node in the fqn/`impl` tree, so it's exempt from "one defining lang" — a `build_cfg.mount` dir can hold `.py` files even when the root card itself is `impl = "c"`/`"rs"`. |
 | 2026-08-10 | No `[[exports]]`/`[[imports]]` lists (either container) — packer unions module faces under the root's subtree instead |
 | 2026-08-10 | Same-artifact cross-module calls: real impl private (`static`/non-`pub`), export face is a slot-backed inline wrapper, slot filled eagerly at connect time, registration = one generator-placed macro beside the impl (no `*.reg.c`) |
 | 2026-08-10 | No flat-dump exception for test fixtures — `bridge` gets decomposed into real per-concern child nodes under one `build` root, once tooling exists |
@@ -714,3 +880,13 @@ into 9 crates for what the new tree treats as one subtree,
 | 2026-08-11 | Attempted fast-jit (`WAMR_BUILD_FAST_JIT=1`) in the same pass and dropped it — WAMR 2.4.3's own `build-scripts/unsupported_combination.cmake` hard-rejects `WAMR_BUILD_SHARED_HEAP=1` + `WAMR_BUILD_FAST_JIT=1` together at configure time, and shared heap is load-bearing for this loader (the whole buffer/string-marshaling model), so fast-jit lost. Traced the actual root cause (upstream docs just say "currently not supported", no reason given): the shared-heap address-translation macro (`CHECK_SHARED_HEAP_OVERFLOW`/`app_addr_in_shared_heap`/`shared_heap_addr_app_to_native` in `core/iwasm/common/wasm_memory.h`) is used by both interpreters (`wasm_interp_fast.c`) and has a full LLVM-IR-level equivalent in AOT's own compiler (`compilation/aot_emit_memory.c`'s `setup_shared_heap_blocks`/chain-lookup) — but has **zero** matches anywhere under `core/iwasm/fast-jit/`. Fast-jit's own bounds-check codegen (`fast-jit/fe/jit_emit_memory.c`'s `check_and_seek_on_64bit_platform`) goes straight from "address out of linear-memory bounds" to an exception, with no branch to a shared-heap check at all — a genuine, real upstream gap (confirmed via `git log` on the constraint: PR #4690 added the *check*, not a fix), not something patchable from our side without porting that whole address-translation feature into WAMR's own proprietary JIT IR (new compiler-context fields + new IR-level control flow per memory-access opcode, replicated across a ~1200-line file) — real upstream-contribution-sized work, out of scope here |
 | 2026-08-11 | Loader's container-kind detection: `wasm_runtime_get_file_package_type(bytes, len)` (mirrors `package_type_t`'s `Wasm_Module_Bytecode`/`Wasm_Module_AoT`) runs on the raw bytes *before* `wasm_runtime_load`, replacing the hardcoded `pm_wasmmod_registry_container_kind_t::Wasm` that `pm_wasmmod_loader_load` previously always passed to `publish` — the registry's already-reserved `Aot` enum slot (`registry/__types__.h`) is finally driven by something real. Nothing else in the load path branches on this; `wasm_runtime_load`/`instantiate`/`call_wasm_a` are identical calls for both kinds, WAMR dispatches internally |
 | 2026-08-11 | AOT proof deliberately reuses the existing `.wasm` fixture bytes rather than a second hand-written binary: `compile_to_aot()` in the loader's own tests shells out to the `wamrc` binary `build.rs` already built (`env!("WAMRC_PATH")`), writing/reading real temp files, and hard-asserts on failure (a real `wamrc` failure here is a regression worth seeing loudly, not a "skip and hope" case) — same `answer`/`add_one` assertions as the interpreter path, proving the `Value` convention is genuinely container-kind-agnostic from the caller's side |
+| 2026-08-11 | ELF `sig` tag derivation resolved: parsed straight from the literal C-type argument already passed to `PM_MOD_EXPORT_C`/`PM_MOD_EXPORT_RS` at each call site (e.g. `int(int, const ssh_opts_t *)`), never a manifest field — same `i32`/`i32_i32`/... tag vocabulary the old `pack.py`'s `sig_tag()` used, just sourced from real code instead of a hand-typed string; keeps ELF consistent with "exports come from faces, not lists" |
+| 2026-08-11 | `version` is usable on any module, not just `build`-marked roots — `deps` on a non-root module is meaningful too, not just whole-package-depends-on-whole-package |
+| 2026-08-11 | **Corrected the row above** — reverted `version`/`deps` back to `build`-marked-roots-only, which is what the doc's own earlier "No `pack.toml`" table (`[deps]` "only meaningful where `build` is set") and "Deliverable root" example (`version` "only meaningful for a root") already said before the row above contradicted them without noticing. The underlying reasoning: a non-root module never exists independently of whichever root's artifact contains it (same commit, same checkout, always built together) — there's no real sense in which it could be "at a different version" than its own siblings, so `version` genuinely is a container-level concept, not a module-level one; `deps` follows the same restriction because its only legal target is something with a `version` to pin |
+| 2026-08-11 | Recursive build boundary: a `build`-marked root's own subtree can contain another `build`-marked root (confirmed by a real case, not a hypothetical — `tree/test_a_test_d/` becomes a real nested `test_a/test_d/` directory once paths must match `fqn`, while staying its own independent `.wasm` artifact). Rule: the outer root's packer run stops descending the instant it hits a nested `build` key — that subtree belongs entirely to its own build, never folded into the outer root's compiled output; any relationship between them is an ordinary cross-artifact `deps`/import-face pair, identical in shape to depending on a root that isn't nested under you at all |
+| 2026-08-11 | Two `wasmmod` trees now exist side by side: `packages/metalpython/extmod/wasmmod/` (old, pinned to `metalpython`'s `master`, still has the real `pack.toml` packer + every example package + `run_matrix.py`/`run_elf.py`/`Makefile` — read-only reference, port FROM) vs. `packages/metalpython-wasmmod/extmod/wasmmod/` (this tree, blank-main rewrite — destination, port TO); worth writing down once since it's easy to grab the wrong one |
+| 2026-08-11 | Consolidated the `*.pmm.toml` schema (card keys, face files per `impl`, guest→host-import-has-no-`deps` rule) into one flat reference table instead of leaving it derivable only from scattered rationale prose; dry-ran it against every real example package in the old reference tree and found exactly two real gaps: `client`/`client_elf` is the same hand-duplicated-twin merge case as `ticks`/`ticks_elf` (not previously called out), and `tree/`'s "flat sibling dashed-directory" layout fails the new `fqn`-must-match-real-path assertion outright — only its "nested directory" twin layout is schema-compliant as-is, so that conversion needs real restructuring, not just a manifest swap |
+| 2026-08-11 | `pmm-parser` shipped (`dev/tools/src/pymergetic/wasmmod/tools/pmm.py` + `faces.py`, C-only v1): walks a `*.pmm.toml` card tree, enforces fqn/path + recursive-build-boundary + `deps`/`version`-root-only at load time, then *synthesizes a `pack.toml`-shaped dict* rather than reimplementing `manifest_to_build()` — the existing, untouched function is still the one place a manifest dict becomes a build plan, for either manifest format. `pack.py`'s `main()` gained one dispatch branch (`pmm.resolve_pmm_root()` tried first, `resolve_pack_root()` unchanged as fallback); both formats coexist, `pack.toml` support is untouched (`remove-pack-toml` stays a separate, later backlog item) |
+| 2026-08-11 | Face-export-discovery v1 (C only): regex-scans `__impl__.c` for `PM_MOD_EXPORT_C(module, export_name, impl_fn, c_type_signature)` call sites, parses the literal signature text into the same compact `i32`/`i32_i32`/… tag `pack.py`'s own `sig_tag()` already understood (anything not all-i32 — floats, 64-bit ints, structs by value — omits `sig` entirely and falls back to `SIG_AUTO`, which the loader's real Wasm-type introspection always handles correctly anyway, just not compactly). `PM_MOD_EXPORT_C` itself (`include/pm_guest.h`, ported to this tree for the first time — it had no `include/` at all before) is a deliberate no-op at the C level; real slot-backed-wrapper + eager-connect registration is separate, later `pm-mod-export-macro` work, not needed yet since `hello` has no same-artifact private calls |
+| 2026-08-11 | Found while implementing `pmm-parser`: `wasmmod_root()`'s own `_looks_like()` (`dev/tools/src/…/paths.py`) only recognized the *old* reference tree's shape (`loader.c` / `crates/wasmmod-read`) — a real, previously-unnoticed bug, since every packer path (`guest_include_dir()`, `find_wasm_ld()`, `find_clang()`, `find_mpy_cross()`) depends on it to find `include/pm_guest.h` and friends. Broadened to also recognize this tree's shape (`Cargo.toml` + `src/pymergetic/wasmmod/`) |
+| 2026-08-11 | `hello` converted for real (`examples/hello/`, first `examples/` dir in this tree) and proven two ways: manually via `make -C examples/hello` (built a real, loadable `.wasm`) and via a new Rust test (`load_call_unload_roundtrips_through_real_pmm_pack` in `loader/__impl__.rs`) that shells out to the packer for real, then loads the result through `pm_wasmmod_loader_load` and calls `hello()`/`add(41,1)` via the registry — same "real, not synthetic" posture as the AOT proof. Mount-tree placement (see the `[build_cfg].mount` decision row above) meant restructuring `hello`'s old flat `src/` (native + Python side by side) into `src/pymergetic/wasmmod_examples/hello/` (fqn-anchored, native only) plus a sibling `mount/` (the old Python tree, byte-for-byte, as payload data) — a real, necessary shape change beyond a pure manifest-format swap, driven by "path == module" now actually being enforced |
