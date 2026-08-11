@@ -31,6 +31,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Bundle source tree
+        run: python3 tools/bundle_rt_share.py
+
       - name: Build
         run: |
           python -m pip install -U pip build twine

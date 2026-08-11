@@ -28,5 +28,5 @@ dist/
 *.egg-info/
 .ruff_cache/
 .pytest_cache/
-python/pymergetic/wasmmod/_version.py
+python/pymergetic/wasmmod/rt/_version.py
 python/pymergetic/wasmmod/rt/share/
