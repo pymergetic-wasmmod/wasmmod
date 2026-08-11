@@ -30,4 +30,4 @@ Humans lose the thread around a few hundred lines; agents still “digest” fat
 
 ## Constellation note
 
-Applies across wasmmod / tools / metal-cdn / metalpython work in this workspace — same digestive mismatch wherever the blob lives.
+Applies across wasmmod / tools / wasmmod-cdn / metalpython work in this workspace — same digestive mismatch wherever the blob lives.

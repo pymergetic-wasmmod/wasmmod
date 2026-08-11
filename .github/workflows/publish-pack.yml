@@ -1,4 +1,4 @@
-# Build a wasmmod pack and publish to metal-cdn (one-shot CLI).
+# Build a wasmmod pack and publish to wasmmod-cdn (one-shot CLI).
 # Default: wasm + AOT + ELF (when a sibling *_elf demo exists). Use aot=false for wasm-only.
 name: publish-pack
 
@@ -35,7 +35,7 @@ on:
         required: false
         default: ""
       cdn_url:
-        description: metal-cdn base URL
+        description: wasmmod-cdn base URL
         required: true
   push:
     tags:
@@ -88,7 +88,7 @@ jobs:
             echo "elf=" >> "$GITHUB_OUTPUT"
             echo "no_elf=false" >> "$GITHUB_OUTPUT"
             echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
-            echo "cdn_url=${{ vars.METAL_CDN_URL }}" >> "$GITHUB_OUTPUT"
+            echo "cdn_url=${{ vars.WASMMOD_CDN_URL }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Write signing material
@@ -129,8 +129,8 @@ jobs:
 
       - name: Publish
         env:
-          METAL_CDN_URL: ${{ steps.meta.outputs.cdn_url }}
-          METAL_CDN_TOKEN: ${{ secrets.METAL_CDN_TOKEN }}
+          WASMMOD_CDN_URL: ${{ steps.meta.outputs.cdn_url }}
+          WASMMOD_CDN_TOKEN: ${{ secrets.WASMMOD_CDN_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p packs
@@ -139,8 +139,8 @@ jobs:
             --version "${{ steps.meta.outputs.version }}"
             --key .keys/sign/leaf.key.pem
             --chain .keys/sign/chain.der
-            --cdn-url "$METAL_CDN_URL"
-            --token "$METAL_CDN_TOKEN"
+            --cdn-url "$WASMMOD_CDN_URL"
+            --token "$WASMMOD_CDN_TOKEN"
             --claim
             -o packs
           )

@@ -16,12 +16,12 @@ dev = [
   "ruff>=0.8.0",
 ]
 cdn = [
-  "pymergetic-metal-cdn-client>=0.1.0a3",
+  "pymergetic-wasmmod-cdn-client>=0.1.0a3",
 ]
 
 [project.urls]
-Homepage = "https://github.com/pymergetic/wasmmod-test"
-Documentation = "https://github.com/pymergetic/wasmmod-test#readme"
+Homepage = "https://github.com/pymergetic-wasmmod/wasmmod-test"
+Documentation = "https://github.com/pymergetic-wasmmod/wasmmod-test#readme"
 
 [build-system]
 requires = ["setuptools>=68", "setuptools-scm>=8"]

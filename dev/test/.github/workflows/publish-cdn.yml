@@ -1,11 +1,11 @@
-# Independent consumer: pack (or reuse wasmmod examples) and upload to metal-cdn.
+# Independent consumer: pack (or reuse wasmmod examples) and upload to wasmmod-cdn.
 name: publish-cdn
 
 on:
   workflow_dispatch:
     inputs:
       cdn_url:
-        description: metal-cdn base URL (e.g. https://cdn.example/cdn)
+        description: wasmmod-cdn base URL (e.g. https://cdn.example/cdn)
         required: true
       version:
         description: Package version to publish
@@ -74,24 +74,24 @@ jobs:
           fi
           ls -la dist-pack
 
-      - name: Publish to metal-cdn
+      - name: Publish to wasmmod-cdn
         if: ${{ !inputs.dry_run }}
         env:
-          METAL_CDN_URL: ${{ inputs.cdn_url }}
-          METAL_CDN_TOKEN: ${{ secrets.METAL_CDN_TOKEN }}
+          WASMMOD_CDN_URL: ${{ inputs.cdn_url }}
+          WASMMOD_CDN_TOKEN: ${{ secrets.WASMMOD_CDN_TOKEN }}
           WASMMOD_ROOT: ${{ github.workspace }}/_wasmmod
         run: |
           set -euo pipefail
-          test -n "${METAL_CDN_TOKEN:-}" || {
-            echo "Set repo secret METAL_CDN_TOKEN (metal-cdn API token)" >&2
+          test -n "${WASMMOD_CDN_TOKEN:-}" || {
+            echo "Set repo secret WASMMOD_CDN_TOKEN (wasmmod-cdn API token)" >&2
             exit 1
           }
           wasmmod publish \
             --from-artifacts dist-pack \
             --package "${{ inputs.package }}" \
             --version "${{ inputs.version }}" \
-            --cdn-url "$METAL_CDN_URL" \
-            --token "$METAL_CDN_TOKEN"
+            --cdn-url "$WASMMOD_CDN_URL" \
+            --token "$WASMMOD_CDN_TOKEN"
 
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}

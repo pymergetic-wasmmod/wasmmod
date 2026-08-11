@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Workspace: use the monorepo
 
-For wasmmod / metal-cdn / wasmmod-tools / metalpython **together**, open Cursor on:
+For wasmmod / wasmmod-cdn / wasmmod-tools / metalpython **together**, open Cursor on:
 
 `/home/ladmin/Devel/os-sdk`
 
