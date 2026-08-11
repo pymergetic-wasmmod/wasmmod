@@ -30,6 +30,30 @@ CompileFlags:
 
 ---
 
+# src/ module tree: #include "src/pymergetic/…" needs wasmmod-root -I.
+# Explicit fragment so workspace --compile-commands-dir=.vscode (empty for
+# these files) cannot leave Generic without that root.
+If:
+  PathMatch: .*/src/.*\.(c|h|cc|cpp)$
+CompileFlags:
+  CompilationDatabase: None
+  Add:
+    - -I.clangd-include
+    - -Iinclude
+    - -I.
+    - -Ithird_party/wamr/core/iwasm/include
+    - -I../..
+    - -I../../ports/unix
+    - -I../../ports/unix/variants/standard
+    - -I../../ports/unix/build-wasm
+    - -DMICROPY_PY_WASM=1
+    - -Wno-unknown-attributes
+    - -Wall
+    - -x
+    - c
+
+---
+
 If:
   PathMatch: .*/(glue|include)/.*\.(c|h|cc|cpp)
 CompileFlags:

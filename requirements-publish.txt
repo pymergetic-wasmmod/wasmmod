@@ -1,2 +1,0 @@
-# Host-side deps for `tools/wasmmod.py publish` (upload step).
-pymergetic-metal-cdn-client>=0.1.0a3

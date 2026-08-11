@@ -1,6 +1,0 @@
-from typing import Any
-
-def ping() -> str: ...
-def ping_code() -> int: ...
-
-__pack__: Any

@@ -1,3 +1,10 @@
-[workspace]
-resolver = "2"
-members = ["crates/wasmmod-read", "crates/pm"]
+[package]
+name = "pymergetic-wasmmod"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "wasmmod: the pm_mod registry, wasm/aot/elf containers, and the pymergetic.util crates it stands on"
+
+[lib]
+name = "pymergetic_wasmmod"
+path = "src/lib.rs"

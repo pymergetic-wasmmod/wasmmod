@@ -1,9 +1,0 @@
-{
-  "static": [
-    {
-      "url": "/inspect",
-      "root": "/mods/pymergetic.metal.inspect/www/inspect",
-      "theme": "metal"
-    }
-  ]
-}
