@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Rouven Raudzus", email = "raudzus@pymergetic.com" }]
 dependencies = [
-  "pymergetic-wasmmod-tools>=0.1.0a1",
+  "pymergetic-wasmmod-tools>=0.2.0a1",
 ]
 
 [project.optional-dependencies]
@@ -16,7 +16,7 @@ dev = [
   "ruff>=0.8.0",
 ]
 cdn = [
-  "pymergetic-wasmmod-cdn-client>=0.1.0a3",
+  "pymergetic-wasmmod-cdn-client>=0.2.0a1",
 ]
 
 [project.urls]
@@ -39,7 +39,7 @@ namespaces = true
 root = "."
 search_parent_directories = false
 version_file = "src/pymergetic/wasmmod/test/_version.py"
-fallback_version = "0.1.0a1"
+fallback_version = "0.2.0a1"
 
 [tool.ruff]
 line-length = 100
