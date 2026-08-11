@@ -40,8 +40,17 @@ fn main() {
     build_wamrc();
 }
 
+/// Runtime, not `env!("CARGO_MANIFEST_DIR")` — the compile-time macro bakes
+/// the path into `build-script-build`, so a directory rename (e.g.
+/// metalpython-wasmmod → micropython-wasmmod) leaves a stale `-I` until
+/// something touches `build.rs`. Cargo always sets this when *running*
+/// the script.
+fn manifest_dir() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")
+}
+
 fn build_util_mem() {
-    let root = env!("CARGO_MANIFEST_DIR");
+    let root = manifest_dir();
     println!("cargo:rerun-if-changed=src/pymergetic/util/mem/__impl__.c");
     println!("cargo:rerun-if-changed=src/pymergetic/util/mem/__types__.h");
     println!("cargo:rerun-if-changed=src/pymergetic/util/mem/__exports__.h");
@@ -55,14 +64,14 @@ fn build_util_mem() {
         // SOURCETREE.md "-I rule"): every `src/pymergetic/...` include
         // inside `__impl__.c` resolves from here, not from the file's
         // own directory.
-        .include(root)
+        .include(&root)
         .include(format!("{root}/third_party/tlsf"))
         .warnings(true)
         .compile("pm_util_mem");
 }
 
 fn build_wamr() {
-    let root = env!("CARGO_MANIFEST_DIR");
+    let root = manifest_dir();
     let wamr_dir = format!("{root}/third_party/wamr");
     println!("cargo:rerun-if-changed={wamr_dir}/CMakeLists.txt");
 
@@ -179,7 +188,7 @@ fn find_file_named(dir: &std::path::Path, name: &str) -> Option<std::path::PathB
 }
 
 fn build_wamrc() {
-    let root = env!("CARGO_MANIFEST_DIR");
+    let root = manifest_dir();
     let wamrc_dir = format!("{root}/third_party/wamr/wamr-compiler");
     println!("cargo:rerun-if-changed={wamrc_dir}/CMakeLists.txt");
 
