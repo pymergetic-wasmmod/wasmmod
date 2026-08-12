@@ -30,6 +30,51 @@
 // `std::` per build mode.
 extern crate alloc;
 
+/// libc-backed `GlobalAlloc` + `panic_handler` for linking into µPy
+/// (`cargo rustc --features upy-host --crate-type staticlib`). Tests use
+/// `std` and must not enable this feature.
+#[cfg(all(feature = "upy-host", not(test)))]
+mod upy_host_alloc {
+    use core::alloc::{GlobalAlloc, Layout};
+    use core::ffi::c_void;
+
+    unsafe extern "C" {
+        fn malloc(size: usize) -> *mut c_void;
+        fn realloc(ptr: *mut c_void, size: usize) -> *mut c_void;
+        fn free(ptr: *mut c_void);
+        fn abort() -> !;
+    }
+
+    struct LibcAlloc;
+
+    unsafe impl GlobalAlloc for LibcAlloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            unsafe { malloc(layout.size()) as *mut u8 }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+            unsafe { free(ptr as *mut c_void) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, _layout: Layout, new_size: usize) -> *mut u8 {
+            unsafe { realloc(ptr as *mut c_void, new_size) as *mut u8 }
+        }
+    }
+
+    #[global_allocator]
+    static A: LibcAlloc = LibcAlloc;
+
+    #[panic_handler]
+    fn panic(_info: &core::panic::PanicInfo) -> ! {
+        unsafe { abort() }
+    }
+
+    // Linked into µPy as a staticlib with panic=abort; some LLVM/rustc
+    // artifacts still reference this personality symbol — provide a stub.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn rust_eh_personality() {}
+}
+
 #[path = "pymergetic/util.rs"]
 pub mod util;
 

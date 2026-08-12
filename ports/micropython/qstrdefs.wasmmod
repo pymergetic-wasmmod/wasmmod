@@ -1,0 +1,12 @@
+// QSTR definitions for the thin mpwm wasmmod face (not a C header).
+Q(pymergetic)
+Q(pymergetic.wasmmod)
+Q(wasmmod)
+Q(version)
+Q(has)
+Q(load)
+Q(unload)
+Q(call)
+Q(install_hook)
+Q(uninstall_hook)
+Q(publish_presence)

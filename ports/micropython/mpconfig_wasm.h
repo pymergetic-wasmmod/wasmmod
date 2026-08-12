@@ -1,0 +1,19 @@
+# Optional MicroPython port defaults for wasmmod (mpwm).
+# Enabling is still `make MICROPY_PY_WASM=1` via micropython.mk.
+#ifndef MICROPY_INCLUDED_WASMMOD_MPCONFIG_WASM_H
+#define MICROPY_INCLUDED_WASMMOD_MPCONFIG_WASM_H
+
+#ifndef MICROPY_PY_WASM
+#define MICROPY_PY_WASM (0)
+#endif
+
+#if MICROPY_PY_WASM
+#ifndef MICROPY_MODULE_BUILTIN_SUBPACKAGES
+#define MICROPY_MODULE_BUILTIN_SUBPACKAGES (1)
+#endif
+#ifndef MICROPY_MODULE_BUILTIN_INIT
+#define MICROPY_MODULE_BUILTIN_INIT (1)
+#endif
+#endif
+
+#endif /* MICROPY_INCLUDED_WASMMOD_MPCONFIG_WASM_H */
