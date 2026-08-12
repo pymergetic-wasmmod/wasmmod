@@ -1,95 +1,19 @@
-# clangd for wasmmod — packages/wasmmod OR metalpython/extmod/wasmmod.
-# Paths are relative to this file's directory. Extra -I that miss are harmless.
+# clangd for wasmmod (directory of this file = crate root).
 #
-# .clangd-include/extmod/wasmmod → ..  so #include "extmod/wasmmod/…" works
-# without needing MicroPython TOP (standalone packages/wasmmod view).
+# Relied-upon fact: relative -I flags are resolved against the *compile
+# command's working directory*, not this file. So we point at
+# compile_commands.json here (absolute -I to this crate). The os-sdk
+# workspace also forces --compile-commands-dir=.vscode; keep matching
+# micropython-wasmmod entries there too.
 CompileFlags:
-  # Prefer this file's flags over a root compile_commands that may point at
-  CompilationDatabase: None
-  Add:
-    - -I.clangd-include
-    - -Iinclude
-    - -I.
-    - -Ithird_party/wamr/core/iwasm/include
-    - -I../metalpython/extmod/wasmmod/third_party/wamr/core/iwasm/include
-    # MicroPython TOP (py/, …) — submodule or sibling checkout
-    - -I../..
-    - -I../metalpython
-    # unix port + generated qstrs — ONLY build-wasm (other variants lack MICROPY_PY_WASM QSTRs)
-    - -I../../ports/unix
-    - -I../../ports/unix/variants/standard
-    - -I../../ports/unix/build-wasm
-    - -I../metalpython/ports/unix
-    - -I../metalpython/ports/unix/variants/standard
-    - -I../metalpython/ports/unix/build-wasm
-    - -DMICROPY_PY_WASM=1
-    - -Wno-unknown-attributes
-    - -Wall
-    - -x
-    - c
+  CompilationDatabase: .
 
 ---
 
-# src/ module tree: #include "src/pymergetic/…" needs wasmmod-root -I.
-# Explicit fragment so workspace --compile-commands-dir=.vscode (empty for
-# these files) cannot leave Generic without that root.
+# Guests under examples/ — CDB already sets -I<crate> -DPM_WASMMOD_GUEST.
 If:
-  PathMatch: .*/src/.*\.(c|h|cc|cpp)$
+  PathMatch: .*/examples/.*\.(c|h|cc|cpp)$
 CompileFlags:
-  CompilationDatabase: None
   Add:
-    - -I.clangd-include
-    - -Iinclude
-    - -I.
-    - -Ithird_party/wamr/core/iwasm/include
-    - -I../..
-    - -I../../ports/unix
-    - -I../../ports/unix/variants/standard
-    - -I../../ports/unix/build-wasm
-    - -DMICROPY_PY_WASM=1
-    - -Wno-unknown-attributes
-    - -Wall
-    - -x
-    - c
-
----
-
-If:
-  PathMatch: .*/(glue|include)/.*\.(c|h|cc|cpp)
-CompileFlags:
-  # Prefer this file's flags over a root compile_commands that may point at
-  CompilationDatabase: None
-  Add:
-    - -I.clangd-include
-    - -Iinclude
-    - -I.
-    - -Ithird_party/wamr/core/iwasm/include
-    - -I../metalpython/extmod/wasmmod/third_party/wamr/core/iwasm/include
-    - -I../..
-    - -I../metalpython
-    - -I../../ports/unix
-    - -I../../ports/unix/variants/standard
-    - -I../../ports/unix/build-wasm
-    - -I../metalpython/ports/unix
-    - -I../metalpython/ports/unix/variants/standard
-    - -I../metalpython/ports/unix/build-wasm
-    - -DMICROPY_PY_WASM=1
-    - -Wno-unknown-attributes
-    - -x
-    - c
-
----
-
-If:
-  PathMatch: examples/.*\.(c|h|cc|cpp)
-CompileFlags:
-  # Prefer this file's flags over a root compile_commands that may point at
-  CompilationDatabase: None
-  Add:
-    - -Iinclude
-    - -I.
-    - -Iexamples
     - -DPM_WASMMOD_GUEST=1
     - -Wno-unknown-attributes
-    - -x
-    - c
