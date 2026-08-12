@@ -5,15 +5,10 @@
  *   - sys.modules = Python import face
  *   - pm_wasmmod_registry_* = native export table
  *   - install_hook auto-installed on first use / parent __init__
- *   - every successful import gets a presence publish (container=RESIDENT
- *     if not already a wasm/aot/elf entry)
+ *   - ImportError → pack finder (wasm.path / sys.path → .wasm)
+ *   - unload(name) → pm_wasmmod_loader_unload when handle attrs present
  *
  * No host_slots / call0_py — resolve via pm_wasmmod_registry_resolve_native.
- *
- * Note: `import pymergetic.wasmmod` often loads wasmmod as an attribute of
- * the parent builtin without running the child's MICROPY_MODULE_BUILTIN_INIT
- * path — so we also put __init__ on `pymergetic` and call ensure_inited from
- * every public entry point.
  */
 
 #include <string.h>
@@ -24,6 +19,7 @@
 #include "py/objmodule.h"
 #include "py/runtime.h"
 
+#include "ports/micropython/finder.h"
 #include "src/pymergetic/wasmmod/registry/__exports__.h"
 #include "src/pymergetic/wasmmod/loader/__exports__.h"
 
@@ -68,6 +64,31 @@ static mp_obj_t mod_wasm_import_hook(size_t n_args, const mp_obj_t *args) {
         prev = MP_OBJ_FROM_PTR(&mp_builtin___import___obj);
     }
 
+    /* Prefer a pack on wasm.path before delegating (beats empty dirs). */
+    if (mp_wasm_hook_depth == 0 && n_args >= 1 && mp_obj_is_str(args[0])) {
+        const char *name = mp_obj_str_get_str(args[0]);
+        mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
+            MP_OBJ_NEW_QSTR(qstr_from_str(name)), MP_MAP_LOOKUP);
+        if (el == NULL || el->value == MP_OBJ_NULL) {
+            vstr_t path;
+            if (mp_wasm_find_pack(name, &path)) {
+                vstr_clear(&path);
+                mp_wasm_hook_depth++;
+                nlr_buf_t nlr_pack;
+                if (nlr_push(&nlr_pack) == 0) {
+                    (void)mp_wasm_import_pack(name);
+                    nlr_pop();
+                    mp_wasm_hook_depth--;
+                    mp_obj_t res = mp_call_function_n_kw(prev, n_args, 0, args);
+                    pm_wasm_presence_publish(name);
+                    return res;
+                }
+                mp_wasm_hook_depth--;
+                nlr_jump(nlr_pack.ret_val);
+            }
+        }
+    }
+
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         mp_obj_t res = mp_call_function_n_kw(prev, n_args, 0, args);
@@ -78,8 +99,28 @@ static mp_obj_t mod_wasm_import_hook(size_t n_args, const mp_obj_t *args) {
         return res;
     }
 
-    /* ImportError: pack finder lands in loader/finder/ later. */
-    nlr_jump(nlr.ret_val);
+    mp_obj_t exc = MP_OBJ_FROM_PTR(nlr.ret_val);
+    if (!mp_obj_exception_match(exc, MP_OBJ_FROM_PTR(&mp_type_ImportError))
+        || mp_wasm_hook_depth > 0 || n_args < 1 || !mp_obj_is_str(args[0])) {
+        nlr_jump(nlr.ret_val);
+    }
+
+    const char *name = mp_obj_str_get_str(args[0]);
+    mp_wasm_hook_depth++;
+    nlr_buf_t nlr2;
+    if (nlr_push(&nlr2) == 0) {
+        (void)mp_wasm_import_pack(name);
+        nlr_pop();
+        mp_wasm_hook_depth--;
+        mp_obj_t res = mp_call_function_n_kw(prev, n_args, 0, args);
+        pm_wasm_presence_publish(name);
+        return res;
+    }
+    mp_wasm_hook_depth--;
+    if (mp_obj_exception_match(MP_OBJ_FROM_PTR(nlr2.ret_val), MP_OBJ_FROM_PTR(&mp_type_ImportError))) {
+        nlr_jump(nlr.ret_val);
+    }
+    nlr_jump(nlr2.ret_val);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_import_hook_obj, 1, 5, mod_wasm_import_hook);
 
@@ -110,8 +151,8 @@ static void pm_wasm_ensure_inited(void) {
             mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasmmod loader_init failed"));
         }
         mp_wasm_inited = 1;
+        (void)mp_wasm_path_obj();
     }
-    /* Soft-reset clears builtins override; always re-install if missing. */
     if (MP_STATE_VM(mp_wasm_prev_import) == MP_OBJ_NULL) {
         (void)mod_wasm_install_hook();
     }
@@ -150,6 +191,19 @@ static mp_obj_t mod_wasm_version(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_version_obj, mod_wasm_version);
 
+static mp_obj_t mod_wasm_path(void) {
+    pm_wasm_ensure_inited();
+    return mp_wasm_path_obj();
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_path_obj_fun, mod_wasm_path);
+
+static mp_obj_t mod_wasm_path_append(mp_obj_t root_in) {
+    pm_wasm_ensure_inited();
+    mp_wasm_path_append(mp_obj_str_get_str(root_in));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_path_append_obj, mod_wasm_path_append);
+
 static mp_obj_t mod_wasm_load(size_t n_args, const mp_obj_t *args) {
     pm_wasm_ensure_inited();
     mp_buffer_info_t bufinfo;
@@ -165,33 +219,15 @@ static mp_obj_t mod_wasm_load(size_t n_args, const mp_obj_t *args) {
     }
 
     qstr qn = qstr_from_strn(fqn, flen);
-    return mp_obj_new_module(qn);
+    mp_obj_t mod = mp_obj_new_module(qn);
+    mp_wasm_store_handle_on_module(mod, h);
+    return mod;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_load_obj, 1, 2, mod_wasm_load);
 
 static mp_obj_t mod_wasm_unload(mp_obj_t name_in) {
     pm_wasm_ensure_inited();
-    const char *name = mp_obj_str_get_str(name_in);
-    size_t nlen = strlen(name);
-
-    mp_map_t *map = &MP_STATE_VM(mp_loaded_modules_dict).map;
-    size_t nrem = 0;
-    mp_obj_t *keys = m_new(mp_obj_t, map->alloc);
-    for (size_t i = 0; i < map->alloc; ++i) {
-        if (!mp_map_slot_is_filled(map, i) || !mp_obj_is_qstr(map->table[i].key)) {
-            continue;
-        }
-        const char *k = qstr_str(MP_OBJ_QSTR_VALUE(map->table[i].key));
-        size_t klen = strlen(k);
-        if ((klen == nlen && memcmp(k, name, nlen) == 0)
-            || (klen > nlen && k[nlen] == '.' && memcmp(k, name, nlen) == 0)) {
-            keys[nrem++] = map->table[i].key;
-        }
-    }
-    for (size_t i = 0; i < nrem; ++i) {
-        mp_map_lookup(map, keys[i], MP_MAP_LOOKUP_REMOVE_IF_FOUND);
-    }
-    m_del(mp_obj_t, keys, map->alloc);
+    mp_wasm_unload_pack(mp_obj_str_get_str(name_in));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_unload_obj, mod_wasm_unload);
@@ -237,7 +273,6 @@ static mp_obj_t mod_wasm___init__(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm___init___obj, mod_wasm___init__);
 
-/* Parent package init — this is what actually runs on `import pymergetic…`. */
 static mp_obj_t mod_pymergetic___init__(void) {
     pm_wasm_ensure_inited();
     return mp_const_none;
@@ -252,6 +287,8 @@ static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_load), MP_ROM_PTR(&mod_wasm_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_unload), MP_ROM_PTR(&mod_wasm_unload_obj) },
     { MP_ROM_QSTR(MP_QSTR_call), MP_ROM_PTR(&mod_wasm_call_obj) },
+    { MP_ROM_QSTR(MP_QSTR_path), MP_ROM_PTR(&mod_wasm_path_obj_fun) },
+    { MP_ROM_QSTR(MP_QSTR_path_append), MP_ROM_PTR(&mod_wasm_path_append_obj) },
     { MP_ROM_QSTR(MP_QSTR_install_hook), MP_ROM_PTR(&mod_wasm_install_hook_obj) },
     { MP_ROM_QSTR(MP_QSTR_uninstall_hook), MP_ROM_PTR(&mod_wasm_uninstall_hook_obj) },
     { MP_ROM_QSTR(MP_QSTR_publish_presence), MP_ROM_PTR(&mod_wasm_publish_presence_obj) },
@@ -274,6 +311,29 @@ const mp_obj_module_t mp_module_pymergetic = {
     .base = { &mp_type_module },
     .globals = (mp_obj_dict_t *)&mp_module_pymergetic_globals,
 };
+
+#if MICROPY_MODULE_ATTR_DELEGATION
+/* ROM pymergetic can't grow; resolve pack namespace children via sys.modules. */
+void mp_module_pymergetic_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    (void)self_in;
+    if (dest[0] != MP_OBJ_NULL) {
+        return;
+    }
+    const char *leaf = qstr_str(attr);
+    size_t llen = strlen(leaf);
+    vstr_t name;
+    vstr_init(&name, 11 + llen);
+    vstr_add_strn(&name, "pymergetic.", 11);
+    vstr_add_strn(&name, leaf, llen);
+    mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
+        MP_OBJ_NEW_QSTR(qstr_from_strn(name.buf, name.len)), MP_MAP_LOOKUP);
+    vstr_clear(&name);
+    if (el != NULL && el->value != MP_OBJ_NULL) {
+        dest[0] = el->value;
+    }
+}
+MP_REGISTER_MODULE_DELEGATION(mp_module_pymergetic, mp_module_pymergetic_attr);
+#endif
 
 MP_REGISTER_MODULE(MP_QSTR_pymergetic, mp_module_pymergetic);
 MP_REGISTER_MODULE(MP_QSTR_pymergetic_dot_wasmmod, mp_module_pymergetic_wasmmod);

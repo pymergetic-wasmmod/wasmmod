@@ -24,7 +24,8 @@ CFLAGS_EXTMOD += -DMICROPY_PY_WASM=1 \
 	-DPM_WASMMOD_GUEST=0
 
 SRC_WASMMOD = \
-	$(WASMMOD_DIR)/ports/micropython/modwasmmod.c
+	$(WASMMOD_DIR)/ports/micropython/modwasmmod.c \
+	$(WASMMOD_DIR)/ports/micropython/finder.c
 
 PY_O += $(addprefix $(BUILD)/, $(SRC_WASMMOD:.c=.o))
 SRC_QSTR += $(SRC_WASMMOD)
