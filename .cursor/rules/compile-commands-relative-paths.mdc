@@ -1,0 +1,37 @@
+---
+description: compile_commands.json must use paths relative to directory — never absolute
+globs: "**/compile_commands.json"
+alwaysApply: true
+---
+
+# compile_commands.json — relative paths only
+
+**FORBIDDEN:** absolute paths anywhere in a compilation database (`directory`, `file`, `command`, `arguments`). No `/home/...`, no machine-specific prefixes. CDBs must be portable across checkouts and machines.
+
+## Required shape
+
+```json
+{
+    "directory": ".",
+    "file": "ports/micropython/modwasmmod.c",
+    "command": "clang ... -c ports/micropython/modwasmmod.c"
+}
+```
+
+- `directory`: `.` or a path **relative to the directory that contains** `compile_commands.json`
+- `file` / `-c` operand: relative to that `directory`
+- `-I` flags: prefer relative (`-I.`, `-I../../ports/unix`, …)
+
+## When editing or regenerating
+
+1. Never write `Path.resolve()` / absolute `cwd` into the JSON.
+2. If a tool emits abs paths, rewrite before commit (strip the tree root; keep `directory` + relative `file`).
+3. Workspace aggregate CDBs (e.g. `.vscode/compile_commands.json`): `directory` like `../packages/.../wasmmod`, `file` relative to that directory — still no abs paths.
+
+## ❌ Bad
+
+```json
+"directory": "/home/you/Devel/os-sdk/packages/.../wasmmod",
+"file": "/home/you/Devel/os-sdk/packages/.../wasmmod/ports/micropython/modwasmmod.c",
+"command": "clang ... -c /home/you/.../modwasmmod.c"
+```

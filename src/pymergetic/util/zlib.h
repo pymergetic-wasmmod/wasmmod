@@ -6,6 +6,6 @@
 #ifndef PYMERGETIC_UTIL_ZLIB_H
 #define PYMERGETIC_UTIL_ZLIB_H
 
-#include "src/pymergetic/util/zlib/__exports__.h" // IWYU pragma: export
+#include "pymergetic/util/zlib/__exports__.h" // IWYU pragma: export
 
 #endif /* PYMERGETIC_UTIL_ZLIB_H */

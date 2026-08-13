@@ -26,7 +26,9 @@
 
 /* Minimal freestanding WASM guest for MicroPython's wasm module. */
 
-#include "src/pymergetic/wasmmod/guest.h"
+#include "pymergetic/wasmmod/guest.h"
+#include "__exports__.h"
+#include "__imports__.h" /* IWYU pragma: keep — empty import face until connects land */
 
 int hello(void) {
     return 42;

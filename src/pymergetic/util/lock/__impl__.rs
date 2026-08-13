@@ -38,7 +38,9 @@ impl Default for pm_util_lock_t {
 
 impl pm_util_lock_t {
     pub const fn new() -> Self {
-        Self { locked: AtomicU32::new(UNLOCKED) }
+        Self {
+            locked: AtomicU32::new(UNLOCKED),
+        }
     }
 
     fn acquire(&self) {
@@ -100,7 +102,10 @@ unsafe impl<T: Send> Sync for SpinLock<T> {}
 
 impl<T> SpinLock<T> {
     pub const fn new(value: T) -> Self {
-        Self { raw: pm_util_lock_t::new(), value: UnsafeCell::new(value) }
+        Self {
+            raw: pm_util_lock_t::new(),
+            value: UnsafeCell::new(value),
+        }
     }
 
     pub fn lock(&self) -> SpinLockGuard<'_, T> {
@@ -109,7 +114,11 @@ impl<T> SpinLock<T> {
     }
 
     pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
-        if self.raw.try_acquire() { Some(SpinLockGuard { lock: self }) } else { None }
+        if self.raw.try_acquire() {
+            Some(SpinLockGuard { lock: self })
+        } else {
+            None
+        }
     }
 }
 
@@ -143,24 +152,12 @@ impl<T> Drop for SpinLockGuard<'_, T> {
 pub type Mutex<T> = SpinLock<T>;
 pub type MutexGuard<'a, T> = SpinLockGuard<'a, T>;
 
+/* Same table as PM_MOD_EXPORT_C — not a second registration system. */
+crate::PM_MOD_EXPORT_RS!("pymergetic.util.lock", pm_util_lock_init, "void(pm_util_lock_t *)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.util.lock", pm_util_lock_acquire, "void(pm_util_lock_t *)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.util.lock", pm_util_lock_release, "void(pm_util_lock_t *)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.util.lock", pm_util_lock_try_acquire, "int32_t(pm_util_lock_t *)");
+
 #[cfg(test)]
-mod tests {
-    // `alloc` is declared once, crate-root, in lib.rs.
-    use super::*;
-
-    #[test]
-    fn locks_out_a_second_try_lock() {
-        let m = Mutex::new(0i32);
-        let guard = m.lock();
-        assert!(m.try_lock().is_none());
-        drop(guard);
-        assert!(m.try_lock().is_some());
-    }
-
-    #[test]
-    fn guard_mutates_through_deref() {
-        let m = Mutex::new(alloc::vec![1, 2, 3]);
-        m.lock().push(4);
-        assert_eq!(*m.lock(), alloc::vec![1, 2, 3, 4]);
-    }
-}
+#[path = "__tests__.rs"]
+mod __tests__;

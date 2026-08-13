@@ -6,6 +6,6 @@
 #ifndef PYMERGETIC_UTIL_MEM_H
 #define PYMERGETIC_UTIL_MEM_H
 
-#include "src/pymergetic/util/mem/__exports__.h" // IWYU pragma: export
+#include "pymergetic/util/mem/__exports__.h" // IWYU pragma: export
 
 #endif /* PYMERGETIC_UTIL_MEM_H */

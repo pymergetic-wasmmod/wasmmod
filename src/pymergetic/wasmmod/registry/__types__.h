@@ -3,6 +3,7 @@
 #ifndef PYMERGETIC_WASMMOD_REGISTRY_TYPES_H
 #define PYMERGETIC_WASMMOD_REGISTRY_TYPES_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -78,6 +79,56 @@ typedef struct {
  * trampolines, later elf/aot. */
 typedef int32_t (*pm_wasmmod_registry_fn_t)(const pm_wasmmod_registry_value_t *args, uint32_t nargs,
     pm_wasmmod_registry_value_t *results, uint32_t nresults);
+
+/* Module `__tests__.*` case — 0 = pass, nonzero = fail. Not an export face. */
+typedef int32_t (*pm_wasmmod_registry_test_fn_t)(void);
+
+/* Portable address — see docs/CALLGRAPH.md.
+ *   SPACE_NATIVE (0): off is a host VA (ELF / resident / unisolated).
+ *   SPACE_SHARED (1): off is a WAMR shared-heap app address.
+ *   SPACE_MODULE (2): off is that module instance's linear-memory app address.
+ * Public faces pass pm_addr_t / pm_buf_t; only the wasm bridge widens to i32. */
+#define PM_ADDR_SPACE_NATIVE  0u
+#define PM_ADDR_SPACE_SHARED  1u
+#define PM_ADDR_SPACE_MODULE  2u
+
+typedef struct {
+    uint32_t space;
+    uint64_t off;
+} pm_addr_t;
+
+typedef struct {
+    pm_addr_t ptr;
+    uint32_t len;
+} pm_buf_t;
+
+static inline __attribute__((unused)) pm_addr_t pm_addr_from_native(const void *p) {
+    pm_addr_t a;
+    a.space = PM_ADDR_SPACE_NATIVE;
+    a.off = (uint64_t)(uintptr_t)p;
+    return a;
+}
+
+static inline __attribute__((unused)) void *pm_addr_as_native(pm_addr_t a) {
+    if (a.space != PM_ADDR_SPACE_NATIVE) {
+        return (void *)0;
+    }
+    return (void *)(uintptr_t)a.off;
+}
+
+static inline __attribute__((unused)) pm_buf_t pm_buf_from_native(const void *p, uint32_t len) {
+    pm_buf_t b;
+    b.ptr = pm_addr_from_native(p);
+    b.len = len;
+    return b;
+}
+
+static inline __attribute__((unused)) pm_wasmmod_registry_value_t pm_wasmmod_registry_value_i32(int32_t v) {
+    pm_wasmmod_registry_value_t x;
+    x.kind = PM_WASMMOD_REGISTRY_VALKIND_I32;
+    x.of.i32 = v;
+    return x;
+}
 
 #ifdef __cplusplus
 }

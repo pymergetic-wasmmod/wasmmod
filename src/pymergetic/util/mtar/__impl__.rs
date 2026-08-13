@@ -131,7 +131,11 @@ unsafe fn read_entry_at(buf: *const u8, buf_len: u32, offset: u32, out: *mut Mta
 
 /// First entry in the archive. Returns MTAR_OK / MTAR_END / MTAR_ERR_*.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pm_util_mtar_first(buf: *const u8, buf_len: u32, out: *mut MtarEntry) -> i32 {
+pub unsafe extern "C" fn pm_util_mtar_first(
+    buf: *const u8,
+    buf_len: u32,
+    out: *mut MtarEntry,
+) -> i32 {
     // SAFETY: forwarding the caller's own unsafe contract to read_entry_at.
     unsafe { read_entry_at(buf, buf_len, 0, out) }
 }
@@ -154,105 +158,18 @@ pub unsafe extern "C" fn pm_util_mtar_next(
     }
 }
 
+/* Same table as PM_MOD_EXPORT_C — not a second registration system. */
+crate::PM_MOD_EXPORT_RS!(
+    "pymergetic.util.mtar",
+    pm_util_mtar_first,
+    "int32_t(const uint8_t *, uint32_t, MtarEntry *)"
+);
+crate::PM_MOD_EXPORT_RS!(
+    "pymergetic.util.mtar",
+    pm_util_mtar_next,
+    "int32_t(const uint8_t *, uint32_t, const MtarEntry *, MtarEntry *)"
+);
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Test-only: builds one valid ustar-ish header block. Not part of the
-    /// public module surface — mtar is a reader, this just gives the
-    /// reader something real to chew on without needing an external `tar`.
-    fn write_header(name: &str, size: usize, typeflag: u8) -> [u8; BLOCK] {
-        let mut h = [0u8; BLOCK];
-        h[NAME_OFF..NAME_OFF + name.len()].copy_from_slice(name.as_bytes());
-        let size_oct = format!("{:011o}\0", size);
-        h[SIZE_OFF..SIZE_OFF + size_oct.len()].copy_from_slice(size_oct.as_bytes());
-        h[TYPEFLAG_OFF] = typeflag;
-        for b in h.iter_mut().skip(CHKSUM_OFF).take(CHKSUM_LEN) {
-            *b = b' ';
-        }
-        let mut sum: u64 = 0;
-        for &b in h.iter() {
-            sum += b as u64;
-        }
-        let chk = format!("{:06o}\0 ", sum);
-        h[CHKSUM_OFF..CHKSUM_OFF + chk.len()].copy_from_slice(chk.as_bytes());
-        h
-    }
-
-    fn pad_to_block(buf: &mut Vec<u8>) {
-        let rem = buf.len() % BLOCK;
-        if rem != 0 {
-            buf.extend(std::iter::repeat_n(0u8, BLOCK - rem));
-        }
-    }
-
-    fn build_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
-        let mut buf = Vec::new();
-        for (name, data) in entries {
-            buf.extend_from_slice(&write_header(name, data.len(), b'0'));
-            buf.extend_from_slice(data);
-            pad_to_block(&mut buf);
-        }
-        buf.extend(std::iter::repeat_n(0u8, BLOCK * 2)); // end-of-archive marker
-        buf
-    }
-
-    #[test]
-    fn iterates_two_entries() {
-        let archive = build_archive(&[
-            ("hello.txt", b"hello world"),
-            ("dir/nested.bin", &[0xAAu8; 700]), // spans two data blocks
-        ]);
-
-        unsafe {
-            let mut e = MtarEntry {
-                name_ptr: core::ptr::null(),
-                name_len: 0,
-                data_ptr: core::ptr::null(),
-                data_len: 0,
-                is_dir: 0,
-                header_off: 0,
-            };
-
-            let rc = pm_util_mtar_first(archive.as_ptr(), archive.len() as u32, &mut e);
-            assert_eq!(rc, MTAR_OK);
-            let name = core::slice::from_raw_parts(e.name_ptr, e.name_len as usize);
-            assert_eq!(name, b"hello.txt");
-            let data = core::slice::from_raw_parts(e.data_ptr, e.data_len as usize);
-            assert_eq!(data, b"hello world");
-            assert_eq!(e.is_dir, 0);
-
-            let rc = pm_util_mtar_next(archive.as_ptr(), archive.len() as u32, &e, &mut e);
-            assert_eq!(rc, MTAR_OK);
-            let name = core::slice::from_raw_parts(e.name_ptr, e.name_len as usize);
-            assert_eq!(name, b"dir/nested.bin");
-            assert_eq!(e.data_len, 700);
-            let data = core::slice::from_raw_parts(e.data_ptr, e.data_len as usize);
-            assert!(data.iter().all(|&b| b == 0xAA));
-
-            let rc = pm_util_mtar_next(archive.as_ptr(), archive.len() as u32, &e, &mut e);
-            assert_eq!(rc, MTAR_END);
-        }
-    }
-
-    #[test]
-    fn rejects_bad_checksum() {
-        let mut archive = build_archive(&[("x", b"y")]);
-        archive[CHKSUM_OFF] = b'9'; // corrupt the checksum field
-        unsafe {
-            let mut e = core::mem::zeroed();
-            let rc = pm_util_mtar_first(archive.as_ptr(), archive.len() as u32, &mut e);
-            assert_eq!(rc, MTAR_ERR_CHECKSUM);
-        }
-    }
-
-    #[test]
-    fn empty_archive_ends_immediately() {
-        let archive = [0u8; BLOCK * 2];
-        unsafe {
-            let mut e = core::mem::zeroed();
-            let rc = pm_util_mtar_first(archive.as_ptr(), archive.len() as u32, &mut e);
-            assert_eq!(rc, MTAR_END);
-        }
-    }
-}
+#[path = "__tests__.rs"]
+mod __tests__;

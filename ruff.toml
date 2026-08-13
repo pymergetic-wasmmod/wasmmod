@@ -1,0 +1,10 @@
+# IDE / host lint for pack + src Python (µPy runtime still owns import).
+target-version = "py312"
+src = ["src", "examples"]
+
+[lint]
+select = ["E", "F", "I", "UP"]
+
+[lint.per-file-ignores]
+# Native wasm exports are injected onto the pack module at load time.
+"examples/hello/mount/__init__.py" = ["F821"]

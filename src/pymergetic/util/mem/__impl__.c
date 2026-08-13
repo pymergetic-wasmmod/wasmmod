@@ -4,9 +4,9 @@
  * mem/port/mem.c (packages/metalpython/extmod/metal/...) down into
  * wasmmod, so that's the one place this logic lives — metal becomes a
  * consumer of this module instead of carrying its own copy. */
-#include "src/pymergetic/util/mem/__exports__.h"
+#include "pymergetic/util/mem/__exports__.h"
 
-#include "src/pymergetic/util/lock.h"
+#include "pymergetic/util/lock.h"
 #include "third_party/tlsf/tlsf.h"
 
 #include <string.h>
@@ -275,3 +275,20 @@ size_t pm_util_mem_arena_overhead(void) {
     size_t structural_min = tlsf_size() + tlsf_pool_overhead() + 64u;
     return hdr + align_up(structural_min, PM_UTIL_MEM_PAGE_SIZE);
 }
+
+/* Same table as PM_MOD_EXPORT_RS! — C language face, next to the muscle. */
+#include "pymergetic/wasmmod/guest.h"
+
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_create, pm_util_mem_arena_create, pm_util_mem_arena_t *(void *, size_t));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_destroy, pm_util_mem_arena_destroy, void(pm_util_mem_arena_t *));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_alloc, pm_util_mem_alloc, void *(pm_util_mem_arena_t *, size_t));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_realloc, pm_util_mem_realloc, void *(pm_util_mem_arena_t *, void *, size_t));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_memalign, pm_util_mem_memalign, void *(pm_util_mem_arena_t *, size_t, size_t));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_free, pm_util_mem_free, void(pm_util_mem_arena_t *, void *));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_map, pm_util_mem_map, void *(pm_util_mem_arena_t *, size_t));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_unmap, pm_util_mem_unmap, int32_t(pm_util_mem_arena_t *, void *, size_t));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_bytes, pm_util_mem_arena_bytes, size_t(const pm_util_mem_arena_t *));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_map_used, pm_util_mem_arena_map_used, size_t(const pm_util_mem_arena_t *));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_heap_used, pm_util_mem_arena_heap_used, size_t(const pm_util_mem_arena_t *));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_hole, pm_util_mem_arena_hole, size_t(const pm_util_mem_arena_t *));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_overhead, pm_util_mem_arena_overhead, size_t(void));

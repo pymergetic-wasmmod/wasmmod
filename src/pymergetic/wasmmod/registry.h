@@ -6,6 +6,6 @@
 #ifndef PYMERGETIC_WASMMOD_REGISTRY_H
 #define PYMERGETIC_WASMMOD_REGISTRY_H
 
-#include "src/pymergetic/wasmmod/registry/__exports__.h" // IWYU pragma: export
+#include "pymergetic/wasmmod/registry/__exports__.h" // IWYU pragma: export
 
 #endif /* PYMERGETIC_WASMMOD_REGISTRY_H */

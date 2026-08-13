@@ -23,9 +23,18 @@
 # THE SOFTWARE.
 
 # Embedded Python side of the hello pack (package root).
+#
+# `hello` / `add` are native guest exports bound onto this module at pack load
+# (see src/.../hello/__impl__.c). Declared under TYPE_CHECKING for the IDE.
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    def hello() -> int: ...
+    def add(a: int, b: int) -> int: ...
 
 def greet():
     return "hello from pack py"
 
 def answer():
-    return hello()
+    return hello()  # native-bound at load

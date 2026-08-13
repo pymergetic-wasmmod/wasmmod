@@ -6,6 +6,6 @@
 #ifndef PYMERGETIC_UTIL_LOCK_H
 #define PYMERGETIC_UTIL_LOCK_H
 
-#include "src/pymergetic/util/lock/__exports__.h" // IWYU pragma: export
+#include "pymergetic/util/lock/__exports__.h" // IWYU pragma: export
 
 #endif /* PYMERGETIC_UTIL_LOCK_H */

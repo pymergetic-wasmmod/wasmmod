@@ -1,0 +1,24 @@
+---
+description: Cell/chromosome in-bin build doctrine — util.gen, VFS/mem sinks, opt-in build machinery
+alwaysApply: true
+---
+
+# Cell build (wasmmod)
+
+Read [docs/CELLBUILD.md](docs/CELLBUILD.md) before changing facegen, pack
+source embed, or “where does build live?”.
+
+**Locked:**
+- Modules/packs ≈ chromosomes: unroll embedded source, introspect registry,
+  rebuild faces, later JIT/reload — at full runtime when the feature is on.
+- `pymergetic.util.gen` is product introspection, not a host-only scanner tree.
+- Emit sinks: **FsSink / VfsSink / MemSink** + `diff_against_included` + live
+  µPy `__init__.pyi` provider + µPy VFS ops (`run_vfs`).
+- `__exports__.h` is **autogen** from the one registry via guest
+  (`PM_MOD_EXPORT_C` / `PM_MOD_EXPORT_RS!`) + util.gen — do not hand-edit.
+- JIT (in-bin C/RS compilers) is **later-later**; never block facegen/VFS/pyi on it.
+- Menuconfig: `mpconfig_wasm.h` + `MICROPY_PY_WASM_GEN` (cargo `gen` /
+  `build-machinery`). Lean freestanding keeps GEN off.
+
+**Do not:** reintroduce `tools/gen` / facegen regex SoT; claim browser can
+never rebuild; assume autogen headers must always ship in the binary.

@@ -7,6 +7,6 @@
 #ifndef PYMERGETIC_UTIL_PYSAMPLE_H
 #define PYMERGETIC_UTIL_PYSAMPLE_H
 
-#include "src/pymergetic/util/pysample/__exports__.h" // IWYU pragma: export
+#include "pymergetic/util/pysample/__exports__.h" // IWYU pragma: export
 
 #endif /* PYMERGETIC_UTIL_PYSAMPLE_H */

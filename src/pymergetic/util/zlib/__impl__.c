@@ -1,5 +1,5 @@
 /* pymergetic.util.zlib — impl. See __exports__.h for the module contract. */
-#include "src/pymergetic/util/zlib/__exports__.h"
+#include "pymergetic/util/zlib/__exports__.h"
 
 #include <string.h>
 
@@ -65,3 +65,9 @@ int32_t pm_util_zlib_deflate(const void *src, size_t src_len, void *dst, size_t 
     }
     return (int32_t)ctx.pos;
 }
+
+/* Same table as PM_MOD_EXPORT_RS! — C language face, next to the muscle. */
+#include "pymergetic/wasmmod/guest.h"
+
+PM_MOD_EXPORT_C(pymergetic.util.zlib, pm_util_zlib_inflate, pm_util_zlib_inflate, int32_t(const void *, size_t, void *, size_t));
+PM_MOD_EXPORT_C(pymergetic.util.zlib, pm_util_zlib_deflate, pm_util_zlib_deflate, int32_t(const void *, size_t, void *, size_t, void *, size_t));

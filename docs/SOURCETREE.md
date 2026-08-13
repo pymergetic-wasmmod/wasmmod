@@ -241,7 +241,7 @@ module:
 ```toml
 impl = "c"
 build = ["wasm", "elf"]   # array: one source tree, N container twins
-version = "0.1.0"         # only meaningful for a root (deps resolution)
+version = "0.1.0"         # publish-unit version (roots + kernel modules)
 
 [build_cfg]
 mount = "mount"           # dir of raw files (incl. .py) embedded as pack payload —
@@ -653,7 +653,8 @@ chain of `../`:
 
 | Root | `-I` (already in `.clangd`, nothing new needed) | Example include |
 |---|---|---|
-| wasmmod repo root | `-I.` | `#include "src/pymergetic/util/mem/__exports__.h"`, `#include "third_party/tlsf/tlsf.h"` |
+| wasmmod repo root | `-I.` | `#include "third_party/tlsf/tlsf.h"` |
+| wasmmod `src/` | `-Isrc` | `#include "pymergetic/util/mem/__exports__.h"` (**never** spell `src/` inside the include) |
 | MicroPython TOP | `-I../..` | `#include "lib/uzlib/uzlib.h"` (same convention upstream's own `extmod/moddeflate.c` already uses) |
 
 Two concrete reasons, not just taste:
@@ -717,8 +718,8 @@ from the rationale prose each time.
 | `pep420` | required if this is a namespace node | bool | mutually exclusive with `impl`; namespace nodes have no muscle file |
 | `impl` | required unless `pep420 = true` | `"c"` \| `"rs"` \| `"py"` | exactly one defining language per module |
 | `on_load` / `on_unload` | optional | string | lifecycle hook function name; any module, not just roots |
-| `deps` | optional | table (`{ "dotted.fqn" = "version" }`) | **`build`-marked roots only** — non-root modules have no independent existence to depend on/pin a version of |
-| `version` | optional | string | **`build`-marked roots only** — a non-root module always ships baked into whichever root's artifact contains it, at that root's own commit/checkout; there's no way for it to be "at a different version" than its own siblings |
+| `deps` | optional | table (`{ "dotted.fqn" = "version" }`) | **`build`-marked roots only** — pins checked at load via `pymergetic.util.version` against the dependency's **registry** version |
+| `version` | optional | string | **Publish units:** `build`-marked deliverable roots **and** host/kernel modules that are independently dependable (e.g. `pymergetic.wasmmod`). Leaf modules inside a pack stay unversioned (baked into the root). Baked into `wasmmod.pkg` (always) and registry on load/init. |
 | `build` | optional, presence marks a deliverable root | array of `"wasm"` \| `"elf"` | one source subtree, N compiled container twins; **cannot nest** — see "Recursive build boundary" below |
 | `[build_cfg]` sub-table | only meaningful with `build` set | — | `mount` (path, data-plane only — see "Deliverable root"), `freeze` (bool), `targets` (list of `upy:mpyN:sibM` / `cpy:cpNNN` strings), `keep_source` (bool), `embed_source` (bool), `compress_source` (bool), `compress_pack` (bool) |
 
@@ -734,6 +735,19 @@ table earlier in this doc for where each one's job went).
 | `rs` | `__impl__.rs` (types SoT too) | `__types__.h` (cbindgen) | `__exports__.h` (cbindgen) | `__imports__.h` (emitted or hand) | `__init__.pyi` (generated) |
 | `py` | `__init__.py` (types = the function's own hints, via `ast`) | — (hints are the SoT) | `__exports__.h` + `__exports__.rs` (generated from hints) | — (Py has no import face; `sys.modules` already location-transparent) | n/a (it *is* the source) |
 | `pep420` | — (no muscle file) | — | — | — | — |
+
+**Module tests** (not faces — never emitted by `util.gen`):
+
+| File | Role |
+|---|---|
+| `__tests__.rs` / `__tests__.c` / `__tests__.py` | Language entry beside the card; cases register via `PM_MOD_TEST_RS!` / `PM_MOD_TEST_C` into a **parallel test table** on the same `ModEntry` |
+| `__tests__/` | Optional split of cases (included by the entry) — **not** a new fqn / no `__pmm__.toml` |
+| Case ABI | `extern "C" fn() -> i32` — `0` pass, nonzero fail |
+| Host runner | `util::mod_test::registry_mod_tests_all` walks every registered module's tests; filter with `WASMMOD_TEST_FQN` |
+| Guest pack | `__tests__.c` linked into the chromosome; packer writes `wasmmod.tests` (MPTE); loader claims test trampolines (never product exports). `__tests__.*` also embed in `wasmmod.source` |
+| In-bin UI | `wasmmod.test` / `test_all` / `tests` / `test_count` over the same registry table |
+
+Do not put `#[cfg(test)]` blobs in `__impl__` — keep muscle and tests separated. RS wires `__tests__.rs` as a `#[cfg(test)]` submodule of `__impl__.rs` (private helpers stay reachable).
 
 Every `impl` also needs, as **direct siblings** of the module's folder (or
 the module folder itself, for `pep420`): the card (folder case:
@@ -889,6 +903,11 @@ Decision log below.
 | 2026-08-11 | `pmm-parser` shipped (`dev/tools/src/pymergetic/wasmmod/tools/pmm.py` + `faces.py`, C-only v1): walks a `*.pmm.toml` card tree, enforces fqn/path + recursive-build-boundary + `deps`/`version`-root-only at load time, then *synthesizes a `pack.toml`-shaped dict* rather than reimplementing `manifest_to_build()` — the existing, untouched function is still the one place a manifest dict becomes a build plan, for either manifest format. `pack.py`'s `main()` gained one dispatch branch (`pmm.resolve_pmm_root()` tried first, `resolve_pack_root()` unchanged as fallback); both formats coexist, `pack.toml` support is untouched (`remove-pack-toml` stays a separate, later backlog item) |
 | 2026-08-11 | Face-export-discovery v1 (C only): regex-scans `__impl__.c` for `PM_MOD_EXPORT_C(module, export_name, impl_fn, c_type_signature)` call sites, parses the literal signature text into the same compact `i32`/`i32_i32`/… tag `pack.py`'s own `sig_tag()` already understood (anything not all-i32 — floats, 64-bit ints, structs by value — omits `sig` entirely and falls back to `SIG_AUTO`, which the loader's real Wasm-type introspection always handles correctly anyway, just not compactly). `PM_MOD_EXPORT_C` itself lives in the unified tree as `src/pymergetic/wasmmod/guest.h` (umbrella, path == module — **not** a parallel `include/`); it is a deliberate no-op at the C level; real slot-backed-wrapper + eager-connect registration is separate, later `pm-mod-export-macro` work, not needed yet since `hello` has no same-artifact private calls |
 | 2026-08-12 | mpwm host face restored at `ports/micropython/` (thin `modwasmmod.c` + `upy-host` staticlib): auto `install_hook`, `sys.modules` → `pm_wasmmod_registry_publish` presence sync, `load`/`call` over Rust registry+loader. No `host_slots`/`call0_py`. Pack finder (`loader/finder/`) still next |
-| 2026-08-12 | Removed the mistaken parallel `include/` and `python/` top-level dirs: guest ABI is `src/pymergetic/wasmmod/guest.h`, PyPI `rt` is `src/pymergetic/wasmmod/rt/`, packaging manifest is root `pyproject.toml` (sibling of `Cargo.toml`, not a second source tree). Packer's `-I` is the crate root so guests `#include "src/pymergetic/wasmmod/guest.h"` per the locked `-I` rule |
+| 2026-08-12 | Removed the mistaken parallel `include/` and `python/` top-level dirs: guest ABI is `src/pymergetic/wasmmod/guest.h`, PyPI `rt` is `src/pymergetic/wasmmod/rt/`, packaging manifest is root `pyproject.toml` (sibling of `Cargo.toml`, not a second source tree). Packer's `-I` was crate root so guests `#include "src/pymergetic/wasmmod/guest.h"` (superseded 2026-08-13) |
+| 2026-08-13 | **-I rule tightened:** `#include` never spells `src/` — use `-Isrc` + `#include "pymergetic/…"`. Packer `guest_include_flags()`, `.clangd`, `micropython.mk`, `build.rs`, CDBs updated. Files still live under `src/` on disk. |
+| 2026-08-13 | **`wasmmod-gen` py + guest access faces:** `impl=py` → host `ast` on `__init__.py` hints → `register_fn` → emit `__exports__.h/.rs` (C/RS call access; live `pyexport` thunks later). Unlinked C cards (guest `hello`) → scan `PM_MOD_EXPORT_C` in `__impl__.c` into the same registry emit path. Empty umbrella `pymergetic.wasmmod` still skips. |
+| 2026-08-13 | **No `__init__.pyi` beside `__init__.py`:** `impl=py` and pack `mount/` keep typing in the `.py` (`TYPE_CHECKING` / real hints). `__init__.pyi` is only the generated editor face for `impl=c`/`rs` (no `.py` muscle). `wasmmod-gen` skips/scrubs sibling `.pyi` for `impl=py`. |
+| 2026-08-13 | **Module versioning (complete):** `ModEntry.version` + `publish_ver`/`set_version`/`version` query; always-on `wasmmod.pkg` (MPPK) baked on pack and into registry on load/ELF; `pymergetic.util.version` (`cmp`/`satisfies`: `*`, exact, `>=`, `^`, PEP440 compact pre like `0.2.0a2`); finder enforces dep pins against registry (missing version = hard fail); card `version` → gen `__version__.h` → `MICROPY_WASM_VERSION` / registry seed; `wasmmod.version` reads registry. `deps` stay `build`-root-only; `version` also allowed on host/kernel publish units (no `build`) — `pmm.py` gate updated. |
+| 2026-08-13 | **Module `__tests__.*` standard:** cases live in `__tests__.{rs,c,py}` (optional `__tests__/` split), register via `PM_MOD_TEST_*` into `ModEntry.tests` (not product exports / not facegen). Host harness `util::mod_test::registry_mod_tests_all`. Guest: packer compiles `__tests__.c`, emits `wasmmod.tests` (MPTE); loader registers test trampolines. In-bin: `wasmmod.test` / `test_all` / `tests` / `test_count`. Migrated version/lock/lz4/mtar/api/registry/loader/gen off `__impl__` blobs. |
 | 2026-08-11 | Found while implementing `pmm-parser`: `wasmmod_root()`'s own `_looks_like()` (`dev/tools/src/…/paths.py`) only recognized the *old* reference tree's shape (`loader.c` / `crates/wasmmod-read`) — a real, previously-unnoticed bug, since every packer path (`guest_include_dir()`, `find_wasm_ld()`, `find_clang()`, `find_mpy_cross()`) depends on it to find the guest umbrella header and friends. Broadened to also recognize this tree's shape (`Cargo.toml` + `src/pymergetic/wasmmod/`) |
 | 2026-08-11 | `hello` converted for real (`examples/hello/`, first `examples/` dir in this tree) and proven two ways: manually via `make -C examples/hello` (built a real, loadable `.wasm`) and via a new Rust test (`load_call_unload_roundtrips_through_real_pmm_pack` in `loader/__impl__.rs`) that shells out to the packer for real, then loads the result through `pm_wasmmod_loader_load` and calls `hello()`/`add(41,1)` via the registry — same "real, not synthetic" posture as the AOT proof. Mount-tree placement (see the `[build_cfg].mount` decision row above) meant restructuring `hello`'s old flat `src/` (native + Python side by side) into `src/pymergetic/wasmmod_examples/hello/` (fqn-anchored, native only) plus a sibling `mount/` (the old Python tree, byte-for-byte, as payload data) — a real, necessary shape change beyond a pure manifest-format swap, driven by "path == module" now actually being enforced |

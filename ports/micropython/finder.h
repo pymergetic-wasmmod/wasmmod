@@ -8,7 +8,8 @@
  *   <slash>/__init__.wasm
  *
  * Host faces (pymergetic.wasmmod / .upy / .metal) are never treated as
- * guest packs. CDN/HTTP and .aot/.elf/.zlib are deferred.
+ * guest packs. Containers (offline): .elf / .aotN / .aot / .wasm (+ .zlib).
+ * CDN/HTTP is deferred.
  */
 
 #ifndef MICROPY_INCLUDED_WASMMOD_PORTS_FINDER_H
@@ -21,7 +22,7 @@
 #include "py/misc.h"
 #include "py/obj.h"
 
-#include "src/pymergetic/wasmmod/registry/__types__.h"
+#include "pymergetic/wasmmod/registry/__types__.h"
 
 bool mp_wasm_is_host_face(const char *dotted_name);
 

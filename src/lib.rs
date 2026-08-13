@@ -15,13 +15,13 @@
 //! consumer's `Cargo.toml`) so `use pymergetic::util::mem;` reads
 //! exactly like the dotted path it mirrors — no
 //! `pymergetic_wasmmod::pymergetic::` stutter.
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(any(test, feature = "gen")), no_std)]
 
 // Unlike `core`, `alloc` isn't implicitly linked/path-resolvable even in
 // a 2018+-edition crate — it needs one explicit `extern crate alloc;`
 // declaration to exist at all as a usable path. Declaring it here, at
 // crate root, rather than per-module, is what makes a bare `alloc::`
-// path resolve from *any* module in the crate (registry, lz4, ...); a
+// path resolve from *any* module in this crate (registry, lz4, ...); a
 // leaf module's own `extern crate alloc;` would only be visible inside
 // that module. This isn't `no_std`-only, either: `alloc` ships as part
 // of every Rust toolchain regardless of `std`, so this line is a no-op
@@ -32,8 +32,9 @@ extern crate alloc;
 
 /// libc-backed `GlobalAlloc` + `panic_handler` for linking into µPy
 /// (`cargo rustc --features upy-host --crate-type staticlib`). Tests use
-/// `std` and must not enable this feature.
-#[cfg(all(feature = "upy-host", not(test)))]
+/// `std` and must not enable this feature. Never combine with ``gen``
+/// (host CLI needs real std).
+#[cfg(all(feature = "upy-host", not(test), not(feature = "gen")))]
 mod upy_host_alloc {
     use core::alloc::{GlobalAlloc, Layout};
     use core::ffi::c_void;

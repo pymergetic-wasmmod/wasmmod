@@ -19,5 +19,15 @@ pub mod lz4;
 #[path = "util/lock.rs"]
 pub mod lock;
 
+#[path = "util/version.rs"]
+pub mod version;
+
+#[cfg(test)]
+#[path = "util/mod_test.rs"]
+pub mod mod_test;
+
 #[path = "util/pysample.rs"]
 pub mod pysample;
+
+#[path = "util/gen.rs"]
+pub mod r#gen;

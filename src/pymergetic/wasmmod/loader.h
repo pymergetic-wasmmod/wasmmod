@@ -6,6 +6,6 @@
 #ifndef PYMERGETIC_WASMMOD_LOADER_H
 #define PYMERGETIC_WASMMOD_LOADER_H
 
-#include "src/pymergetic/wasmmod/loader/__exports__.h" // IWYU pragma: export
+#include "pymergetic/wasmmod/loader/__exports__.h" // IWYU pragma: export
 
 #endif /* PYMERGETIC_WASMMOD_LOADER_H */

@@ -1,19 +1,40 @@
-# clangd for wasmmod (directory of this file = crate root).
+# clangd for wasmmod (this file's directory = crate root).
 #
-# Relied-upon fact: relative -I flags are resolved against the *compile
-# command's working directory*, not this file. So we point at
-# compile_commands.json here (absolute -I to this crate). The os-sdk
-# workspace also forces --compile-commands-dir=.vscode; keep matching
-# micropython-wasmmod entries there too.
+# ALWAYS inject MicroPython TOP (-I../..) for every TU under this tree so
+# host port files (modwasmmod.c → py/builtin.h) and anything that pulls
+# µPy headers don't depend on PathMatch / CDB roulette. Guest-only flags
+# stay in the examples/ block.
 CompileFlags:
   CompilationDatabase: .
+  Add:
+    - -xc
+    - -std=gnu11
+    - -I.
+    - -Isrc
+    - -Ithird_party/wamr/core/iwasm/include
+    - -I../..
+    - -I../../ports/unix
+    - -I../../ports/unix/variants/standard
+    - -I../../ports/unix/build-wasm
+    - -DMICROPY_PY_WASM=1
+    - -DMICROPY_MODULE_BUILTIN_INIT=1
+    - -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1
+    - -Wno-unknown-attributes
 
 ---
 
-# Guests under examples/ — CDB already sets -I<crate> -DPM_WASMMOD_GUEST.
+# Host µPy port — not a guest TU.
+If:
+  PathMatch: .*/ports/micropython/.*\.(c|h)$
+CompileFlags:
+  Add:
+    - -DPM_WASMMOD_GUEST=0
+
+---
+
+# Guests under examples/
 If:
   PathMatch: .*/examples/.*\.(c|h|cc|cpp)$
 CompileFlags:
   Add:
     - -DPM_WASMMOD_GUEST=1
-    - -Wno-unknown-attributes

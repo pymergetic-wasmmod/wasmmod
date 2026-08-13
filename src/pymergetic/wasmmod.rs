@@ -9,3 +9,10 @@ pub mod registry;
 
 #[path = "wasmmod/loader.rs"]
 pub mod loader;
+
+#[path = "wasmmod/api.rs"]
+pub mod api;
+
+/// C face: `guest.h`. RS face: `guest.rs` (`PM_MOD_EXPORT_RS!` ≡ `PM_MOD_EXPORT_C`).
+#[path = "wasmmod/guest.rs"]
+pub mod guest;

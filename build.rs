@@ -36,6 +36,7 @@
 
 fn main() {
     build_util_mem();
+    build_util_zlib();
     build_wamr();
     build_wamrc();
 }
@@ -57,17 +58,55 @@ fn build_util_mem() {
     println!("cargo:rerun-if-changed=third_party/tlsf/tlsf.c");
     println!("cargo:rerun-if-changed=third_party/tlsf/tlsf.h");
 
-    cc::Build::new()
+    // cargo_metadata(false): we emit static:+whole-archive ourselves so
+    // PM_MOD_EXPORT_C .init_array ctors survive --gc-sections in bins
+    // (wasmmod-gen) that don't otherwise reference every util symbol.
+    let mut build = cc::Build::new();
+    build
         .file("src/pymergetic/util/mem/__impl__.c")
         .file("third_party/tlsf/tlsf.c")
-        // `-I.` — this tree's own root-relative include rule (see
-        // SOURCETREE.md "-I rule"): every `src/pymergetic/...` include
-        // inside `__impl__.c` resolves from here, not from the file's
-        // own directory.
+        // `-I.` for third_party/; `-Isrc` for `#include "pymergetic/…"`
+        // (never spell `src/` inside the include — see SOURCETREE.md).
         .include(&root)
+        .include(format!("{root}/src"))
         .include(format!("{root}/third_party/tlsf"))
+        .define("PM_WASMMOD_GUEST", "0")
         .warnings(true)
+        .cargo_metadata(false)
         .compile("pm_util_mem");
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static:+whole-archive=pm_util_mem");
+}
+
+fn build_util_zlib() {
+    let root = manifest_dir();
+    // µPy TOP is two levels up from this crate (extmod/wasmmod → package root).
+    let mpy_top = format!("{root}/../..");
+    let uzlib = format!("{mpy_top}/lib/uzlib");
+    println!("cargo:rerun-if-changed=src/pymergetic/util/zlib/__impl__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/util/zlib/__exports__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/util/zlib/__types__.h");
+    println!("cargo:rerun-if-changed={uzlib}/tinflate.c");
+    println!("cargo:rerun-if-changed={uzlib}/lz77.c"); // includes defl_static.c
+    println!("cargo:rerun-if-changed={uzlib}/defl_static.c");
+
+    let mut build = cc::Build::new();
+    build
+        .file("src/pymergetic/util/zlib/__impl__.c")
+        .file(format!("{uzlib}/tinflate.c"))
+        .file(format!("{uzlib}/lz77.c"))
+        .include(&root)
+        .include(format!("{root}/src"))
+        .include(&mpy_top)
+        .include(&uzlib) // lz77.c: #include "uzlib.h"
+        .define("PM_WASMMOD_GUEST", "0")
+        .warnings(true)
+        .cargo_metadata(false)
+        .compile("pm_util_zlib");
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static:+whole-archive=pm_util_zlib");
 }
 
 fn build_wamr() {
@@ -145,7 +184,11 @@ fn find_llvm_config() -> String {
         "llvm-config-14",
     ];
     for candidate in candidates {
-        if std::process::Command::new(candidate).arg("--version").output().is_ok_and(|o| o.status.success()) {
+        if std::process::Command::new(candidate)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
             return candidate.to_string();
         }
     }
@@ -170,7 +213,10 @@ fn llvm_cmake_dir(llvm_config: &str) -> String {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    String::from_utf8(output.stdout).expect("llvm-config --cmakedir printed non-UTF8 output").trim().to_string()
+    String::from_utf8(output.stdout)
+        .expect("llvm-config --cmakedir printed non-UTF8 output")
+        .trim()
+        .to_string()
 }
 
 fn find_file_named(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
@@ -207,7 +253,11 @@ fn build_wamrc() {
         .build();
 
     let build_dir = dst.join("build");
-    let wamrc_path = find_file_named(&build_dir, "wamrc")
-        .unwrap_or_else(|| panic!("wamrc binary not found anywhere under {}", build_dir.display()));
+    let wamrc_path = find_file_named(&build_dir, "wamrc").unwrap_or_else(|| {
+        panic!(
+            "wamrc binary not found anywhere under {}",
+            build_dir.display()
+        )
+    });
     println!("cargo:rustc-env=WAMRC_PATH={}", wamrc_path.display());
 }

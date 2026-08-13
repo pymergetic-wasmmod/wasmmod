@@ -7,6 +7,6 @@
 #ifndef PYMERGETIC_UTIL_MTAR_H
 #define PYMERGETIC_UTIL_MTAR_H
 
-#include "src/pymergetic/util/mtar/__exports__.h" // IWYU pragma: export
+#include "pymergetic/util/mtar/__exports__.h" // IWYU pragma: export
 
 #endif /* PYMERGETIC_UTIL_MTAR_H */

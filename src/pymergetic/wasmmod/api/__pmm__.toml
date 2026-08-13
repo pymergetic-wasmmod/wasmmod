@@ -1,0 +1,3 @@
+# Portable call helpers (hand-written until PMM codegen).
+fqn = "pymergetic.wasmmod.api"
+impl = "rs"

@@ -1,17 +1,20 @@
 /*
  * Pack path finder — see finder.h.
+ * Offline containers: .elf / .aotN / .aot / .wasm, each optionally + .zlib.
+ * No CDN / HTTP.
  */
 
 #include "ports/micropython/finder.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "extmod/vfs.h"
 #include "py/builtin.h"
 #include "py/mperrno.h"
+#include "py/nlr.h"
 #include "py/objlist.h"
 #include "py/objmodule.h"
-#include "py/objstr.h"
 #include "py/runtime.h"
 #include "py/stream.h"
 
@@ -19,14 +22,46 @@
 #error "wasmmod pack finder requires MICROPY_PY_SYS_PATH"
 #endif
 
-#include "src/pymergetic/wasmmod/loader/__exports__.h"
-#include "src/pymergetic/wasmmod/registry/__exports__.h"
+#include "ports/micropython/packbind.h"
+#include "pymergetic/util/version/__exports__.h"
+#include "pymergetic/wasmmod/loader/__exports__.h"
+#include "pymergetic/wasmmod/pack/__types__.h"
+#include "pymergetic/wasmmod/pack/alloc.h"
+#include "pymergetic/wasmmod/pack/format/common/format.h"
+#include "pymergetic/wasmmod/pack/zlib_env.h"
+#include "pymergetic/wasmmod/registry/__exports__.h"
 
-MP_REGISTER_ROOT_POINTER(mp_obj_t mp_wasm_path_obj);
+#ifndef MICROPY_PY_WASM_ELF
+#define MICROPY_PY_WASM_ELF (0)
+#endif
+
+#ifndef MICROPY_WASM_AOT_VERSION
+#define MICROPY_WASM_AOT_VERSION (0)
+#endif
+
+#ifndef MICROPY_WASM_CONTAINERS
+#define MICROPY_WASM_CONTAINERS "elf,aot,wasm"
+#endif
+
+#ifndef MICROPY_WASM_VERIFY
+#define MICROPY_WASM_VERIFY (0)
+#endif
+
+#if MICROPY_WASM_VERIFY
+#include "pymergetic/wasmmod/verify/__exports__.h"
+#endif
+
+/* Root pointer name must not match the getter (clangd/type confusion). */
+MP_REGISTER_ROOT_POINTER(mp_obj_t mp_wasm_path);
 
 bool mp_wasm_is_host_face(const char *dotted_name) {
     if (dotted_name == NULL || dotted_name[0] == '\0') {
         return false;
+    }
+    /* Bare umbrella only (exact). Do NOT treat every pymergetic.* as a
+     * host face — guest packs live under pymergetic.wasmmod_examples.*. */
+    if (strcmp(dotted_name, "pymergetic") == 0) {
+        return true;
     }
     static const char *const faces[] = {
         "pymergetic.wasmmod",
@@ -44,10 +79,10 @@ bool mp_wasm_is_host_face(const char *dotted_name) {
 }
 
 mp_obj_t mp_wasm_path_obj(void) {
-    if (MP_STATE_VM(mp_wasm_path_obj) == MP_OBJ_NULL) {
-        MP_STATE_VM(mp_wasm_path_obj) = mp_obj_new_list(0, NULL);
+    if (MP_STATE_VM(mp_wasm_path) == MP_OBJ_NULL) {
+        MP_STATE_VM(mp_wasm_path) = mp_obj_new_list(0, NULL);
     }
-    return MP_STATE_VM(mp_wasm_path_obj);
+    return MP_STATE_VM(mp_wasm_path);
 }
 
 void mp_wasm_path_append(const char *root) {
@@ -96,39 +131,109 @@ static bool join_try_file(const char *root, const char *rel, vstr_t *path_out) {
     return false;
 }
 
+/* Prefer rel+".zlib" when present. */
+static bool try_rel_prefer_zlib(const char *root, const char *rel, vstr_t *path_out) {
+    vstr_t zrel;
+    vstr_init(&zrel, strlen(rel) + 6);
+    vstr_add_str(&zrel, rel);
+    vstr_add_str(&zrel, ".zlib");
+    if (join_try_file(root, vstr_null_terminated_str(&zrel), path_out)) {
+        vstr_clear(&zrel);
+        return true;
+    }
+    vstr_clear(&zrel);
+    return join_try_file(root, rel, path_out);
+}
+
+static bool try_stem_ext(const char *root, const char *stem, const char *ext, vstr_t *path_out) {
+    vstr_t rel;
+    vstr_init(&rel, strlen(stem) + strlen(ext) + 1);
+    vstr_add_str(&rel, stem);
+    vstr_add_str(&rel, ext);
+    bool ok = try_rel_prefer_zlib(root, vstr_null_terminated_str(&rel), path_out);
+    vstr_clear(&rel);
+    return ok;
+}
+
+static bool try_pkg_init(const char *root, const char *stem, const char *ext, vstr_t *path_out) {
+    vstr_t rel;
+    vstr_init(&rel, strlen(stem) + strlen(ext) + 14);
+    vstr_add_str(&rel, stem);
+    vstr_add_str(&rel, "/__init__");
+    vstr_add_str(&rel, ext);
+    bool ok = try_rel_prefer_zlib(root, vstr_null_terminated_str(&rel), path_out);
+    vstr_clear(&rel);
+    return ok;
+}
+
+static bool try_one_ext(const char *root, const char *dotted, const char *slash, const char *ext,
+    vstr_t *path_out) {
+    if (try_stem_ext(root, dotted, ext, path_out)) {
+        return true;
+    }
+    if (try_stem_ext(root, slash, ext, path_out)) {
+        return true;
+    }
+    if (try_pkg_init(root, slash, ext, path_out)) {
+        return true;
+    }
+    return false;
+}
+
+static void aot_ext(char *buf, size_t buflen) {
+    unsigned v = (unsigned)MICROPY_WASM_AOT_VERSION;
+    if (v > 0) {
+        snprintf(buf, buflen, ".aot%u", v);
+    } else {
+        snprintf(buf, buflen, ".aot");
+    }
+}
+
+static bool try_aot(const char *root, const char *dotted, const char *slash, vstr_t *path_out) {
+    char ext[16];
+    aot_ext(ext, sizeof(ext));
+    if (try_one_ext(root, dotted, slash, ext, path_out)) {
+        return true;
+    }
+    if (strcmp(ext, ".aot") != 0) {
+        return try_one_ext(root, dotted, slash, ".aot", path_out);
+    }
+    return false;
+}
+
 static bool try_candidates(const char *root, const char *dotted, const char *slash,
     vstr_t *path_out) {
-    vstr_t rel;
-    /* flat: dotted.wasm */
-    vstr_init(&rel, strlen(dotted) + 6);
-    vstr_add_str(&rel, dotted);
-    vstr_add_str(&rel, ".wasm");
-    if (join_try_file(root, vstr_null_terminated_str(&rel), path_out)) {
-        vstr_clear(&rel);
-        return true;
+    const char *pref = MICROPY_WASM_CONTAINERS;
+    while (*pref) {
+        while (*pref == ',' || *pref == ' ') {
+            ++pref;
+        }
+        if (*pref == '\0') {
+            break;
+        }
+        const char *start = pref;
+        while (*pref && *pref != ',') {
+            ++pref;
+        }
+        size_t n = (size_t)(pref - start);
+        if (n == 3 && memcmp(start, "elf", 3) == 0) {
+#if MICROPY_PY_WASM_ELF
+            if (try_one_ext(root, dotted, slash, ".elf", path_out)) {
+                return true;
+            }
+#endif
+        } else if (n == 3 && memcmp(start, "aot", 3) == 0) {
+            if (try_aot(root, dotted, slash, path_out)) {
+                return true;
+            }
+        } else if (n == 4 && memcmp(start, "wasm", 4) == 0) {
+            if (try_one_ext(root, dotted, slash, ".wasm", path_out)) {
+                return true;
+            }
+        }
     }
-    vstr_clear(&rel);
-
-    /* slash.wasm */
-    vstr_init(&rel, strlen(slash) + 6);
-    vstr_add_str(&rel, slash);
-    vstr_add_str(&rel, ".wasm");
-    if (join_try_file(root, vstr_null_terminated_str(&rel), path_out)) {
-        vstr_clear(&rel);
-        return true;
-    }
-    vstr_clear(&rel);
-
-    /* slash/__init__.wasm */
-    vstr_init(&rel, strlen(slash) + 14);
-    vstr_add_str(&rel, slash);
-    vstr_add_str(&rel, "/__init__.wasm");
-    if (join_try_file(root, vstr_null_terminated_str(&rel), path_out)) {
-        vstr_clear(&rel);
-        return true;
-    }
-    vstr_clear(&rel);
-    return false;
+    /* Fallback if CONTAINERS empty/odd: wasm only. */
+    return try_one_ext(root, dotted, slash, ".wasm", path_out);
 }
 
 static bool find_in_list(mp_obj_t list_obj, const char *dotted, const char *slash,
@@ -199,7 +304,6 @@ bool mp_wasm_read_file(const char *path, uint8_t **out, size_t *out_len) {
         }
         vstr_add_strn(&buf, (const char *)chunk, n);
     }
-    /* close best-effort */
     mp_stream_close(f);
 
     if (buf.len == 0) {
@@ -212,61 +316,6 @@ bool mp_wasm_read_file(const char *path, uint8_t **out, size_t *out_len) {
     *out_len = buf.len;
     vstr_clear(&buf);
     return true;
-}
-
-/* Namespace parents so µPy's level-walk can see the leaf in sys.modules.
- * Skip built-ins / host faces so we never shadow pymergetic.wasmmod. */
-static void ensure_parent_packages(const char *full_name) {
-    size_t len = strlen(full_name);
-    for (size_t i = 0; i < len; ++i) {
-        if (full_name[i] != '.') {
-            continue;
-        }
-        qstr parent = qstr_from_strn(full_name, i);
-        const char *pname = qstr_str(parent);
-        if (mp_wasm_is_host_face(pname)) {
-            continue;
-        }
-        if (mp_module_get_builtin(parent, false) != MP_OBJ_NULL) {
-            continue;
-        }
-#if MICROPY_HAVE_REGISTERED_EXTENSIBLE_MODULES
-        if (mp_module_get_builtin(parent, true) != MP_OBJ_NULL) {
-            continue;
-        }
-#endif
-        mp_obj_t pmod = mp_obj_new_module(parent);
-        mp_obj_t g = MP_OBJ_FROM_PTR(mp_obj_module_get_globals(pmod));
-        mp_map_elem_t *el = mp_map_lookup(&((mp_obj_dict_t *)MP_OBJ_TO_PTR(g))->map,
-            MP_OBJ_NEW_QSTR(MP_QSTR___path__), MP_MAP_LOOKUP);
-        if (el == NULL) {
-            /* µPy packages use a str __path__ (not a list). */
-            mp_obj_dict_store(g, MP_OBJ_NEW_QSTR(MP_QSTR___path__),
-                mp_obj_new_str(pname, i));
-        }
-    }
-}
-
-static void link_module_to_parent(const char *dotted_name) {
-    const char *dot = strrchr(dotted_name, '.');
-    if (dot == NULL) {
-        return;
-    }
-    qstr qparent = qstr_from_strn(dotted_name, (size_t)(dot - dotted_name));
-    qstr qleaf = qstr_from_str(dot + 1);
-    mp_map_elem_t *pel = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
-        MP_OBJ_NEW_QSTR(qparent), MP_MAP_LOOKUP);
-    mp_map_elem_t *cel = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
-        MP_OBJ_NEW_QSTR(qstr_from_str(dotted_name)), MP_MAP_LOOKUP);
-    if (pel == NULL || cel == NULL || pel->value == MP_OBJ_NULL || cel->value == MP_OBJ_NULL) {
-        return;
-    }
-    /* Built-in parents have fixed ROM globals — skip attribute link. */
-    mp_obj_module_t *pmod = MP_OBJ_TO_PTR(pel->value);
-    if (pmod->globals->map.is_fixed) {
-        return;
-    }
-    mp_obj_dict_store(MP_OBJ_FROM_PTR(pmod->globals), MP_OBJ_NEW_QSTR(qleaf), cel->value);
 }
 
 void mp_wasm_store_handle_on_module(mp_obj_t mod, pm_wasmmod_registry_handle_t h) {
@@ -289,6 +338,90 @@ bool mp_wasm_load_handle_from_module(mp_obj_t mod, pm_wasmmod_registry_handle_t 
     out->index = (uint32_t)mp_obj_get_int(ei->value);
     out->generation = (uint32_t)mp_obj_get_int(eg->value);
     return true;
+}
+
+/* Unwrap MPZL in-place into a fresh m_new buffer when needed. */
+static void unwrap_artifact(uint8_t **bytes, size_t *blen) {
+    const uint8_t *p = *bytes;
+    uint32_t len = (uint32_t)*blen;
+    uint8_t *owned = NULL;
+    if (!mp_wasm_artifact_unwrap_zlib(&p, &len, &owned)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("corrupt MPZL artifact"));
+    }
+    if (owned != NULL) {
+        m_del(uint8_t, *bytes, *blen);
+        /* Move malloc'd inflate into GC heap so unload path is uniform. */
+        uint8_t *mem = m_new(uint8_t, len);
+        memcpy(mem, owned, len);
+        MICROPY_WASM_FREE(owned);
+        *bytes = mem;
+        *blen = len;
+    } else if (p != *bytes) {
+        /* Shouldn't happen without owned. */
+    }
+}
+
+static int mp_wasm_import_depth;
+
+/* Local MPWD: load deps found on wasm.path / sys.path (no CDN). */
+static void load_local_deps(const uint8_t *bytes, uint32_t blen) {
+    if (mp_wasm_import_depth > 16) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm deps: nest limit"));
+    }
+    const uint8_t *payload = NULL;
+    uint32_t payload_len = 0;
+    if (!mp_wasm_deps_find_section(bytes, blen, &payload, &payload_len)) {
+        return;
+    }
+    mp_wasm_deps_info_t deps;
+    memset(&deps, 0, sizeof(deps));
+    if (!mp_wasm_deps_parse(payload, payload_len, &deps)) {
+        return;
+    }
+    for (uint32_t i = 0; i < deps.n_deps; ++i) {
+        if (deps.deps[i].name_len == 0) {
+            continue;
+        }
+        vstr_t name;
+        vstr_init(&name, deps.deps[i].name_len + 1);
+        vstr_add_strn(&name, deps.deps[i].name, deps.deps[i].name_len);
+        const char *dep = vstr_null_terminated_str(&name);
+        if (!pm_wasmmod_registry_has((const uint8_t *)dep, (uint32_t)strlen(dep))) {
+            mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
+                MP_OBJ_NEW_QSTR(qstr_from_str(dep)), MP_MAP_LOOKUP);
+            if (el == NULL || el->value == MP_OBJ_NULL) {
+                (void)mp_wasm_import_pack(dep);
+            }
+        }
+        /* Version pin check (exact / semver / >= / ^ via util.version).
+         * Empty / "*" pins are always satisfied. Any other pin requires a
+         * registered version on the dep — no soft skip. */
+        if (deps.deps[i].version_len > 0
+            && !(deps.deps[i].version_len == 1 && deps.deps[i].version[0] == '*')) {
+            uint8_t have_buf[64];
+            uint32_t have_len = sizeof(have_buf);
+            if (!pm_wasmmod_registry_version((const uint8_t *)dep, (uint32_t)strlen(dep),
+                    have_buf, &have_len)
+                || have_len == 0) {
+                mp_wasm_deps_info_free(&deps);
+                mp_raise_msg_varg(&mp_type_ImportError,
+                    MP_ERROR_TEXT("wasm dep '%s' has no registered version"), dep);
+            }
+            int32_t ok = pm_util_version_satisfies(have_buf, have_len,
+                (const uint8_t *)deps.deps[i].version, deps.deps[i].version_len);
+            if (ok == 0) {
+                mp_wasm_deps_info_free(&deps);
+                mp_raise_msg_varg(&mp_type_ImportError,
+                    MP_ERROR_TEXT("wasm dep '%s' version mismatch"), dep);
+            } else if (ok < 0) {
+                mp_wasm_deps_info_free(&deps);
+                mp_raise_msg_varg(&mp_type_ImportError,
+                    MP_ERROR_TEXT("wasm dep '%s' version unparsable"), dep);
+            }
+        }
+        vstr_clear(&name);
+    }
+    mp_wasm_deps_info_free(&deps);
 }
 
 mp_obj_t mp_wasm_import_pack(const char *dotted_name) {
@@ -316,19 +449,66 @@ mp_obj_t mp_wasm_import_pack(const char *dotted_name) {
     }
     vstr_clear(&path);
 
-    size_t flen = strlen(dotted_name);
-    pm_wasmmod_registry_handle_t h = pm_wasmmod_loader_load(
-        (const uint8_t *)dotted_name, (uint32_t)flen, bytes, (uint32_t)blen);
-    m_del(uint8_t, bytes, blen);
+    unwrap_artifact(&bytes, &blen);
+
+#if MICROPY_WASM_VERIFY
+    {
+        char err[160];
+        if (!mp_wasm_verify_bytes(bytes, (uint32_t)blen, dotted_name, err, sizeof(err))) {
+            m_del(uint8_t, bytes, blen);
+            mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("wasm verify: %s"), err);
+        }
+    }
+#endif
+
+    mp_wasm_import_depth++;
+    nlr_buf_t nlr_deps;
+    if (nlr_push(&nlr_deps) == 0) {
+        load_local_deps(bytes, (uint32_t)blen);
+        nlr_pop();
+        mp_wasm_import_depth--;
+    } else {
+        mp_wasm_import_depth--;
+        m_del(uint8_t, bytes, blen);
+        nlr_jump(nlr_deps.ret_val);
+    }
+
+    mp_wasm_artifact_kind_t kind = mp_wasm_artifact_kind(bytes, (uint32_t)blen);
+    pm_wasmmod_registry_handle_t h = { .index = UINT32_MAX, .generation = 0 };
+
+#if MICROPY_PY_WASM_ELF
+    if (kind == MP_WASM_KIND_ELF) {
+        char err[160];
+        void *img = NULL;
+        h = mp_wasm_elf_publish(dotted_name, bytes, (uint32_t)blen, &img, err, sizeof(err));
+        if (h.index == UINT32_MAX) {
+            m_del(uint8_t, bytes, blen);
+            mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("elf load: %s"), err);
+        }
+        mp_obj_t mod = mp_wasm_pack_bind(dotted_name, h, bytes, (uint32_t)blen);
+        mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(mod)),
+            MP_OBJ_NEW_QSTR(MP_QSTR___wasm_elf__),
+            mp_obj_new_int_from_ull((uint64_t)(uintptr_t)img));
+        m_del(uint8_t, bytes, blen);
+        return mod;
+    }
+#else
+    if (kind == MP_WASM_KIND_ELF) {
+        m_del(uint8_t, bytes, blen);
+        mp_raise_msg(&mp_type_RuntimeError,
+            MP_ERROR_TEXT("ELF disabled (MICROPY_PY_WASM_ELF=0)"));
+    }
+#endif
+
+    h = pm_wasmmod_loader_load((const uint8_t *)dotted_name, (uint32_t)strlen(dotted_name),
+        bytes, (uint32_t)blen);
     if (h.index == UINT32_MAX) {
+        m_del(uint8_t, bytes, blen);
         mp_raise_OSError(MP_EINVAL);
     }
 
-    ensure_parent_packages(dotted_name);
-    qstr qn = qstr_from_strn(dotted_name, flen);
-    mp_obj_t mod = mp_obj_new_module(qn);
-    mp_wasm_store_handle_on_module(mod, h);
-    link_module_to_parent(dotted_name);
+    mp_obj_t mod = mp_wasm_pack_bind(dotted_name, h, bytes, (uint32_t)blen);
+    m_del(uint8_t, bytes, blen);
     return mod;
 }
 
@@ -342,9 +522,19 @@ void mp_wasm_unload_pack(const char *dotted_name) {
     mp_map_elem_t *el = mp_map_lookup(map, MP_OBJ_NEW_QSTR(qstr_from_str(dotted_name)),
         MP_MAP_LOOKUP);
     if (el != NULL && el->value != MP_OBJ_NULL) {
-        pm_wasmmod_registry_handle_t h;
-        if (mp_wasm_load_handle_from_module(el->value, &h)) {
-            (void)pm_wasmmod_loader_unload(h);
+#if MICROPY_PY_WASM_ELF
+        mp_obj_t g = MP_OBJ_FROM_PTR(mp_obj_module_get_globals(el->value));
+        mp_map_elem_t *ee = mp_map_lookup(&((mp_obj_dict_t *)MP_OBJ_TO_PTR(g))->map,
+            MP_OBJ_NEW_QSTR(MP_QSTR___wasm_elf__), MP_MAP_LOOKUP);
+        if (ee != NULL && ee->value != MP_OBJ_NULL) {
+            mp_wasm_elf_release_for_module(el->value);
+        } else
+#endif
+        {
+            pm_wasmmod_registry_handle_t h;
+            if (mp_wasm_load_handle_from_module(el->value, &h)) {
+                (void)pm_wasmmod_loader_unload(h);
+            }
         }
     }
 

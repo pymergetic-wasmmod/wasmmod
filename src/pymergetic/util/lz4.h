@@ -7,6 +7,6 @@
 #ifndef PYMERGETIC_UTIL_LZ4_H
 #define PYMERGETIC_UTIL_LZ4_H
 
-#include "src/pymergetic/util/lz4/__exports__.h" // IWYU pragma: export
+#include "pymergetic/util/lz4/__exports__.h" // IWYU pragma: export
 
 #endif /* PYMERGETIC_UTIL_LZ4_H */

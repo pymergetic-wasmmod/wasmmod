@@ -1,0 +1,9 @@
+{
+  "include": ["src", "examples"],
+  "extraPaths": ["src", "examples/hello/src", "examples/hello/mount"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none",
+  "reportUnusedImport": "warning"
+}

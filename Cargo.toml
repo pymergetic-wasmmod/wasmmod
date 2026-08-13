@@ -8,23 +8,27 @@ description = "wasmmod: the pm_mod registry, wasm/aot/elf containers, and the py
 [lib]
 name = "pymergetic_wasmmod"
 path = "src/lib.rs"
-# rlib for cargo test / path deps; staticlib for MICROPY_PY_WASM=1 link.
 crate-type = ["rlib", "staticlib"]
 
 [features]
 default = []
-# Enables the libc GlobalAlloc + panic_handler used by the staticlib when
-# embedded in micropython-wasmmod. Required for `cargo build --features upy-host`.
 upy-host = []
+# Host facegen via pymergetic.util.gen (std + toml). Not for freestanding staticlib.
+gen = ["dep:toml"]
+# Alias — CELLBUILD "build-machinery" name (same as gen today).
+build-machinery = ["gen"]
 
-# Host/no_std staticlib must abort on panic (no unwinding without std).
+[[bin]]
+name = "wasmmod-gen"
+path = "src/pymergetic/util/gen/cli.rs"
+required-features = ["gen"]
+
+[dependencies]
+toml = { version = "0.8", optional = true }
+
 [profile.release]
 panic = "abort"
 
-# build.rs's job: compile pymergetic.util.mem's C impl (+ vendored TLSF) and
-# build WAMR's `vmlib` (third_party/wamr) as a static lib for
-# pymergetic.wasmmod.loader to link against. Neither pm_util_mem's C nor
-# WAMR is otherwise part of a normal `cargo build` — see build.rs.
 [build-dependencies]
 cc = "1"
 cmake = "0.1"

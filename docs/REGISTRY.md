@@ -60,6 +60,13 @@ cares about unload being symmetric and correct.
   — resolve + call in one step against the `Value` convention below;
   the one path a cross-container `Fn` export is reached through.
 
+## Call graph / portable pointers
+
+Cross-language call edges, `pm_addr_t` / `pm_buf_t`, import faces, and the
+Native vs Bridge split are documented in **`docs/CALLGRAPH.md`**. Scalar
+`Value` convention below is the Bridge encoding only — public faces should
+prefer typed Native calls or `pm_addr_t`, not naked wasm i32 offsets.
+
 ## Value convention
 
 `resolve_native`/`export_set` never changed shape for this — they still
@@ -148,18 +155,13 @@ releases it back to the pool. What's genuinely per-export is the *slot
 assignment*, not the logic; a macro generates the N addresses, it isn't
 N different implementations.
 
-**Buffer/string marshaling: WAMR shared heap**, backed by one
-`pymergetic.util.mem` arena reserved once at `pm_wasmmod_loader_init`:
-a `Box<[u8]>` (ordinary `alloc`, never freed — this is a once-per-process
-reservation) gives `pm_util_mem_arena_create` its backing bytes; the
-actual shared-heap block is then carved out of that arena via
-`pm_util_mem_alloc` and handed to `wasm_runtime_create_shared_heap` as
-`SharedHeapInitArgs::pre_allocated_addr`. Every loaded instance attaches
-the same heap (`wasm_runtime_attach_shared_heap`); WAMR's own
-`wasm_runtime_shared_heap_malloc`/`_free` do the per-call
-sub-allocation inside that one reserved block — `pymergetic.util.mem`'s
-job here is only "reserve the fixed-size backing block once", not
-per-call allocation.
+**Buffer/string marshaling: WAMR shared heap**, created once at
+`pm_wasmmod_loader_init` as a **runtime-managed** heap (not
+`pre_allocated_addr` — WAMR refuses `shared_heap_malloc` on prealloc
+heaps). Every loaded instance attaches the same heap; portable
+`pm_wasmmod_loader_shared_alloc` / `_shared_free` / `_addr_to_native`
+wrap those APIs for `pm_addr_t` / `pm_buf_t` (see `CALLGRAPH.md`).
+`pymergetic.util.mem` remains available for other host arenas.
 
 **Callable from any thread.** Every adapter call starts with an
 unconditional `wasm_runtime_init_thread_env()` — `wasm_runtime_init()`

@@ -1,2 +1,3 @@
 fqn = "pymergetic.wasmmod"
 impl = "py"
+version = "0.2.0a2"
