@@ -15,9 +15,9 @@ extern "C" {
 
 int32_t pm_wasmmod_api_call0_i32(const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t *);
 
-int32_t pm_wasmmod_api_call2_i32(const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t, int32_t, int32_t *);
-
 int32_t pm_wasmmod_api_connect(const uint8_t *, uint32_t, const uint8_t *, uint32_t, pm_wasmmod_registry_fn_t *);
+
+int32_t pm_wasmmod_api_call2_i32(const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t, int32_t, int32_t *);
 
 #ifdef __cplusplus
 }

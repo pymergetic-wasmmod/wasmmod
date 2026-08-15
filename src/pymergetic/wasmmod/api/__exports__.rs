@@ -9,6 +9,6 @@ pub struct pm_wasmmod_registry_fn_t {
 
 unsafe extern "C" {
     pub fn pm_wasmmod_api_call0_i32(a0: *const u8, a1: u32, a2: *const u8, a3: u32, a4: *mut i32) -> i32;
-    pub fn pm_wasmmod_api_call2_i32(a0: *const u8, a1: u32, a2: *const u8, a3: u32, a4: i32, a5: i32, a6: *mut i32) -> i32;
     pub fn pm_wasmmod_api_connect(a0: *const u8, a1: u32, a2: *const u8, a3: u32, a4: *mut pm_wasmmod_registry_fn_t) -> i32;
+    pub fn pm_wasmmod_api_call2_i32(a0: *const u8, a1: u32, a2: *const u8, a3: u32, a4: i32, a5: i32, a6: *mut i32) -> i32;
 }

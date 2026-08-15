@@ -9,17 +9,12 @@ pub struct pm_util_gen_mem_sink_t {
     _opaque: [u8; 0],
 }
 
-#[repr(C)]
-pub struct pm_util_gen_mem_sink_t * {
-    _opaque: [u8; 0],
-}
-
 unsafe extern "C" {
-    pub fn pm_util_gen_mem_sink_free(a0: *mut pm_util_gen_mem_sink_t);
-    pub fn pm_util_gen_set_py_face_provider(a0: pm_util_gen_py_face_fn, a1: *mut c_void);
-    pub fn pm_util_gen_mem_sink_read(a0: *const pm_util_gen_mem_sink_t, a1: *const u8, a2: u32, a3: *mut u8, a4: u32) -> i32;
-    pub fn pm_util_gen_run(a0: *const u8, a1: u32, a2: i32) -> i32;
-    pub fn pm_util_gen_run_mem(a0: *const u8, a1: u32, a2: *const u8, a3: u32, a4: i32, a5: *mut pm_util_gen_mem_sink_t *) -> i32;
-    pub fn pm_util_gen_diff_included(a0: *const u8, a1: u32, a2: *const u8, a3: u32, a4: *const u8, a5: u32, a6: *const u8, a7: u32) -> i32;
     pub fn pm_util_gen_run_vfs(a0: *const u8, a1: u32, a2: *const u8, a3: u32, a4: i32, a5: pm_util_gen_vfs_ops_t, a6: *mut c_void) -> i32;
+    pub fn pm_util_gen_mem_sink_read(a0: *const pm_util_gen_mem_sink_t, a1: *const u8, a2: u32, a3: *mut u8, a4: u32) -> i32;
+    pub fn pm_util_gen_run_mem(a0: *const u8, a1: u32, a2: *const u8, a3: u32, a4: i32, a5: *mut *mut pm_util_gen_mem_sink_t) -> i32;
+    pub fn pm_util_gen_set_py_face_provider(a0: pm_util_gen_py_face_fn, a1: *mut c_void);
+    pub fn pm_util_gen_mem_sink_free(a0: *mut pm_util_gen_mem_sink_t);
+    pub fn pm_util_gen_run(a0: *const u8, a1: u32, a2: i32) -> i32;
+    pub fn pm_util_gen_diff_included(a0: *const u8, a1: u32, a2: *const u8, a3: u32, a4: *const u8, a5: u32, a6: *const u8, a7: u32) -> i32;
 }

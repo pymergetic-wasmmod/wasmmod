@@ -9,8 +9,22 @@ if(MICROPY_PY_WASM)
     set(MICROPY_PY_WASM_GEN 1)
   endif()
   list(APPEND MICROPY_SOURCE_EXTMOD
+    ${WASMMOD_DIR}/ports/common/boot.c
+    ${WASMMOD_DIR}/ports/common/load.c
+    ${WASMMOD_DIR}/ports/common/memcookie.c
     ${WASMMOD_DIR}/ports/micropython/modwasmmod.c
+    ${WASMMOD_DIR}/ports/micropython/modutil.c
+    ${WASMMOD_DIR}/ports/micropython/importhook.c
+    ${WASMMOD_DIR}/ports/micropython/hostready.c
+    ${WASMMOD_DIR}/ports/micropython/nativecall.c
+    ${WASMMOD_DIR}/ports/micropython/objhandle.c
+    ${WASMMOD_DIR}/src/pymergetic/wasmmod/pyexport/__impl__.c
   )
+  if(MICROPY_PY_WASM_GEN)
+    list(APPEND MICROPY_SOURCE_EXTMOD
+      ${WASMMOD_DIR}/ports/micropython/modgen.c
+    )
+  endif()
   list(APPEND MICROPY_CPP_DEF_DEFS
     MICROPY_PY_WASM=1
     MICROPY_MODULE_BUILTIN_SUBPACKAGES=1

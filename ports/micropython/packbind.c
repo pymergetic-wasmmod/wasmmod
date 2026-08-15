@@ -14,6 +14,7 @@
 #include "py/smallint.h"
 
 #include "ports/micropython/finder.h"
+#include "ports/micropython/nativecall.h"
 #include "pymergetic/wasmmod/api/__exports__.h"
 #include "pymergetic/wasmmod/pack/__types__.h"
 #include "pymergetic/wasmmod/pack/alloc.h"
@@ -40,42 +41,7 @@ typedef struct _mp_obj_wasm_export_t {
 static mp_obj_t wasm_export_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     (void)n_kw;
     mp_obj_wasm_export_t *self = MP_OBJ_TO_PTR(self_in);
-    const char *fqn = qstr_str(self->pack_fqn);
-    const char *exp = qstr_str(self->export_name);
-    size_t flen = strlen(fqn);
-    size_t elen = strlen(exp);
-    int32_t out = 0;
-    int32_t st;
-
-    if (n_args == 0) {
-        st = pm_wasmmod_api_call0_i32((const uint8_t *)fqn, (uint32_t)flen,
-            (const uint8_t *)exp, (uint32_t)elen, &out);
-    } else if (n_args == 2) {
-        st = pm_wasmmod_api_call2_i32((const uint8_t *)fqn, (uint32_t)flen,
-            (const uint8_t *)exp, (uint32_t)elen,
-            (int32_t)mp_obj_get_int(args[0]), (int32_t)mp_obj_get_int(args[1]), &out);
-    } else {
-        pm_wasmmod_registry_value_t argv[8];
-        if (n_args > 8) {
-            mp_raise_ValueError(MP_ERROR_TEXT("wasm export: at most 8 args"));
-        }
-        for (size_t i = 0; i < n_args; ++i) {
-            argv[i] = pm_wasmmod_registry_value_i32((int32_t)mp_obj_get_int(args[i]));
-        }
-        pm_wasmmod_registry_value_t results[1];
-        memset(results, 0, sizeof(results));
-        st = pm_wasmmod_registry_call((const uint8_t *)fqn, (uint32_t)flen,
-            (const uint8_t *)exp, (uint32_t)elen, argv, (uint32_t)n_args, results, 1);
-        if (st >= 0 && results[0].kind == PM_WASMMOD_REGISTRY_VALKIND_I32) {
-            out = results[0].of.i32;
-        } else if (st >= 0) {
-            out = st;
-        }
-    }
-    if (st < 0) {
-        mp_raise_msg(&mp_type_LookupError, MP_ERROR_TEXT("wasm export call miss"));
-    }
-    return mp_obj_new_int(out);
+    return mp_wasm_native_call(qstr_str(self->pack_fqn), qstr_str(self->export_name), n_args, args);
 }
 
 static MP_DEFINE_CONST_OBJ_TYPE(

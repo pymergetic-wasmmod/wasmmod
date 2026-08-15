@@ -1,11 +1,10 @@
 //! Host-only discovery when the live registry is empty for a card:
-//! - `impl = "py"` → `ast` on `__init__.py` (C/RS access faces from hints)
+//! - `impl = "py"` → scan `__init__.py` access faces from type hints (no python3)
 //! - else if `__impl__.c` has `PM_MOD_EXPORT_C` → scan call sites (guest / unlinked C)
 //!
 //! Registers into the one registry so [`super::gen_fqn_to_sink`] stays the emit path.
 
 use std::path::Path;
-use std::process::Command;
 
 use crate::wasmmod::registry::{
     pm_wasmmod_registry_container_kind_t, pm_wasmmod_registry_ensure,
@@ -57,6 +56,12 @@ pub fn ensure_card_exports(card_dir: &Path, fqn: &str) -> FaceSource {
         }
         return FaceSource::Empty;
     }
+    if impl_lang == "rs" {
+        if ensure_rs_export_scan(card_dir, fqn) {
+            return FaceSource::Guest;
+        }
+        return FaceSource::Empty;
+    }
     if ensure_c_export_scan(card_dir, fqn) {
         FaceSource::Guest
     } else {
@@ -66,9 +71,6 @@ pub fn ensure_card_exports(card_dir: &Path, fqn: &str) -> FaceSource {
 
 fn ensure_py_exports(card_dir: &Path, fqn: &str) -> bool {
     let init = card_dir.join("__init__.py");
-    if !init.is_file() {
-        return false;
-    }
     let Some(exports) = py_exports_from_init(&init) else {
         return false;
     };
@@ -84,73 +86,329 @@ fn ensure_py_exports(card_dir: &Path, fqn: &str) -> bool {
 
 /// Parse `__init__.py` type hints → `(export_name, c_sig)`.
 pub fn py_exports_from_init(init_py: &Path) -> Option<Vec<(String, String)>> {
-    let script = r##"
-import ast, sys
-src = open(sys.argv[1], encoding="utf-8").read()
-tree = ast.parse(src)
-for node in tree.body:
-    if not isinstance(node, ast.FunctionDef) or node.name.startswith("_"):
-        continue
-    args = []
-    ok = True
-    for a in node.args.args:
-        ann = a.annotation
-        if ann is None:
-            ok = False
-            break
-        if isinstance(ann, ast.Name) and ann.id == "bytes":
-            args.append("bytes")
-        elif isinstance(ann, ast.Name) and ann.id == "int":
-            args.append("int")
-        else:
-            ok = False
-            break
-    if not ok:
-        continue
-    ret = node.returns
-    if not (isinstance(ret, ast.Name) and ret.id == "int"):
-        continue
-    if args == []:
-        sig = "int32_t(void)"
-    elif args == ["bytes"]:
-        sig = "int32_t(const uint8_t *, uint32_t)"
-    elif args == ["int"]:
-        sig = "int32_t(int32_t)"
-    else:
-        continue
-    # name<TAB>sig — no JSON dep in the Rust host
-    print(node.name + "\t" + sig)
-"##;
-    let output = Command::new("python3")
-        .arg("-c")
-        .arg(script)
-        .arg(init_py)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        eprintln!(
-            "pm_util_gen: python3 ast failed for {}: {}",
-            init_py.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return None;
-    }
-    let stdout = String::from_utf8(output.stdout).ok()?;
-    let mut out = Vec::new();
-    for line in stdout.lines() {
-        let mut parts = line.splitn(2, '\t');
-        let name = parts.next()?.trim();
-        let sig = parts.next()?.trim();
-        if name.is_empty() || sig.is_empty() {
-            continue;
-        }
-        out.push((name.to_string(), sig.to_string()));
-    }
+    let text = std::fs::read_to_string(init_py).ok()?;
+    let out = py_exports_from_init_src(&text);
     if out.is_empty() {
         None
     } else {
         Some(out)
     }
+}
+
+/// Scan top-level `def name(...) -> int:` faces (constrained hint set).
+/// Same spirit as [`scan_pm_mod_export_c`]: string scan, no foreign runtime.
+pub fn py_exports_from_init_src(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    let bytes = text.as_bytes();
+    while i < bytes.len() {
+        // Start of line (or file).
+        if i > 0 && bytes[i - 1] != b'\n' {
+            i += 1;
+            continue;
+        }
+        // Skip indent — only module-level defs (no leading whitespace).
+        if bytes[i] == b' ' || bytes[i] == b'\t' {
+            i += 1;
+            continue;
+        }
+        if !text[i..].starts_with("def ") {
+            i += 1;
+            continue;
+        }
+        let after_def = i + 4;
+        let Some((name, rest)) = take_ident(&text[after_def..]) else {
+            i = after_def;
+            continue;
+        };
+        if name.starts_with('_') {
+            i = after_def;
+            continue;
+        }
+        let rest = rest.trim_start();
+        if !rest.starts_with('(') {
+            i = after_def;
+            continue;
+        }
+        let Some((params, after_params)) = take_balanced(&rest[1..], '(', ')') else {
+            i = after_def;
+            continue;
+        };
+        let after = after_params.trim_start();
+        if !after.starts_with("->") {
+            i = after_def;
+            continue;
+        }
+        let after_arrow = after[2..].trim_start();
+        let Some(ret) = take_hint_token(after_arrow) else {
+            i = after_def;
+            continue;
+        };
+        let ret = normalize_hint(ret);
+        if let Some(sig) = hints_to_sig(ret, &parse_param_hints(params)) {
+            out.push((name.to_string(), sig));
+        }
+        i = after_def;
+    }
+    out
+}
+
+fn take_ident(s: &str) -> Option<(&str, &str)> {
+    let mut end = 0;
+    for (off, ch) in s.char_indices() {
+        let ok = if off == 0 {
+            ch == '_' || ch.is_ascii_alphabetic()
+        } else {
+            ch == '_' || ch.is_ascii_alphanumeric()
+        };
+        if !ok {
+            break;
+        }
+        end = off + ch.len_utf8();
+    }
+    if end == 0 {
+        return None;
+    }
+    Some((&s[..end], &s[end..]))
+}
+
+/// Return `(inner, rest_after_closing)` where `inner` is between open…close.
+fn take_balanced<'a>(s: &'a str, open: char, close: char) -> Option<(&'a str, &'a str)> {
+    let mut depth = 1i32;
+    for (off, ch) in s.char_indices() {
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some((&s[..off], &s[off + close.len_utf8()..]));
+            }
+        }
+    }
+    None
+}
+
+fn parse_param_hints(params: &str) -> Option<Vec<&str>> {
+    let params = params.trim();
+    if params.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut hints = Vec::new();
+    for part in split_top_level_commas(params) {
+        let part = part.trim();
+        if part.is_empty() || part == "self" || part == "cls" {
+            continue;
+        }
+        // name: hint  |  name: "hint"
+        let Some(colon) = part.find(':') else {
+            return None;
+        };
+        let hint = part[colon + 1..].trim();
+        let hint = strip_str_quotes(hint)?;
+        if !matches!(
+            hint,
+            "bytes" | "int" | "mem" | "obj" | "i64" | "int64" | "f32" | "float" | "f64"
+        ) {
+            return None;
+        }
+        hints.push(hint);
+    }
+    Some(hints)
+}
+
+fn strip_str_quotes(s: &str) -> Option<&str> {
+    let s = s.trim();
+    if (s.starts_with('"') && s.ends_with('"') && s.len() >= 2)
+        || (s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2)
+    {
+        return Some(&s[1..s.len() - 1]);
+    }
+    // Bare Name — reject if trailing junk (default values, etc.)
+    let (id, rest) = take_ident(s)?;
+    if !rest.trim().is_empty() {
+        return None;
+    }
+    Some(id)
+}
+
+fn take_hint_token(s: &str) -> Option<&str> {
+    let s = s.trim_start();
+    if let Some(q) = s.chars().next() {
+        if q == '"' || q == '\'' {
+            let end = s[1..].find(q)? + 1;
+            return Some(&s[1..end]);
+        }
+    }
+    let (id, _) = take_ident(s)?;
+    Some(id)
+}
+
+fn normalize_hint(h: &str) -> &str {
+    match h {
+        "int64" => "i64",
+        "float" => "f32",
+        "float64" => "f64",
+        other => other,
+    }
+}
+
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    let mut in_str: Option<char> = None;
+    for (off, ch) in s.char_indices() {
+        if let Some(q) = in_str {
+            if ch == q {
+                in_str = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => in_str = Some(ch),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&s[start..off]);
+                start = off + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&s[start..]);
+    out
+}
+
+fn hints_to_sig(ret: &str, hints: &Option<Vec<&str>>) -> Option<String> {
+    let hints = hints.as_ref()?;
+    let args: Vec<&str> = hints.iter().copied().map(normalize_hint).collect();
+    let sig = match (ret, args.as_slice()) {
+        ("int", []) => "int32_t(void)",
+        ("int", ["bytes"]) => "int32_t(const uint8_t *, uint32_t)",
+        ("int", ["int"]) => "int32_t(int32_t)",
+        ("int", ["int", "int"]) => "int32_t(int32_t, int32_t)",
+        ("int", ["int", "int", "int"]) => "int32_t(int32_t, int32_t, int32_t)",
+        ("int", ["mem"]) => "int32_t(pm_wasmmod_mem_cookie_t)",
+        ("int", ["obj"]) => "int32_t(pm_wasmmod_obj_handle_t)",
+        ("i64", ["i64"]) => "int64_t(int64_t)",
+        ("f32", ["f32"]) => "float(float)",
+        ("f64", ["f64"]) => "double(double)",
+        _ => return None,
+    };
+    Some(sig.to_string())
+}
+
+fn ensure_rs_export_scan(card_dir: &Path, fqn: &str) -> bool {
+    let impl_rs = card_dir.join("__impl__.rs");
+    if !impl_rs.is_file() {
+        return false;
+    }
+    let Ok(text) = std::fs::read_to_string(&impl_rs) else {
+        return false;
+    };
+    let exports = scan_pm_mod_export_rs(&text);
+    if exports.is_empty() {
+        return false;
+    }
+    unsafe {
+        let _ = pm_wasmmod_registry_ensure(
+            fqn.as_ptr(),
+            fqn.len() as u32,
+            pm_wasmmod_registry_container_kind_t::Resident,
+        );
+    }
+    let mut any = false;
+    for (export_name, sig) in exports {
+        if unsafe { register_fn(fqn, &export_name, stub_ptr(), &sig) } {
+            any = true;
+        }
+    }
+    any
+}
+
+/// Scan `PM_MOD_EXPORT_RS!("fqn", ident, "sig")` → `(ident, sig)`.
+pub fn scan_pm_mod_export_rs(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut search_from = 0;
+    const MARK: &str = "PM_MOD_EXPORT_RS!";
+    while let Some(rel) = text[search_from..].find(MARK) {
+        let at = search_from + rel;
+        let after = at + MARK.len();
+        let Some(open_rel) = text[after..].find('(') else {
+            search_from = after;
+            continue;
+        };
+        let start = after + open_rel + 1;
+        let mut depth = 1i32;
+        let mut end = None;
+        for (off, ch) in text[start..].char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(start + off);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else {
+            search_from = after;
+            continue;
+        };
+        if let Some(pair) = parse_pm_mod_export_rs_args(&text[start..end]) {
+            out.push(pair);
+        }
+        search_from = end + 1;
+    }
+    out
+}
+
+fn strip_rs_str(s: &str) -> String {
+    let t = s.trim();
+    t.trim_matches('"').to_string()
+}
+
+fn parse_pm_mod_export_rs_args(inner: &str) -> Option<(String, String)> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    for ch in inner.chars() {
+        match ch {
+            '"' => {
+                in_str = !in_str;
+                cur.push(ch);
+            }
+            '(' if !in_str => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ')' if !in_str => {
+                depth -= 1;
+                cur.push(ch);
+            }
+            ',' if depth == 0 && !in_str => {
+                parts.push(cur.trim().to_string());
+                cur.clear();
+            }
+            _ => cur.push(ch),
+        }
+    }
+    if !cur.trim().is_empty() {
+        parts.push(cur.trim().to_string());
+    }
+    if parts.len() != 3 {
+        return None;
+    }
+    let export_name = parts[1].trim().to_string();
+    let sig = strip_rs_str(&parts[2]);
+    if export_name.is_empty() || sig.is_empty() {
+        return None;
+    }
+    Some((export_name, sig))
 }
 
 fn ensure_c_export_scan(card_dir: &Path, fqn: &str) -> bool {
@@ -279,10 +537,97 @@ PM_MOD_EXPORT_C(hello, add, add, int(int, int));
     }
 
     #[test]
+    fn scans_rs_export_macro() {
+        let text = r#"
+crate::PM_MOD_EXPORT_RS!(
+    "pymergetic.metal.net.http.asgi",
+    pm_metal_net_http_asgi_init,
+    "int32_t(pm_util_mem_arena_t *)"
+);
+"#;
+        let ex = scan_pm_mod_export_rs(text);
+        assert_eq!(ex.len(), 1);
+        assert_eq!(
+            ex[0],
+            (
+                "pm_metal_net_http_asgi_init".into(),
+                "int32_t(pm_util_mem_arena_t *)".into()
+            )
+        );
+    }
+
+    #[test]
     fn c_abi_name_strips_pymergetic() {
         assert_eq!(
             c_abi_name("pymergetic.util.pysample", "hello"),
             "pm_util_pysample_hello"
         );
+    }
+
+    #[test]
+    fn scans_pysample_style_init() {
+        let text = r#"
+# comment
+def hello() -> int:
+    return 42
+
+def echo_len(data: bytes) -> int:
+    return len(data)
+
+def echo_mem(data: "mem") -> int:
+    return len(data)
+
+def is_none(o: 'obj') -> int:
+    return 1 if o is None else 0
+
+def add(a: int, b: int) -> int:
+    return a + b
+
+def add3(a: int, b: int, c: int) -> int:
+    return a + b + c
+
+def wid(x: i64) -> i64:
+    return x
+
+def fl(x: f32) -> f32:
+    return x
+
+def _skip() -> int:
+    return 0
+
+def bad(x: str) -> int:
+    return 0
+"#;
+        let ex = py_exports_from_init_src(text);
+        assert_eq!(
+            ex,
+            vec![
+                ("hello".into(), "int32_t(void)".into()),
+                (
+                    "echo_len".into(),
+                    "int32_t(const uint8_t *, uint32_t)".into()
+                ),
+                ("echo_mem".into(), "int32_t(pm_wasmmod_mem_cookie_t)".into()),
+                ("is_none".into(), "int32_t(pm_wasmmod_obj_handle_t)".into()),
+                ("add".into(), "int32_t(int32_t, int32_t)".into()),
+                ("add3".into(), "int32_t(int32_t, int32_t, int32_t)".into()),
+                ("wid".into(), "int64_t(int64_t)".into()),
+                ("fl".into(), "float(float)".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn scans_metal_async_impl() {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../metal/src/pymergetic/metal/async/__impl__.c");
+        let text = std::fs::read_to_string(&p).expect("metal async __impl__.c");
+        let ex = scan_pm_mod_export_c(&text);
+        assert!(
+            ex.iter().any(|(n, s)| n == "pm_metal_async_init"
+                && s == "int32_t(pm_util_mem_arena_t *, uint32_t)"),
+            "metal.async PM_MOD_EXPORT_C missing/wrong: {ex:?}"
+        );
+        assert!(ex.iter().any(|(n, _)| n == "pm_metal_async_yield"));
     }
 }

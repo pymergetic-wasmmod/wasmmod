@@ -83,6 +83,10 @@ typedef int32_t (*pm_wasmmod_registry_fn_t)(const pm_wasmmod_registry_value_t *a
 /* Module `__tests__.*` case — 0 = pass, nonzero = fail. Not an export face. */
 typedef int32_t (*pm_wasmmod_registry_test_fn_t)(void);
 
+/* Loader hook: run a guest pack test by wasm export name (fqn, export). */
+typedef int32_t (*pm_wasmmod_registry_wasm_test_runner_t)(const uint8_t *fqn, uint32_t fqn_len,
+    const uint8_t *export_name, uint32_t export_len);
+
 /* Portable address — see docs/CALLGRAPH.md.
  *   SPACE_NATIVE (0): off is a host VA (ELF / resident / unisolated).
  *   SPACE_SHARED (1): off is a WAMR shared-heap app address.

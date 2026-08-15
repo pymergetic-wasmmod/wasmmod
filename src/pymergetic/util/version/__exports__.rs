@@ -3,6 +3,6 @@
 #![allow(non_camel_case_types)]
 
 unsafe extern "C" {
-    pub fn pm_util_version_satisfies(a0: *const u8, a1: u32, a2: *const u8, a3: u32) -> i32;
     pub fn pm_util_version_cmp(a0: *const u8, a1: u32, a2: *const u8, a3: u32) -> i32;
+    pub fn pm_util_version_satisfies(a0: *const u8, a1: u32, a2: *const u8, a3: u32) -> i32;
 }

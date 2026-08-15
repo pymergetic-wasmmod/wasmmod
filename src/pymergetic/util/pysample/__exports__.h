@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "pymergetic/wasmmod/host/__types__.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,6 +16,10 @@ extern "C" {
 int32_t pm_util_pysample_hello(void);
 
 int32_t pm_util_pysample_echo_len(const uint8_t *, uint32_t);
+
+int32_t pm_util_pysample_echo_mem(pm_wasmmod_mem_cookie_t);
+
+int32_t pm_util_pysample_is_none(pm_wasmmod_obj_handle_t);
 
 #ifdef __cplusplus
 }

@@ -9,7 +9,8 @@
 
 #![allow(clippy::missing_safety_doc)]
 
-use alloc::string::String;
+use alloc::format;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::ffi::c_void;
 
@@ -209,6 +210,22 @@ pub fn prototype_line(name: &str, sig: &str) -> String {
     format!("{ret} {name}{args};")
 }
 
+#[cfg(feature = "gen")]
+fn c_sig_needs_local_types(sig: &str) -> bool {
+    for word in sig.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+        if word.is_empty() {
+            continue;
+        }
+        match word {
+            "void" | "int" | "int32_t" | "uint32_t" | "int64_t" | "uint64_t" | "uint8_t"
+            | "int8_t" | "uint16_t" | "int16_t" | "size_t" | "char" | "float" | "double"
+            | "bool" | "_Bool" | "unsigned" | "const" | "struct" => {}
+            _ => return true,
+        }
+    }
+    false
+}
+
 pub fn emit_exports_h(fqn: &str, exports: &[LiveExport]) -> String {
     let guard = guard_name(fqn, "EXPORT");
     let mut out = String::new();
@@ -228,13 +245,25 @@ pub fn emit_exports_h(fqn: &str, exports: &[LiveExport]) -> String {
     }) {
         includes.push(String::from("pymergetic/wasmmod/registry/__types__.h"));
     }
-    // Module-local types face (path == module). Host gen: only if present.
+    if exports.iter().any(|e| {
+        e.sig.contains("pm_wasmmod_mem_cookie_t") || e.sig.contains("pm_wasmmod_obj_handle_t")
+    }) {
+        includes.push(String::from("pymergetic/wasmmod/host/__types__.h"));
+    }
+    if exports.iter().any(|e| e.sig.contains("pm_util_mem_")) {
+        includes.push(String::from("pymergetic/util/mem/__types__.h"));
+    }
+    if exports.iter().any(|e| e.sig.contains("pm_wasmmod_io_")) {
+        includes.push(String::from("pymergetic/wasmmod/io/__types__.h"));
+    }
+    // Module-local types face — only when a prototype names a non-builtin type
+    // (otherwise clangd IWYU: "included header __types__.h is not used directly").
     #[cfg(feature = "gen")]
     {
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join(&types_rel);
-        if p.is_file() {
+        let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let on_disk = crate_dir.join("src").join(&types_rel).is_file()
+            || crate_dir.join("../metal/src").join(&types_rel).is_file();
+        if on_disk && exports.iter().any(|e| c_sig_needs_local_types(&e.sig)) {
             includes.push(types_rel);
         }
     }
@@ -272,27 +301,31 @@ fn map_c_type_to_rust(c: &str) -> (String, bool, Option<String>) {
     if t.contains('(') {
         return (String::from("*mut c_void"), true, None);
     }
-    let (base, is_ptr, is_const) = {
-        let mut s = t;
+    let (base, stars, is_const) = {
+        let mut s = t.to_string();
+        let mut stars = 0usize;
+        loop {
+            let trimmed = s.trim_end();
+            if let Some(rest) = trimmed.strip_suffix('*') {
+                stars += 1;
+                s = rest.trim_end().to_string();
+            } else {
+                break;
+            }
+        }
         let is_const = if let Some(rest) = s.strip_prefix("const ") {
-            s = rest.trim();
+            s = rest.trim().to_string();
             true
         } else {
             false
         };
-        let is_ptr = s.ends_with('*');
-        let base = if is_ptr {
-            s[..s.len() - 1].trim()
-        } else {
-            s
-        };
-        let base = base.strip_prefix("const ").unwrap_or(base).trim();
-        (base.to_string(), is_ptr, is_const)
+        let base = s.strip_prefix("const ").unwrap_or(&s).trim().to_string();
+        (base, stars, is_const)
     };
-    if !is_ptr {
+    if stars == 0 {
         let rust = match base.as_str() {
             "void" => "()",
-            "int" | "int32_t" => "i32",
+            "int" | "int32_t" | "pm_wasmmod_mem_cookie_t" | "pm_wasmmod_obj_handle_t" => "i32",
             "uint32_t" | "unsigned" | "unsigned int" => "u32",
             "int64_t" => "i64",
             "uint64_t" => "u64",
@@ -304,62 +337,25 @@ fn map_c_type_to_rust(c: &str) -> (String, bool, Option<String>) {
         };
         return (String::from(rust), false, None);
     }
-    // Pointers
-    match base.as_str() {
-        "void" => (
-            if is_const {
-                String::from("*const c_void")
-            } else {
-                String::from("*mut c_void")
-            },
-            true,
-            None,
-        ),
-        "uint8_t" | "int8_t" | "char" | "unsigned char" => (
-            if is_const {
-                String::from("*const u8")
-            } else {
-                String::from("*mut u8")
-            },
-            false,
-            None,
-        ),
-        "uint16_t" | "int16_t" => (
-            if is_const {
-                String::from("*const u16")
-            } else {
-                String::from("*mut u16")
-            },
-            false,
-            None,
-        ),
-        "int32_t" | "int" => (
-            if is_const {
-                String::from("*const i32")
-            } else {
-                String::from("*mut i32")
-            },
-            false,
-            None,
-        ),
-        "uint32_t" => (
-            if is_const {
-                String::from("*const u32")
-            } else {
-                String::from("*mut u32")
-            },
-            false,
-            None,
-        ),
-        other => {
-            let ty = if is_const {
-                format!("*const {other}")
-            } else {
-                format!("*mut {other}")
-            };
-            (ty, false, Some(other.to_string()))
+    // Innermost pointed-to type. Every `*` is peeled (`uint8_t **` → `*mut *mut u8`,
+    // not an illegal opaque named `uint8_t *`). Innermost `*` carries `const`.
+    let (inner, need_void, opaque): (String, bool, Option<String>) = match base.as_str() {
+        "void" => (String::from("c_void"), true, None),
+        "uint8_t" | "int8_t" | "char" | "unsigned char" => (String::from("u8"), false, None),
+        "uint16_t" | "int16_t" => (String::from("u16"), false, None),
+        "int32_t" | "int" => (String::from("i32"), false, None),
+        "uint32_t" => (String::from("u32"), false, None),
+        other => (other.to_string(), false, Some(other.to_string())),
+    };
+    let mut ty = inner;
+    for i in 0..stars {
+        if i == 0 && is_const {
+            ty = format!("*const {ty}");
+        } else {
+            ty = format!("*mut {ty}");
         }
     }
+    (ty, need_void, opaque)
 }
 
 fn split_c_params(args: &str) -> Vec<String> {

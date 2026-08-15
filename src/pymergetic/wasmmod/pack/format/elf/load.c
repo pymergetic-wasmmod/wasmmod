@@ -11,15 +11,11 @@
  * builds omit this file entirely (WASMMOD_EMSCRIPTEN → ELF=0).
  */
 
-#ifndef MICROPY_PY_WASM
-#define MICROPY_PY_WASM (0)
-#endif
-
 #ifndef MICROPY_PY_WASM_ELF
 #define MICROPY_PY_WASM_ELF (0)
 #endif
 
-#if MICROPY_PY_WASM && MICROPY_PY_WASM_ELF
+#if MICROPY_PY_WASM_ELF
 
 #include "pymergetic/wasmmod/pack/format/elf/load.h"
 
@@ -807,4 +803,4 @@ void mp_wasm_elf_foreach_func(const mp_wasm_elf_image_t *img, mp_wasm_elf_export
     }
 }
 
-#endif // MICROPY_PY_WASM && MICROPY_PY_WASM_ELF
+#endif // MICROPY_PY_WASM_ELF

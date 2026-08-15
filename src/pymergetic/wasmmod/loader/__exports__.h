@@ -13,21 +13,21 @@
 extern "C" {
 #endif
 
-int32_t pm_wasmmod_loader_shared_free(pm_wasmmod_registry_handle_t, pm_addr_t);
-
-int32_t pm_wasmmod_loader_unload(pm_wasmmod_registry_handle_t);
-
-int32_t pm_wasmmod_loader_shared_alloc(pm_wasmmod_registry_handle_t, uint32_t, pm_buf_t *);
+pm_wasmmod_registry_handle_t pm_wasmmod_loader_load(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
 
 int32_t pm_wasmmod_loader_init(void);
 
-pm_wasmmod_registry_handle_t pm_wasmmod_loader_load(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
-
-pm_addr_t pm_wasmmod_loader_native_to_addr(pm_wasmmod_registry_handle_t, uint32_t, void *);
+int32_t pm_wasmmod_loader_shared_free(pm_wasmmod_registry_handle_t, pm_addr_t);
 
 int32_t pm_wasmmod_loader_bake_pkg_version(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
 
+int32_t pm_wasmmod_loader_unload(pm_wasmmod_registry_handle_t);
+
+pm_addr_t pm_wasmmod_loader_native_to_addr(pm_wasmmod_registry_handle_t, uint32_t, void *);
+
 void * pm_wasmmod_loader_addr_to_native(pm_wasmmod_registry_handle_t, pm_addr_t);
+
+int32_t pm_wasmmod_loader_shared_alloc(pm_wasmmod_registry_handle_t, uint32_t, pm_buf_t *);
 
 #ifdef __cplusplus
 }

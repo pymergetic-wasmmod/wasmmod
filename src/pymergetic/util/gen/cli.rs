@@ -28,6 +28,7 @@ fn main() -> ExitCode {
         }
     }
     // Default: scan src/ + examples/ under crate root when given the crate.
+    // Metal cards live in the sibling extmod/metal/src tree (path == module).
     let root = std::path::Path::new(&path);
     let code = if root.join("src/pymergetic").is_dir() {
         let mut roots = Vec::new();
@@ -36,6 +37,10 @@ fn main() -> ExitCode {
             if p.exists() {
                 roots.push(p);
             }
+        }
+        let metal = root.join("../metal/src");
+        if metal.exists() {
+            roots.push(metal);
         }
         let refs: Vec<&std::path::Path> = roots.iter().map(|p| p.as_path()).collect();
         pymergetic_wasmmod::util::r#gen::gen_run_paths(&refs, check)

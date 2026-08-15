@@ -13,31 +13,7 @@
 extern "C" {
 #endif
 
-int32_t pm_wasmmod_registry_has(const uint8_t *, uint32_t);
-
-pm_wasmmod_registry_handle_t pm_wasmmod_registry_ensure(const uint8_t *, uint32_t, pm_wasmmod_registry_container_kind_t);
-
-int32_t pm_wasmmod_registry_export_at(const uint8_t *, uint32_t, uint32_t, uint8_t *, uint32_t *, pm_wasmmod_registry_export_kind_t *, uint8_t *, uint32_t *);
-
-int32_t pm_wasmmod_registry_version(const uint8_t *, uint32_t, uint8_t *, uint32_t *);
-
-void pm_wasmmod_registry_set_wasm_test_runner(pm_wasmmod_registry_wasm_test_runner_t);
-
-int32_t pm_wasmmod_registry_call(const uint8_t *, uint32_t, const uint8_t *, uint32_t, const pm_wasmmod_registry_value_t *, uint32_t, pm_wasmmod_registry_value_t *, uint32_t);
-
-void pm_wasmmod_registry_init(void);
-
-uint32_t pm_wasmmod_registry_export_count(const uint8_t *, uint32_t);
-
-int32_t pm_wasmmod_registry_module_at(uint32_t, uint8_t *, uint32_t *);
-
-int32_t pm_wasmmod_registry_test_register_wasm(const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *, uint32_t);
-
-int32_t pm_wasmmod_registry_export_set(pm_wasmmod_registry_handle_t, const uint8_t *, uint32_t, pm_wasmmod_registry_export_kind_t, void *);
-
-pm_wasmmod_registry_handle_t pm_wasmmod_registry_publish_ver(const uint8_t *, uint32_t, pm_wasmmod_registry_container_kind_t, const uint8_t *, uint32_t);
-
-void * pm_wasmmod_registry_resolve_native(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
+int32_t pm_wasmmod_registry_unpublish(pm_wasmmod_registry_handle_t);
 
 uint32_t pm_wasmmod_registry_test_count(const uint8_t *, uint32_t);
 
@@ -45,27 +21,51 @@ int32_t pm_wasmmod_registry_container(const uint8_t *, uint32_t);
 
 int32_t pm_wasmmod_registry_test_register(const uint8_t *, uint32_t, const uint8_t *, uint32_t, pm_wasmmod_registry_test_fn_t);
 
-int32_t pm_wasmmod_registry_unpublish(pm_wasmmod_registry_handle_t);
-
-int32_t pm_wasmmod_registry_mod_export(const uint8_t *, uint32_t, const uint8_t *, uint32_t, pm_wasmmod_registry_export_kind_t, void *, const uint8_t *, uint32_t);
-
 int32_t pm_wasmmod_registry_test_run_all(const uint8_t *, uint32_t);
-
-int32_t pm_wasmmod_registry_set_version(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
 
 int32_t pm_wasmmod_registry_test_run(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
 
-int32_t pm_wasmmod_registry_export_set_sig(pm_wasmmod_registry_handle_t, const uint8_t *, uint32_t, pm_wasmmod_registry_export_kind_t, void *, const uint8_t *, uint32_t);
+int32_t pm_wasmmod_registry_module_at(uint32_t, uint8_t *, uint32_t *);
 
-uint32_t pm_wasmmod_registry_module_count(void);
+int32_t pm_wasmmod_registry_call(const uint8_t *, uint32_t, const uint8_t *, uint32_t, const pm_wasmmod_registry_value_t *, uint32_t, pm_wasmmod_registry_value_t *, uint32_t);
 
 int32_t pm_wasmmod_registry_test_at(const uint8_t *, uint32_t, uint32_t, uint8_t *, uint32_t *);
 
+pm_wasmmod_registry_handle_t pm_wasmmod_registry_publish_ver(const uint8_t *, uint32_t, pm_wasmmod_registry_container_kind_t, const uint8_t *, uint32_t);
+
+int32_t pm_wasmmod_registry_export_set_sig(pm_wasmmod_registry_handle_t, const uint8_t *, uint32_t, pm_wasmmod_registry_export_kind_t, void *, const uint8_t *, uint32_t);
+
+int32_t pm_wasmmod_registry_has(const uint8_t *, uint32_t);
+
+int32_t pm_wasmmod_registry_mod_export(const uint8_t *, uint32_t, const uint8_t *, uint32_t, pm_wasmmod_registry_export_kind_t, void *, const uint8_t *, uint32_t);
+
+pm_wasmmod_registry_handle_t pm_wasmmod_registry_publish(const uint8_t *, uint32_t, pm_wasmmod_registry_container_kind_t);
+
+int32_t pm_wasmmod_registry_export_set(pm_wasmmod_registry_handle_t, const uint8_t *, uint32_t, pm_wasmmod_registry_export_kind_t, void *);
+
+pm_wasmmod_registry_handle_t pm_wasmmod_registry_ensure(const uint8_t *, uint32_t, pm_wasmmod_registry_container_kind_t);
+
+int32_t pm_wasmmod_registry_export_at(const uint8_t *, uint32_t, uint32_t, uint8_t *, uint32_t *, pm_wasmmod_registry_export_kind_t *, uint8_t *, uint32_t *);
+
+uint32_t pm_wasmmod_registry_module_count(void);
+
+int32_t pm_wasmmod_registry_test_register_wasm(const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *, uint32_t);
+
+void * pm_wasmmod_registry_resolve_native(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
+
+void pm_wasmmod_registry_init(void);
+
 void pm_wasmmod_registry_gc_visit(void (*)(void *, void *), void *);
+
+int32_t pm_wasmmod_registry_version(const uint8_t *, uint32_t, uint8_t *, uint32_t *);
+
+uint32_t pm_wasmmod_registry_export_count(const uint8_t *, uint32_t);
 
 int32_t pm_wasmmod_registry_connect_import(const uint8_t *, uint32_t, const uint8_t *, uint32_t, void **);
 
-pm_wasmmod_registry_handle_t pm_wasmmod_registry_publish(const uint8_t *, uint32_t, pm_wasmmod_registry_container_kind_t);
+void pm_wasmmod_registry_set_wasm_test_runner(pm_wasmmod_registry_wasm_test_runner_t);
+
+int32_t pm_wasmmod_registry_set_version(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
 
 #ifdef __cplusplus
 }

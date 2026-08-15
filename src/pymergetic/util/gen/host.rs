@@ -1,7 +1,7 @@
 //! Host FS path for `pymergetic.util.gen` (feature = "gen").
 //!
 //! Card walk discovers write *paths*; faces come from the live registry after
-//! `PM_MOD_EXPORT_*` ctors and, when empty, host discovery (py `ast` /
+//! `PM_MOD_EXPORT_*` ctors and, when empty, host discovery (py hint scan /
 //! `PM_MOD_EXPORT_C` scan) via [`super::discover`].
 
 use std::collections::BTreeMap;
@@ -146,17 +146,14 @@ fn plane_of(source: FaceSource, fqn: &str, build: GuestKinds) -> Plane {
                 Plane::Host
             }
         }
-        // Unlinked guest chromosome (PM_MOD_EXPORT_C scan) — pack deliverable.
+        // Unlinked C: `build = […]` is a guest pack; no build list is in-bin
+        // host muscle the gen binary did not link (Metal, etc.).
         FaceSource::Guest => {
-            let k = if build.any() {
-                build
+            if build.any() {
+                Plane::Guest(build)
             } else {
-                GuestKinds {
-                    wasm: true,
-                    ..GuestKinds::default()
-                }
-            };
-            Plane::Guest(k)
+                Plane::Host
+            }
         }
         FaceSource::Py | FaceSource::Live => {
             // Card `build` wins when present (guest pack root).

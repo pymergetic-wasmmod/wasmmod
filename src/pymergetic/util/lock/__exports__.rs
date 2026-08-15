@@ -9,7 +9,7 @@ pub struct pm_util_lock_t {
 
 unsafe extern "C" {
     pub fn pm_util_lock_acquire(a0: *mut pm_util_lock_t);
+    pub fn pm_util_lock_init(a0: *mut pm_util_lock_t);
     pub fn pm_util_lock_try_acquire(a0: *mut pm_util_lock_t) -> i32;
     pub fn pm_util_lock_release(a0: *mut pm_util_lock_t);
-    pub fn pm_util_lock_init(a0: *mut pm_util_lock_t);
 }

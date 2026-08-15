@@ -10,7 +10,7 @@
 #define MICROPY_PY_WASM (0)
 #endif
 
-#if MICROPY_PY_WASM
+#if MICROPY_PY_WASM || (defined(PM_WASMMOD_CPYTHON) && PM_WASMMOD_CPYTHON)
 
 #include "pymergetic/wasmmod/pack/format/common/format.h"
 

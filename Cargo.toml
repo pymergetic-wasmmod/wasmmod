@@ -11,8 +11,11 @@ path = "src/lib.rs"
 crate-type = ["rlib", "staticlib"]
 
 [features]
-default = []
+# bundle-mbedtls: cargo test / CPython have no µPy ssl objects.
+# µPy unix already compiles lib/mbedtls — pass --no-default-features.
+default = ["bundle-mbedtls"]
 upy-host = []
+bundle-mbedtls = []
 # Host facegen via pymergetic.util.gen (std + toml). Not for freestanding staticlib.
 gen = ["dep:toml"]
 # Alias — CELLBUILD "build-machinery" name (same as gen today).

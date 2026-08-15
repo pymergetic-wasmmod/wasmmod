@@ -1,7 +1,8 @@
 /*
  * Pack path finder — see finder.h.
- * Offline containers: .elf / .aotN / .aot / .wasm, each optionally + .zlib.
- * No CDN / HTTP.
+ * Containers: .elf / .aotN / .aot / .wasm, each optionally + .zlib.
+ * HTTP roots: io.probe / io.fetch. Metal-cdn bases on wasm.path are skipped
+ * (artifacts/lead|pin via net.cdn). Local: µPy VFS.
  */
 
 #include "ports/micropython/finder.h"
@@ -24,7 +25,9 @@
 
 #include "ports/micropython/packbind.h"
 #include "pymergetic/util/version/__exports__.h"
+#include "pymergetic/wasmmod/io.h"
 #include "pymergetic/wasmmod/loader/__exports__.h"
+#include "pymergetic/wasmmod/net/cdn.h"
 #include "pymergetic/wasmmod/pack/__types__.h"
 #include "pymergetic/wasmmod/pack/alloc.h"
 #include "pymergetic/wasmmod/pack/format/common/format.h"
@@ -131,18 +134,39 @@ static bool join_try_file(const char *root, const char *rel, vstr_t *path_out) {
     return false;
 }
 
+/* wait=async — HEAD (or fetch-synthesize) via io_ops. */
+static bool try_url_candidate(const char *root, const char *rel, vstr_t *path_out) {
+    size_t cap = strlen(root) + strlen(rel) + 2;
+    char *uri = m_new(char, cap);
+    pm_wasmmod_io_join_uri(root, rel, uri, (uint32_t)cap);
+    int32_t ok = pm_wasmmod_io_probe(uri);
+    if (ok) {
+        vstr_init(path_out, strlen(uri) + 1);
+        vstr_add_str(path_out, uri);
+    }
+    m_del(char, uri, cap);
+    return ok != 0;
+}
+
+static bool try_rel(const char *root, const char *rel, vstr_t *path_out) {
+    if (pm_wasmmod_io_uri_is_http(root)) {
+        return try_url_candidate(root, rel, path_out);
+    }
+    return join_try_file(root, rel, path_out);
+}
+
 /* Prefer rel+".zlib" when present. */
 static bool try_rel_prefer_zlib(const char *root, const char *rel, vstr_t *path_out) {
     vstr_t zrel;
     vstr_init(&zrel, strlen(rel) + 6);
     vstr_add_str(&zrel, rel);
     vstr_add_str(&zrel, ".zlib");
-    if (join_try_file(root, vstr_null_terminated_str(&zrel), path_out)) {
+    if (try_rel(root, vstr_null_terminated_str(&zrel), path_out)) {
         vstr_clear(&zrel);
         return true;
     }
     vstr_clear(&zrel);
-    return join_try_file(root, rel, path_out);
+    return try_rel(root, rel, path_out);
 }
 
 static bool try_stem_ext(const char *root, const char *stem, const char *ext, vstr_t *path_out) {
@@ -252,6 +276,12 @@ static bool find_in_list(mp_obj_t list_obj, const char *dotted, const char *slas
         if (strcmp(root, ".frozen") == 0) {
             continue;
         }
+        /* Metal-cdn bases are artifacts/ only — probing {base}/name.wasm 200s HTML. */
+        if (pm_wasmmod_io_uri_is_http(root)
+            && pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_METAL
+            && pm_wasmmod_net_cdn_url_is_base(root)) {
+            continue;
+        }
         if (try_candidates(root, dotted, slash, path_out)) {
             return true;
         }
@@ -284,6 +314,22 @@ bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out) {
 bool mp_wasm_read_file(const char *path, uint8_t **out, size_t *out_len) {
     *out = NULL;
     *out_len = 0;
+    if (pm_wasmmod_io_uri_is_http(path)) {
+        uint8_t *buf = NULL;
+        uint32_t len = 0;
+        char err[160];
+        if (pm_wasmmod_io_fetch(path, &buf, &len, err, sizeof(err)) != 0 || buf == NULL) {
+            return false;
+        }
+        uint8_t *mem = m_new(uint8_t, len ? len : 1);
+        if (len > 0) {
+            memcpy(mem, buf, len);
+        }
+        MICROPY_WASM_FREE(buf);
+        *out = mem;
+        *out_len = len;
+        return len > 0;
+    }
     mp_obj_t path_obj = mp_obj_new_str(path, strlen(path));
     mp_obj_t open_args[2] = { path_obj, MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
     mp_obj_t f = mp_vfs_open(2, open_args, (mp_map_t *)&mp_const_empty_map);
@@ -363,7 +409,7 @@ static void unwrap_artifact(uint8_t **bytes, size_t *blen) {
 
 static int mp_wasm_import_depth;
 
-/* Local MPWD: load deps found on wasm.path / sys.path (no CDN). */
+/* Local MPWD + metal-cdn: import_pack resolves deps (finder, then cdn). */
 static void load_local_deps(const uint8_t *bytes, uint32_t blen) {
     if (mp_wasm_import_depth > 16) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm deps: nest limit"));
@@ -436,18 +482,33 @@ mp_obj_t mp_wasm_import_pack(const char *dotted_name) {
     }
 
     vstr_t path;
-    if (!mp_wasm_find_pack(dotted_name, &path)) {
+    uint8_t *bytes = NULL;
+    size_t blen = 0;
+    if (mp_wasm_find_pack(dotted_name, &path)) {
+        const char *cpath = vstr_null_terminated_str(&path);
+        if (!mp_wasm_read_file(cpath, &bytes, &blen)) {
+            vstr_clear(&path);
+            mp_raise_OSError(MP_ENOENT);
+        }
+        vstr_clear(&path);
+    } else if (pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_METAL) {
+        uint8_t *buf = NULL;
+        uint32_t n = 0;
+        char err[160];
+        if (pm_wasmmod_net_cdn_fetch_pack(dotted_name, NULL, &buf, &n, err, sizeof(err)) != 0) {
+            mp_raise_msg_varg(&mp_type_ImportError,
+                MP_ERROR_TEXT("no pack for '%s' (%s)"), dotted_name, err);
+        }
+        bytes = m_new(uint8_t, n ? n : 1);
+        if (n > 0) {
+            memcpy(bytes, buf, n);
+        }
+        MICROPY_WASM_FREE(buf);
+        blen = n;
+    } else {
         mp_raise_msg_varg(&mp_type_ImportError,
             MP_ERROR_TEXT("no pack for '%s'"), dotted_name);
     }
-    const char *cpath = vstr_null_terminated_str(&path);
-    uint8_t *bytes = NULL;
-    size_t blen = 0;
-    if (!mp_wasm_read_file(cpath, &bytes, &blen)) {
-        vstr_clear(&path);
-        mp_raise_OSError(MP_ENOENT);
-    }
-    vstr_clear(&path);
 
     unwrap_artifact(&bytes, &blen);
 

@@ -15,11 +15,11 @@ extern "C" {
 
 void pm_util_lock_acquire(pm_util_lock_t *);
 
+void pm_util_lock_init(pm_util_lock_t *);
+
 int32_t pm_util_lock_try_acquire(pm_util_lock_t *);
 
 void pm_util_lock_release(pm_util_lock_t *);
-
-void pm_util_lock_init(pm_util_lock_t *);
 
 #ifdef __cplusplus
 }

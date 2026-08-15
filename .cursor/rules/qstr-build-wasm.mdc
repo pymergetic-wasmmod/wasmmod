@@ -1,13 +1,40 @@
 ---
-description: After new wasmmod QSTRs, rebuild build-wasm genhdr; avoid build-standard compile_commands
+description: Same-edit Q() + build-wasm genhdr for every new MP_QSTR_*; never analyze via build-standard
+globs: ports/micropython/**/*.{c,h}
 alwaysApply: true
 ---
 
-# QSTR / clangd for wasmmod faces
+# QSTR faces — never leave undeclared `MP_QSTR_*`
 
-False `Use of undeclared identifier 'MP_QSTR_pymergetic_dot_…'` usually means:
+`MP_ROM_QSTR(MP_QSTR_foo)` / `MP_QSTR_foo` in `ports/micropython/*.c` is **not** a free identifier. It only exists after:
 
-1. New `Q(pymergetic….…)` in `qstrdefs.wasmmod` but **genhdr not rebuilt**, or
-2. `compile_commands.json` analyzes wasmmod `.c` with **`build-standard`** (no wasm QSTRs) instead of **`build-wasm`**.
+1. `Q(foo)` (or `Q(pymergetic.util.gen)` → `MP_QSTR_pymergetic_dot_util_dot_gen`) in `ports/micropython/qstrdefs.wasmmod`
+2. unix **`BUILD=build-wasm`** regenerates `ports/unix/build-wasm/genhdr/qstrdefs.generated.h`
+3. clangd/CDB include **`build-wasm` only** — **never** `build-standard` (it shadows `genhdr/` and lacks wasmmod QSTRs → `did you mean MP_QSTR_text?`)
 
-**Fix:** add `Q(…)` lines → rebuild unix `BUILD=build-wasm` → keep `extmod/wasmmod/.clangd` on `build-wasm` includes only.
+## Mandatory same change-set (do not finish the turn without this)
+
+When you add or rename any `MP_QSTR_*` used by the wasmmod port:
+
+1. **Same edit** as the `.c` change: add matching `Q(…)` to `qstrdefs.wasmmod`.
+2. Regenerate:
+   ```bash
+   make -C ../../ports/unix BUILD=build-wasm MICROPY_PY_WASM=1 \
+     build-wasm/genhdr/qstrdefs.generated.h
+   ```
+   (from `extmod/wasmmod`, or equivalent absolute path).
+3. **Verify** before claiming done:
+   ```bash
+   rg 'MP_QSTR_<name>\b' ../../ports/unix/build-wasm/genhdr/qstrdefs.generated.h
+   ```
+4. If clangd still squiggles: ensure `compile_commands.json` / `.clangd` use `-I…/build-wasm` and **no** `-I…/build-standard` for wasmmod TUs. Restart clangd after CDB edits.
+
+## Forbidden
+
+- Shipping `MP_QSTR_*` in `modwasmmod.c` / `finder.c` / `packbind.c` without `Q(…)` in `qstrdefs.wasmmod`.
+- Pointing analysis at `ports/unix/build-standard` for wasmmod host files.
+- Assuming “it built once” — parallel `make -j` can race qstr/frozen; regenerate genhdr explicitly after QSTR edits.
+
+## Why this keeps biting
+
+ROM dict tables need **compile-time** QSTR enums. `qstr_from_str("test")` is runtime-only and cannot replace `MP_ROM_QSTR(MP_QSTR_test)`.

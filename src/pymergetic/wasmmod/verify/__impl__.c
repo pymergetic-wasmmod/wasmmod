@@ -28,7 +28,7 @@
 #define MICROPY_PY_WASM (0)
 #endif
 
-#if MICROPY_PY_WASM
+#if MICROPY_PY_WASM || (defined(PM_WASMMOD_CPYTHON) && PM_WASMMOD_CPYTHON)
 
 #include <stdio.h>
 #include <string.h>
@@ -489,4 +489,4 @@ bool mp_wasm_verify_sig(const uint8_t *bytes, uint32_t len, char *errbuf, size_t
 
 #endif // MICROPY_WASM_VERIFY
 
-#endif // MICROPY_PY_WASM
+#endif // MICROPY_PY_WASM || PM_WASMMOD_CPYTHON

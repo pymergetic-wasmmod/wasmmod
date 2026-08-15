@@ -7,8 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "pymergetic/util/zlib/__types__.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -96,6 +96,24 @@ than `__impl__.py`.
 - Exactly one of C / RS / Py **defines** the module.
 - Other langs only **consume** via faces.
 
+### Wait class (on wait-y export faces)
+
+Not a card key. Not a second module tree. Not an async engine in wasmmod.
+
+Wait-y exports are tagged `sync` | `facade` | `async` on the **face**
+(comment/convention this slice; not a `pmm-parser` TOML key yet):
+
+| Tag | Meaning |
+|---|---|
+| `sync` | bounded CPU; never waits (`uri_is_http`, `join_uri`, `set`/`get`) |
+| `facade` | enqueue / checkpoint; never parks (`yield`) |
+| `async` | may wait; Metal parks **inside the same symbol**; mpwm/unix may **block** in the same fill (`fetch`, `probe`, `request`) |
+
+Engine stays in Metal ("Py async = Metal async"). Wasmmod owns the async
+**border**: `io_ops` is sync-looking C; the fill is where wait happens.
+`build = ["wasm", "elf"]` remains the only artifact twin. Do not invent
+`foo_async/` trees or a second asyncio.
+
 ### Module card (once, forever)
 
 **`__pmm__.toml`** inside the module's own folder (`pmm` = pymergetic
@@ -429,7 +447,7 @@ would be.
 |--------|-----------|--------------|
 | `c` | `*.types.h` (human) | `*.types.rs` (bindgen) |
 | `rs` | human RS (`*.rs` / `*.types.rs`) | `*.types.h` (cbindgen) |
-| `py` | **the function's own type hints** — parsed statically via `ast`, same posture as bindgen/cbindgen reading real source, not a manifest | `*.export.h` + `*.export.rs`, generated from the parsed hints, same as any other module |
+| `py` | **the function's own type hints** — scanned in-crate from `__init__.py` (same posture as bindgen/cbindgen reading real source, not a manifest) | `*.export.h` + `*.export.rs`, generated from the parsed hints, same as any other module |
 
 `export` / `import` on the **foreign** side are normally emitted; defaults follow
 `impl` (no faces table in `.pmm.toml` unless we need opt-out later).
@@ -471,8 +489,8 @@ risk and how much of the implementation stays safe:
 No manifest field, no `sig` key on the card — that would just be the same
 export-list-duplicates-the-source mistake `pack.toml` made, applied to
 Python instead of C. The function's own type hints are the signature,
-parsed statically via `ast` (never executed — same posture as bindgen/
-cbindgen reading real source):
+scanned in-crate from `__init__.py` (never executed — same posture as
+bindgen/cbindgen reading real source):
 
 ```python
 # util/__init__.py — just the function; no self-export boilerplate
@@ -490,11 +508,12 @@ family already has):
 
 | Hint | Shape |
 |---|---|
-| `int -> int` | `i32` (default) |
-| `bytes -> int` | `mem` — matches `pm_wasmmod_pyexport_export_py_mem` exactly: native side gets an `int32` cookie, marshals to `bytes` *before* calling Python; the `bytes` annotation on the Python side already **is** that marshaling declaration |
-| unannotated / arbitrary object param | `obj` (handle-resolved) |
-| `pymergetic.wasmmod.types.i64` / `f32` / `f64` | disambiguates where Python's own `int`/`float` are too coarse — project-provided aliases, still 100% derived from source via `ast`, never a manifest |
-| `pymergetic.wasmmod.types.RawBuf` | the ELF-only `bufptr` shape — explicit opt-in marker, never inferred, since it's a real host pointer and already flagged as unsafe for a wasm guest in `pyexport.h` |
+| `() -> int` / `int -> int` (0..3×`int`) | `i32` — `int32_t(void)` / `int32_t(int32_t, …)` |
+| `bytes -> int` | `bufptr` — `(const uint8_t *, uint32_t) → i32`; wraps `[ptr,len)` as `bytes` before calling Python |
+| `"mem" -> int` | cookie **mem** — `int32_t(pm_wasmmod_mem_cookie_t)`; host table borrows `[ptr,len)` for the call |
+| `"obj" -> int` | handle **obj** — `int32_t(pm_wasmmod_obj_handle_t)`; GC-rooted `mp_obj_t` slot |
+
+Live today: the rows above (`util.gen` discover + `pm_wasmmod_pyexport_*` + host memcookie/objhandle). Discover emits 0..3×`int`, `bytes`/`mem`/`obj`, and scalar aliases `i64`/`int64`, `f32`/`float`, `f64`/`float64`. Do not invent a `pymergetic.wasmmod.types` module in docs until it exists as a real product face.
 
 The packer, parsing a `py` module's functions this way, generates **both**:
 
@@ -725,7 +744,8 @@ from the rationale prose each time.
 
 No `[[exports]]`, `[[imports]]`, `sig`, `name`, `type`, `comment`,
 `description`, `license`, `native.dir`/`native.sources` — all retired (see
-table earlier in this doc for where each one's job went).
+table earlier in this doc for where each one's job went). Wait class
+(`sync` / `facade` / `async`) is **face documentation**, not a card key.
 
 **Face files**, by `impl`:
 
@@ -733,7 +753,7 @@ table earlier in this doc for where each one's job went).
 |---|---|---|---|---|---|
 | `c` | `__impl__.c` | `__types__.h` (human) | `__exports__.h` (human) + `__exports__.rs` (bindgen) | `__imports__.h` (human) + `__imports__.rs` (bindgen or hand) | `__init__.pyi` (generated) |
 | `rs` | `__impl__.rs` (types SoT too) | `__types__.h` (cbindgen) | `__exports__.h` (cbindgen) | `__imports__.h` (emitted or hand) | `__init__.pyi` (generated) |
-| `py` | `__init__.py` (types = the function's own hints, via `ast`) | — (hints are the SoT) | `__exports__.h` + `__exports__.rs` (generated from hints) | — (Py has no import face; `sys.modules` already location-transparent) | n/a (it *is* the source) |
+| `py` | `__init__.py` (types = the function's own hints, in-crate scan) | — (hints are the SoT) | `__exports__.h` + `__exports__.rs` (generated from hints) | — (Py has no import face; `sys.modules` already location-transparent) | n/a (it *is* the source) |
 | `pep420` | — (no muscle file) | — | — | — | — |
 
 **Module tests** (not faces — never emitted by `util.gen`):
@@ -905,7 +925,25 @@ Decision log below.
 | 2026-08-12 | mpwm host face restored at `ports/micropython/` (thin `modwasmmod.c` + `upy-host` staticlib): auto `install_hook`, `sys.modules` → `pm_wasmmod_registry_publish` presence sync, `load`/`call` over Rust registry+loader. No `host_slots`/`call0_py`. Pack finder (`loader/finder/`) still next |
 | 2026-08-12 | Removed the mistaken parallel `include/` and `python/` top-level dirs: guest ABI is `src/pymergetic/wasmmod/guest.h`, PyPI `rt` is `src/pymergetic/wasmmod/rt/`, packaging manifest is root `pyproject.toml` (sibling of `Cargo.toml`, not a second source tree). Packer's `-I` was crate root so guests `#include "src/pymergetic/wasmmod/guest.h"` (superseded 2026-08-13) |
 | 2026-08-13 | **-I rule tightened:** `#include` never spells `src/` — use `-Isrc` + `#include "pymergetic/…"`. Packer `guest_include_flags()`, `.clangd`, `micropython.mk`, `build.rs`, CDBs updated. Files still live under `src/` on disk. |
-| 2026-08-13 | **`wasmmod-gen` py + guest access faces:** `impl=py` → host `ast` on `__init__.py` hints → `register_fn` → emit `__exports__.h/.rs` (C/RS call access; live `pyexport` thunks later). Unlinked C cards (guest `hello`) → scan `PM_MOD_EXPORT_C` in `__impl__.c` into the same registry emit path. Empty umbrella `pymergetic.wasmmod` still skips. |
+| 2026-08-13 | **`wasmmod-gen` py + guest access faces:** `impl=py` → in-crate scan of `__init__.py` hints → `register_fn` → emit `__exports__.h/.rs`. Unlinked C cards (guest `hello`) → scan `PM_MOD_EXPORT_C` in `__impl__.c` into the same registry emit path. Empty umbrella `pymergetic.wasmmod` still skips. |
+| 2026-08-13 | Dropped host `python3`/`ast` blob from `util.gen` discover — pure Rust string scan (same spirit as `PM_MOD_EXPORT_C`). |
+| 2026-08-13 | **Live `pm_wasmmod_pyexport_*`:** pool thunks + `bind_py`; `bytes→int` faces use bufptr (discover SoT). |
+| 2026-08-13 | **Cookie mem / handle obj:** host `memcookie` + `objhandle` tables; pyexport pools; discover `"mem"`/`"obj"`; `pysample.echo_mem` / `is_none`. |
+| 2026-08-14 | **Discover arity/scalars:** 2–3×`int` + hint aliases `i64`/`int64`, `f32`/`float`, `f64`/`float64`; nativecall arms match. |
+| 2026-08-14 | **CPython port:** `ports/cpython/` wraps `ports/common/` + objhandle twin + import→ready (`pyexport`/`hostready`/`nativecall`/`importhook`); `make smoke` proves pysample typed call. Portable `pm_wasmmod_py_obj_t` in `host/pyobj.h`. |
+| 2026-08-14 | **`pymergetic.wasmmod.io` restored** (before CDN client): `io_ops` table (`fetch`/`probe`/`yield`/`request`) + POSIX file + optional `http://` GET/HEAD. Wait class locked on faces (`async`/`facade`/`sync`); mpwm may block inside the fill; Metal later parks in the same slot. No mbedtls this slice (`https://` → host ops / later TLS). Builtin ops DECLINE so the default chain runs. Compiled only in `build.rs` (`static:+whole-archive`); not duplicated in `micropython.mk` / CPython `CORE_SRCS`. Boot calls `pm_wasmmod_io_set(NULL)`. |
+| 2026-08-14 | **Finder HTTP candidates on `io`:** µPy `ports/micropython/finder.c` probes HTTP roots on `wasm.path`/`sys.path` via `pm_wasmmod_io_probe` + `join_uri`, loads hits via `pm_wasmmod_io_fetch` (copy onto GC heap). Local roots stay on µPy VFS (`mp_import_stat` / `mp_vfs_open`) — not POSIX `fopen`. Same container forms as offline (`.elf`/`.aotN`/`.wasm` + `.zlib`). |
+| 2026-08-14 | **`pymergetic.wasmmod.net.cdn`:** metal-cdn client on `io_ops` (not a net stack). Bases + bearer + `artifacts/lead|pin/{name}{ext}` + `index/{channel}`. Rejects non-artifact 200s. Finder skips configured bases as flat HTTP roots; `import_pack` / dep load uses `fetch_pack` when driver is metal. µPy `wasm.cdn` / `cdn_prepend` / `cdn_reset` / `catalog` / `session_id` / `publish` / `publish_file` (qstrs in `qstrdefs.wasmmod`). C `publish` is still a stub (`io.request` unused). `https://` TLS stays later. |
+| 2026-08-14 | **CPython pack finder / pack_bind / ELF:** `ports/cpython/finder.c` twins µPy (POSIX local + `io` HTTP + metal-cdn `fetch_pack`). `packbind.c` prefers `.cpy.`/`.py`, rejects `.upy.`/`.mpy`. ELF64 ET_REL loader lives at `src/pymergetic/wasmmod/pack/format/elf/load.c` (µPy `micropython.mk` already listed it). `load`/`unload`/`path`/`cdn`/`catalog` on the CPython face. `publish` still a stub. |
+| 2026-08-14 | **CPython `util.gen` VFS:** `ports/cpython/modgen.c` fills `VfsSink` ops with POSIX fopen (no µPy VFS). `pymergetic.util.gen.run_vfs` / `.diff` + live pyi provider (import fqn, walk callables). `wasmmod.gen` / `.run` still `pm_util_gen_run` (needs cargo `gen`; returns -1 on the `upy-host` staticlib). |
+| 2026-08-14 | **`io.request` + CDN publish:** public `pm_wasmmod_io_request` (ops short-circuit / DECLINE / native `http://` POST-PUT with 2xx; `https://` still needs host ops). `pm_wasmmod_net_cdn_publish` POSTs original bytes to `{base}/artifacts/lead|pin/...` via `io.request` (not sockets; not the metal-cdn-client multipart JSON API). Python `publish` / `publish_file` raise `NotImplementedError` only for “not supported” / “https requires”; other failures are `OSError`. |
+| 2026-08-14 | **Default `https://` in `io` fill:** native HTTP wraps the fd in µPy-vendored mbedtls SSL (`MICROPY_SSL_MBEDTLS`, `VERIFY_NONE` like micropython-lib requests). Finder/CDN still only call `io.fetch`/`probe`/`request`. Host `io_ops` still wins (Metal/browser). Cargo compiles `lib/mbedtls` into `pm_mbedtls` only with `bundle-mbedtls` (cargo test / CPython). µPy unix already compiles those sources — `--no-default-features`, no second copy, no `--allow-multiple-definition`. |
+| 2026-08-14 | **`ports/metal/` stub:** `io_ops.c` weak `pm_metal_wasm_io_fetch`/`_probe`/`_request` DECLINE + `pm_metal_async_yield`; runtime `pm_wasmmod_metal_io_ops_init` (no const fn-ptrs on UEFI PE). `mpconfig_metal.h` (`MICROPY_WASM_IO_OPS` / TLSF malloc comments, GC+scheduler off). `wamr_freestanding.mk` wasmmod-owned (interp + shared heap, AOT/JIT off; Metal supplies platform glue). Not a TLS module, not `register_upy`. Not added to `SRC_WASMMOD` / CPython `CORE_SRCS` / `build.rs`. |
+| 2026-08-14 | **`extmod/metal`:** `pymergetic.metal` package shell (`MICROPY_PY_METAL=1` needs wasm). Heap ABI is `pymergetic.util.mem` only — no `pm_metal_mem_*`, no `pymergetic.metal.mem` Python holder. |
+| 2026-08-15 | **`pymergetic.metal.async`:** stackless coro/task, lock-free ready ring, sorted timer list, `run_until` nested drain + idle wait. Strong `pm_metal_async_yield`. Weak `pm_metal_net_ip_pump`. Host prove `make -C extmod/metal test`. Not Asyncify. Not `run.c`/`coro.c`. |
+| 2026-08-15 | **`pymergetic.metal.net.ip`:** IPv4 + ICMP echo + UDP + TCP + lo; L2 ops attach; strong `pm_metal_net_ip_pump`. TCP is lo-reliable (handshake/data/FIN, no rexmit). UDP/TCP empty recv parks the current task. |
+| 2026-08-15 | **`pymergetic.metal.net.tls`:** same µPy-vendored mbedtls on ip socks (client `VERIFY_NONE`, server DER cert/key). Park handshake/send/recv like ip. Host prove links `lib/mbedtls`; unix `MICROPY_PY_METAL=1` does not compile mbedtls again. |
+| 2026-08-15 | **`pymergetic.metal.net.http`:** GET/HEAD/POST on ip TCP; strong `pm_metal_wasm_io_fetch|_probe|_request` park via `run_until`. IPv4 literals only. `https://` via `net.tls`. Host prove `make -C extmod/metal test`. |
 | 2026-08-13 | **No `__init__.pyi` beside `__init__.py`:** `impl=py` and pack `mount/` keep typing in the `.py` (`TYPE_CHECKING` / real hints). `__init__.pyi` is only the generated editor face for `impl=c`/`rs` (no `.py` muscle). `wasmmod-gen` skips/scrubs sibling `.pyi` for `impl=py`. |
 | 2026-08-13 | **Module versioning (complete):** `ModEntry.version` + `publish_ver`/`set_version`/`version` query; always-on `wasmmod.pkg` (MPPK) baked on pack and into registry on load/ELF; `pymergetic.util.version` (`cmp`/`satisfies`: `*`, exact, `>=`, `^`, PEP440 compact pre like `0.2.0a2`); finder enforces dep pins against registry (missing version = hard fail); card `version` → gen `__version__.h` → `MICROPY_WASM_VERSION` / registry seed; `wasmmod.version` reads registry. `deps` stay `build`-root-only; `version` also allowed on host/kernel publish units (no `build`) — `pmm.py` gate updated. |
 | 2026-08-13 | **Module `__tests__.*` standard:** cases live in `__tests__.{rs,c,py}` (optional `__tests__/` split), register via `PM_MOD_TEST_*` into `ModEntry.tests` (not product exports / not facegen). Host harness `util::mod_test::registry_mod_tests_all`. Guest: packer compiles `__tests__.c`, emits `wasmmod.tests` (MPTE); loader registers test trampolines. In-bin: `wasmmod.test` / `test_all` / `tests` / `test_count`. Migrated version/lock/lz4/mtar/api/registry/loader/gen off `__impl__` blobs. |

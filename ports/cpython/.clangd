@@ -1,0 +1,23 @@
+# Local clangd for the CPython port (paths relative to this directory).
+CompileFlags:
+  Remove:
+    - -DMICROPY_PY_WASM=1
+    - -DMICROPY_MODULE_BUILTIN_INIT=1
+    - -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1
+    - -DPM_WASMMOD_GUEST=1
+    - -I.*/ports/unix/build-standard
+    - -I.*/ports/unix/build-wasm
+    - -I.*/ports/unix/variants/standard
+    - -I.*/ports/unix$
+  Add:
+    - -Wall
+    - -Wextra
+    - -DPM_WASMMOD_CPYTHON=1
+    - -DPM_WASMMOD_GUEST=0
+    - -DMICROPY_PY_DEFLATE=1
+    - -I../..
+    - -I../../src
+    - -Istubs
+    - -I../../../..
+    - -I../../../../lib/uzlib
+    - -I/usr/include/python3.12

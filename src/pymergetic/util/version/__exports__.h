@@ -11,9 +11,9 @@
 extern "C" {
 #endif
 
-int32_t pm_util_version_satisfies(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
-
 int32_t pm_util_version_cmp(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
+
+int32_t pm_util_version_satisfies(const uint8_t *, uint32_t, const uint8_t *, uint32_t);
 
 #ifdef __cplusplus
 }

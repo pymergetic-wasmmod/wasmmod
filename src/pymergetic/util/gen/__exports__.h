@@ -13,19 +13,19 @@
 extern "C" {
 #endif
 
-void pm_util_gen_mem_sink_free(pm_util_gen_mem_sink_t *);
-
-void pm_util_gen_set_py_face_provider(pm_util_gen_py_face_fn, void *);
+int32_t pm_util_gen_run_vfs(const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t, pm_util_gen_vfs_ops_t, void *);
 
 int32_t pm_util_gen_mem_sink_read(const pm_util_gen_mem_sink_t *, const uint8_t *, uint32_t, uint8_t *, uint32_t);
 
-int32_t pm_util_gen_run(const uint8_t *, uint32_t, int32_t);
-
 int32_t pm_util_gen_run_mem(const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t, pm_util_gen_mem_sink_t **);
 
-int32_t pm_util_gen_diff_included(const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *, uint32_t);
+void pm_util_gen_set_py_face_provider(pm_util_gen_py_face_fn, void *);
 
-int32_t pm_util_gen_run_vfs(const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t, pm_util_gen_vfs_ops_t, void *);
+void pm_util_gen_mem_sink_free(pm_util_gen_mem_sink_t *);
+
+int32_t pm_util_gen_run(const uint8_t *, uint32_t, int32_t);
+
+int32_t pm_util_gen_diff_included(const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *, uint32_t);
 
 #ifdef __cplusplus
 }

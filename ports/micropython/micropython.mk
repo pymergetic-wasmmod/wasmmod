@@ -28,6 +28,7 @@ MICROPY_WASM_AOT_VERSION ?= 0
 MICROPY_WASM_CONTAINERS ?= elf,aot,wasm
 
 # Cargo: gen/build-machinery only when MICROPY_PY_WASM_GEN=1.
+# --no-default-features: drop bundle-mbedtls; unix already compiles lib/mbedtls.
 ifeq ($(WASMMOD_CARGO_FEATURES),)
 ifeq ($(MICROPY_PY_WASM_GEN),1)
 WASMMOD_CARGO_FEATURES := upy-host,gen
@@ -47,12 +48,22 @@ CFLAGS_EXTMOD += -include $(WASMMOD_ABS)/ports/micropython/mpconfig_wasm.h \
 	-DMICROPY_PY_WASM_ELF=$(MICROPY_PY_WASM_ELF) \
 	-DMICROPY_WASM_VERIFY=$(MICROPY_WASM_VERIFY) \
 	-DMICROPY_WASM_AOT_VERSION=$(MICROPY_WASM_AOT_VERSION) \
-	-DMICROPY_WASM_CONTAINERS=\"$(MICROPY_WASM_CONTAINERS)\"
+	-DMICROPY_WASM_CONTAINERS=\"$(MICROPY_WASM_CONTAINERS)\" \
+	-DMICROPY_WASMMOD_HOST_SRC=\"$(WASMMOD_ABS)/src\"
 
 SRC_WASMMOD = \
+	$(WASMMOD_DIR)/ports/common/boot.c \
+	$(WASMMOD_DIR)/ports/common/load.c \
+	$(WASMMOD_DIR)/ports/common/memcookie.c \
 	$(WASMMOD_DIR)/ports/micropython/modwasmmod.c \
+	$(WASMMOD_DIR)/ports/micropython/modutil.c \
+	$(WASMMOD_DIR)/ports/micropython/importhook.c \
+	$(WASMMOD_DIR)/ports/micropython/hostready.c \
+	$(WASMMOD_DIR)/ports/micropython/nativecall.c \
+	$(WASMMOD_DIR)/ports/micropython/objhandle.c \
 	$(WASMMOD_DIR)/ports/micropython/finder.c \
 	$(WASMMOD_DIR)/ports/micropython/packbind.c \
+	$(WASMMOD_DIR)/src/pymergetic/wasmmod/pyexport/__impl__.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/pack/manifest.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/pack/zlib_env.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/pack/source.c \
@@ -61,6 +72,10 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/pack/format/aot/section.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/pack/format/elf/section.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/verify/__impl__.c
+
+ifeq ($(MICROPY_PY_WASM_GEN),1)
+SRC_WASMMOD += $(WASMMOD_DIR)/ports/micropython/modgen.c
+endif
 
 ifeq ($(MICROPY_PY_WASM_ELF),1)
 SRC_WASMMOD += $(WASMMOD_DIR)/src/pymergetic/wasmmod/pack/format/elf/load.c
@@ -84,7 +99,7 @@ wasmmod-staticlib: $(WASMMOD_STATICLIB)
 # track the Rust graph). Touch the archive when cargo reports work done.
 $(WASMMOD_STATICLIB): FORCE
 	$(ECHO) "CARGO $(WASMMOD_DIR) ($(WASMMOD_CARGO_FEATURES) staticlib)"
-	$(Q)cd $(WASMMOD_ABS) && cargo build --release --features $(WASMMOD_CARGO_FEATURES)
+	$(Q)cd $(WASMMOD_ABS) && cargo build --lib --release --no-default-features --features $(WASMMOD_CARGO_FEATURES)
 .PHONY: FORCE
 FORCE:
 
@@ -93,6 +108,8 @@ $(BUILD)/firmware.elf: $(WASMMOD_STATICLIB)
 $(BUILD)/micropython: $(WASMMOD_STATICLIB)
 
 LDFLAGS_EXTMOD += -L$(WASMMOD_CARGO_TARGET) -lpymergetic_wasmmod -lpthread -ldl -lm -lstdc++
+# io HTTPS leaves U mbedtls_*; unix already compiles lib/mbedtls (ssl).
+# Cargo --no-default-features drops bundle-mbedtls so this .a is not a second copy.
 # WAMR vmlib is a separate static lib (build.rs); locate it under cargo OUT_DIR.
 WASMMOD_IWASM_A := $(firstword $(wildcard $(WASMMOD_ABS)/target/release/build/*/out/vmlib/build/libiwasm.a))
 ifneq ($(WASMMOD_IWASM_A),)

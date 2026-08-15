@@ -1,11 +1,13 @@
 # clangd for wasmmod (this file's directory = crate root).
 #
-# ALWAYS inject MicroPython TOP (-I../..) for every TU under this tree so
-# host port files (modwasmmod.c → py/builtin.h) and anything that pulls
-# µPy headers don't depend on PathMatch / CDB roulette. Guest-only flags
-# stay in the examples/ block.
+# Workspace clangd uses --compile-commands-dir=.vscode (metal CDB). Rely on
+# PathMatch fragments in repo-root .clangd + this file so host TUs still get
+# the right -I/-D even when CDB lookup misses.
 CompileFlags:
   CompilationDatabase: .
+  Remove:
+    - -I.*/ports/unix/build-standard
+    - -I.*/build-standard
   Add:
     - -xc
     - -std=gnu11
@@ -27,8 +29,63 @@ CompileFlags:
 If:
   PathMatch: .*/ports/micropython/.*\.(c|h)$
 CompileFlags:
+  Remove:
+    - -I.*/ports/unix/build-standard
+    - -I.*/build-standard
   Add:
     - -DPM_WASMMOD_GUEST=0
+    - -I../../ports/unix/build-wasm
+
+---
+
+# Metal io_ops stub — host TU, not a guest pack.
+If:
+  PathMatch: .*/ports/metal/.*\.(c|h)$
+CompileFlags:
+  Add:
+    - -DPM_WASMMOD_GUEST=0
+
+---
+
+# Host CPython port — Python.h; strip µPy/guest inject from parent fragment.
+If:
+  PathMatch: .*/ports/cpython/.*\.(c|h)$
+CompileFlags:
+  Remove:
+    - -DMICROPY_PY_WASM=1
+    - -DMICROPY_MODULE_BUILTIN_INIT=1
+    - -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1
+    - -DPM_WASMMOD_GUEST=1
+    - -I.*/ports/unix/build-standard
+    - -I.*/ports/unix/build-wasm
+    - -I.*/ports/unix/variants/standard
+    - -I.*/ports/unix$
+  Add:
+    - -Wall
+    - -Wextra
+    - -DPM_WASMMOD_CPYTHON=1
+    - -DPM_WASMMOD_GUEST=0
+    - -DMICROPY_PY_DEFLATE=1
+    - -Iports/cpython/stubs
+    - -I/usr/include/python3.12
+
+---
+
+# Host crate src/ (io, mem, …) — not guest packs.
+If:
+  PathMatch: .*/src/.*\.(c|h)$
+CompileFlags:
+  Add:
+    - -DPM_WASMMOD_GUEST=0
+
+---
+
+If:
+  PathMatch: .*/__tests__\.c$
+CompileFlags:
+  Add:
+    - -DPM_WASMMOD_GUEST=0
+    - -DPM_MOD_TESTS=1
 
 ---
 

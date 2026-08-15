@@ -16,3 +16,9 @@ pub mod api;
 /// C face: `guest.h`. RS face: `guest.rs` (`PM_MOD_EXPORT_RS!` ≡ `PM_MOD_EXPORT_C`).
 #[path = "wasmmod/guest.rs"]
 pub mod guest;
+
+#[path = "wasmmod/io.rs"]
+pub mod io;
+
+#[path = "wasmmod/net.rs"]
+pub mod net;

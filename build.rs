@@ -37,8 +37,17 @@
 fn main() {
     build_util_mem();
     build_util_zlib();
+    if bundle_mbedtls() {
+        build_mbedtls();
+    }
+    build_wasmmod_io();
+    build_wasmmod_net_cdn();
     build_wamr();
     build_wamrc();
+}
+
+fn bundle_mbedtls() -> bool {
+    std::env::var("CARGO_FEATURE_BUNDLE_MBEDTLS").is_ok()
 }
 
 /// Runtime, not `env!("CARGO_MANIFEST_DIR")` — the compile-time macro bakes
@@ -107,6 +116,183 @@ fn build_util_zlib() {
     let out = std::env::var("OUT_DIR").expect("OUT_DIR");
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static:+whole-archive=pm_util_zlib");
+}
+
+fn mpy_top(root: &str) -> String {
+    format!("{root}/../..")
+}
+
+fn mbedtls_cflags(build: &mut cc::Build, root: &str) {
+    let mpy = mpy_top(root);
+    build
+        .include(format!("{mpy}/lib/mbedtls/include"))
+        .include(format!("{root}/ports/cpython/stubs"))
+        .include(&mpy)
+        .define("MBEDTLS_CONFIG_FILE", "\"mbedtls/mbedtls_config_port.h\"")
+        .define("MICROPY_SSL_MBEDTLS", "1");
+    // Same config as the objects we will actually link: bundled copy uses
+    // ports/common; µPy firmware uses the unix port's already-built mbedtls.
+    if bundle_mbedtls() {
+        build.include(format!("{root}/ports/common"));
+    } else {
+        build.include(format!("{mpy}/ports/unix"));
+    }
+}
+
+/// µPy-vendored mbedtls for consumers that do not already link it
+/// (`feature = "bundle-mbedtls"`: cargo test, CPython). µPy unix compiles
+/// the same `lib/mbedtls` sources itself — do not add a second copy.
+fn build_mbedtls() {
+    let root = manifest_dir();
+    let mpy = mpy_top(&root);
+    let lib = format!("{mpy}/lib/mbedtls/library");
+    println!("cargo:rerun-if-changed=ports/common/mbedtls/mbedtls_config_port.h");
+    println!("cargo:rerun-if-changed={mpy}/extmod/mbedtls/mbedtls_config_common.h");
+    println!("cargo:rerun-if-changed={mpy}/lib/mbedtls_errors/mp_mbedtls_errors.c");
+
+    let files = [
+        "aes.c",
+        "aesni.c",
+        "asn1parse.c",
+        "asn1write.c",
+        "base64.c",
+        "bignum_core.c",
+        "bignum_mod.c",
+        "bignum_mod_raw.c",
+        "bignum.c",
+        "camellia.c",
+        "ccm.c",
+        "chacha20.c",
+        "chachapoly.c",
+        "cipher.c",
+        "cipher_wrap.c",
+        "nist_kw.c",
+        "aria.c",
+        "cmac.c",
+        "constant_time.c",
+        "mps_reader.c",
+        "mps_trace.c",
+        "ctr_drbg.c",
+        "debug.c",
+        "des.c",
+        "dhm.c",
+        "ecdh.c",
+        "ecdsa.c",
+        "ecjpake.c",
+        "ecp.c",
+        "ecp_curves.c",
+        "entropy.c",
+        "entropy_poll.c",
+        "gcm.c",
+        "hmac_drbg.c",
+        "md5.c",
+        "md.c",
+        "oid.c",
+        "padlock.c",
+        "pem.c",
+        "pk.c",
+        "pkcs12.c",
+        "pkcs5.c",
+        "pkparse.c",
+        "pk_ecc.c",
+        "pk_wrap.c",
+        "pkwrite.c",
+        "platform.c",
+        "platform_util.c",
+        "poly1305.c",
+        "ripemd160.c",
+        "rsa.c",
+        "rsa_alt_helpers.c",
+        "sha1.c",
+        "sha256.c",
+        "sha512.c",
+        "ssl_cache.c",
+        "ssl_ciphersuites.c",
+        "ssl_client.c",
+        "ssl_cookie.c",
+        "ssl_debug_helpers_generated.c",
+        "ssl_msg.c",
+        "ssl_ticket.c",
+        "ssl_tls.c",
+        "ssl_tls12_client.c",
+        "ssl_tls12_server.c",
+        "timing.c",
+        "x509.c",
+        "x509_create.c",
+        "x509_crl.c",
+        "x509_crt.c",
+        "x509_csr.c",
+        "x509write_crt.c",
+        "x509write_csr.c",
+    ];
+    let mut build = cc::Build::new();
+    mbedtls_cflags(&mut build, &root);
+    for f in files {
+        let path = format!("{lib}/{f}");
+        println!("cargo:rerun-if-changed={path}");
+        build.file(&path);
+    }
+    build.file(format!("{mpy}/lib/mbedtls_errors/mp_mbedtls_errors.c"));
+    build
+        .define("PM_WASMMOD_GUEST", "0")
+        .warnings(false)
+        .cargo_metadata(false)
+        .compile("pm_mbedtls");
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static:+whole-archive=pm_mbedtls");
+}
+
+fn build_wasmmod_io() {
+    let root = manifest_dir();
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io/__impl__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io/__tests__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io/__exports__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io/__types__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io.h");
+    println!("cargo:rerun-if-changed=ports/common/mbedtls/mbedtls_config_port.h");
+
+    // cargo_metadata(false): emit static:+whole-archive so PM_MOD_EXPORT_C /
+    // PM_MOD_TEST_C .init_array ctors survive --gc-sections.
+    let mut build = cc::Build::new();
+    mbedtls_cflags(&mut build, &root);
+    build
+        .file("src/pymergetic/wasmmod/io/__impl__.c")
+        .file("src/pymergetic/wasmmod/io/__tests__.c")
+        .include(&root)
+        .include(format!("{root}/src"))
+        .define("PM_WASMMOD_GUEST", "0")
+        .define("PM_MOD_TESTS", "1")
+        .warnings(true)
+        .cargo_metadata(false)
+        .compile("pm_wasmmod_io");
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static:+whole-archive=pm_wasmmod_io");
+}
+
+fn build_wasmmod_net_cdn() {
+    let root = manifest_dir();
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn/__impl__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn/__tests__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn/__exports__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn/__types__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn.h");
+
+    let mut build = cc::Build::new();
+    build
+        .file("src/pymergetic/wasmmod/net/cdn/__impl__.c")
+        .file("src/pymergetic/wasmmod/net/cdn/__tests__.c")
+        .include(&root)
+        .include(format!("{root}/src"))
+        .define("PM_WASMMOD_GUEST", "0")
+        .define("PM_MOD_TESTS", "1")
+        .warnings(true)
+        .cargo_metadata(false)
+        .compile("pm_wasmmod_net_cdn");
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static:+whole-archive=pm_wasmmod_net_cdn");
 }
 
 fn build_wamr() {

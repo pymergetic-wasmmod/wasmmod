@@ -97,7 +97,11 @@
             (pm_wasmmod_registry_test_fn_t)(impl_fn)); \
     }
 #else
-#define PM_MOD_TEST_C(mod, case_name, impl_fn) /* guest: packer / host without PM_MOD_TESTS */
+/* Packer scans the call site; keep a ref so -Wunused-function stays quiet
+ * when this expands to nothing (guest TU / clangd without PM_MOD_TESTS). */
+#define PM_MOD_TEST_C(mod, case_name, impl_fn) \
+    static int32_t (*const pm_mod_test_keep_##impl_fn)(void) \
+        __attribute__((unused)) = (impl_fn)
 #endif
 
 #endif /* PM_GUEST_H_ */
