@@ -311,6 +311,37 @@ fn scrub_py_pyi(dir: &Path) {
     let _ = fs::remove_file(dir.join("__init__.pyi"));
 }
 
+/// Per-card ignore for generated faces. Identical bytes every run (no git
+/// noise). The `.gitignore` itself is tracked; the names listed are not.
+/// Recreate faces with `wasmmod-gen` after a clean.
+const CARD_GITIGNORE: &str = "\
+# pymergetic.util.gen — generated faces. Recreate with wasmmod-gen.
+__exports__.h
+__exports__.rs
+__imports__.h
+__imports__.rs
+__init__.pyi
+__version__.h
+!.gitignore
+";
+
+fn emit_card_gitignore(dir: &Path, check: bool) -> i32 {
+    let path = dir.join(".gitignore");
+    let same = fs::read_to_string(&path)
+        .ok()
+        .is_some_and(|existing| existing == CARD_GITIGNORE);
+    if same {
+        return 0;
+    }
+    if check {
+        return 1;
+    }
+    match fs::write(&path, CARD_GITIGNORE) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    }
+}
+
 fn status_cols(leaf: &Leaf, color: bool) -> String {
     let n = if leaf.outcome == Outcome::Skip {
         paint(color, "2", "—")
@@ -630,13 +661,16 @@ pub fn gen_run_paths(roots: &[&Path], check: bool) -> i32 {
     let mut drift = 0i32;
     let mut rows = Vec::new();
     for card in cards {
+        let dir = card.parent().unwrap();
+        if emit_card_gitignore(dir, check) != 0 {
+            drift = 1;
+        }
         if is_pep420(&card) {
             continue;
         }
         let Some(fqn) = load_fqn(&card) else {
             continue;
         };
-        let dir = card.parent().unwrap();
         let dir_s = dir.display().to_string();
         let impl_lang = impl_of(load_impl(&card).as_deref());
         let source = ensure_card_exports(dir, &fqn);
@@ -747,6 +781,10 @@ mod tests {
         let h = fs::read_to_string(mod_dir.join("__exports__.h")).unwrap();
         assert!(h.contains("int ping(void);"));
         assert!(h.contains("live registry introspection"));
+        let gi = fs::read_to_string(mod_dir.join(".gitignore")).unwrap();
+        assert_eq!(gi, CARD_GITIGNORE);
+        assert!(gi.contains("__exports__.h"));
+        assert!(!gi.lines().any(|l| l == "__init__.py" || l == "__pmm__.toml"));
         assert_eq!(gen_run_path(&tmp.join("src").display().to_string(), true), 0);
         let _ = fs::remove_dir_all(&tmp);
     }
