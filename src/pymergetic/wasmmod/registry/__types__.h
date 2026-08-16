@@ -134,6 +134,16 @@ static inline __attribute__((unused)) pm_wasmmod_registry_value_t pm_wasmmod_reg
     return x;
 }
 
+/* Callees of PM_MOD_EXPORT_C / PM_MOD_CONNECT / PM_MOD_TEST_C in guest.h.
+ * Handwritten ABI — generated __exports__.h repeats these for consumers. */
+int32_t pm_wasmmod_registry_mod_export(const uint8_t *fqn, uint32_t fqn_len, const uint8_t *name,
+    uint32_t name_len, pm_wasmmod_registry_export_kind_t kind, void *fn, const uint8_t *sig,
+    uint32_t sig_len);
+int32_t pm_wasmmod_registry_connect_import(const uint8_t *fqn, uint32_t fqn_len, const uint8_t *name,
+    uint32_t name_len, void **out);
+int32_t pm_wasmmod_registry_test_register(const uint8_t *fqn, uint32_t fqn_len, const uint8_t *name,
+    uint32_t name_len, pm_wasmmod_registry_test_fn_t fn);
+
 #ifdef __cplusplus
 }
 #endif

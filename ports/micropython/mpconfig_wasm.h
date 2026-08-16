@@ -21,6 +21,11 @@
 #ifndef MICROPY_MODULE_BUILTIN_INIT
 #define MICROPY_MODULE_BUILTIN_INIT (1)
 #endif
+/* Guest packs live under ROM `pymergetic`; LOAD_ATTR after
+ * `import a.b.c as d` resolves `pymergetic.<leaf>` via sys.modules. */
+#ifndef MICROPY_MODULE_ATTR_DELEGATION
+#define MICROPY_MODULE_ATTR_DELEGATION (1)
+#endif
 
 /* In-bin / host facegen (`pymergetic.util.gen` + cargo feature `gen`).
  * Unix product default ON. Freestanding / lean guest: set 0. */

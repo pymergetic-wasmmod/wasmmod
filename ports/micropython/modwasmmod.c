@@ -24,7 +24,6 @@
 #include "ports/micropython/finder.h"
 #include "ports/micropython/hostready.h"
 #include "ports/micropython/importhook.h"
-#include "ports/micropython/modgen.h"
 #include "ports/micropython/modutil.h"
 #include "ports/micropython/mpconfig_wasm.h"
 #include "ports/micropython/nativecall.h"
@@ -32,6 +31,10 @@
 #if MICROPY_PY_METAL
 #include "extmod/metal/modmetal.h"
 #endif
+
+extern const mp_obj_module_t mp_module_pymergetic_wasmmod_guest;
+extern const mp_obj_module_t mp_module_pymergetic_wasmmod_net;
+
 #include "pymergetic/wasmmod/__version__.h"
 #include "pymergetic/wasmmod/api/__exports__.h"
 #include "pymergetic/wasmmod/io.h"
@@ -44,6 +47,10 @@
 
 #ifndef MICROPY_PY_WASM_ELF
 #define MICROPY_PY_WASM_ELF (0)
+#endif
+
+#if MICROPY_PY_WASM_GEN
+MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_gen_obj);
 #endif
 
 #ifndef MICROPY_WASM_VERSION
@@ -569,6 +576,8 @@ static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
 #if MICROPY_PY_WASM_GEN
     { MP_ROM_QSTR(MP_QSTR_gen), MP_ROM_PTR(&mod_wasm_gen_obj) },
 #endif
+    { MP_ROM_QSTR(MP_QSTR_guest), MP_ROM_PTR(&mp_module_pymergetic_wasmmod_guest) },
+    { MP_ROM_QSTR(MP_QSTR_net), MP_ROM_PTR(&mp_module_pymergetic_wasmmod_net) },
 };
 static MP_DEFINE_CONST_DICT(mp_module_pymergetic_wasmmod_globals, mp_module_pymergetic_wasmmod_globals_table);
 
@@ -594,25 +603,7 @@ const mp_obj_module_t mp_module_pymergetic = {
 };
 
 #if MICROPY_MODULE_ATTR_DELEGATION
-void mp_module_pymergetic_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
-    (void)self_in;
-    if (dest[0] != MP_OBJ_NULL) {
-        return;
-    }
-    const char *leaf = qstr_str(attr);
-    size_t llen = strlen(leaf);
-    vstr_t name;
-    vstr_init(&name, 11 + llen);
-    vstr_add_strn(&name, "pymergetic.", 11);
-    vstr_add_strn(&name, leaf, llen);
-    mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
-        MP_OBJ_NEW_QSTR(qstr_from_strn(name.buf, name.len)), MP_MAP_LOOKUP);
-    vstr_clear(&name);
-    if (el != NULL && el->value != MP_OBJ_NULL) {
-        dest[0] = el->value;
-    }
-}
-MP_REGISTER_MODULE_DELEGATION(mp_module_pymergetic, mp_module_pymergetic_attr);
+MP_REGISTER_MODULE_DELEGATION(mp_module_pymergetic, mp_wasm_pymergetic_attr);
 #endif
 
 MP_REGISTER_MODULE(MP_QSTR_pymergetic, mp_module_pymergetic);

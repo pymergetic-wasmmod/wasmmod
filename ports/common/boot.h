@@ -11,7 +11,8 @@
 extern "C" {
 #endif
 
-/* Weak no-op; Metal provides strong (MICROPY_PY_METAL=1). Called before host_boot. */
+/* Weak no-op; Metal provides strong (MICROPY_PY_METAL=1). Metal module __init__ calls this
+ * after Python PM_MOD_BOOT* have queued extras. */
 int pm_metal_boot(void);
 
 /* Init registry + builtin io_ops + loader, seed kernel fqn version, start verify trust session.

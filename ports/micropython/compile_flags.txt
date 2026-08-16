@@ -1,14 +1,15 @@
-# Fallback when clangd has no CDB hit (paths relative to this file).
-# Host port → µPy TOP is ../../../.. (micropython-wasmmod).
+# Fallback for this directory (paths relative to this file).
 -xc
 -std=gnu11
+-I.
 -I../..
 -I../../src
+-I../../third_party/wamr/core/iwasm/include
 -I../../../..
 -I../../../../ports/unix
 -I../../../../ports/unix/variants/standard
 -I../../../../ports/unix/build-wasm
--I../../third_party/wamr/core/iwasm/include
+-include mpconfig_wasm.h
 -DMICROPY_PY_WASM=1
 -DMICROPY_MODULE_BUILTIN_INIT=1
 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1

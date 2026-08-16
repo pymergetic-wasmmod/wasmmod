@@ -35,15 +35,48 @@
 //! `build.rs` per crate — not a sign any of them belongs to another.
 
 fn main() {
+    // impl=c RS barrels `#[path = "…/__exports__.rs"]`. Those files are
+    // gen output; if they are missing, rustc cannot compile this crate
+    // (including wasmmod-gen). Write an empty module so wipe → gen works.
+    // wasmmod-gen overwrites the stubs with the real faces in the same run.
+    ensure_export_rs_stubs();
     build_util_mem();
     build_util_zlib();
     if bundle_mbedtls() {
         build_mbedtls();
     }
+    build_wasmmod_boot();
     build_wasmmod_io();
     build_wasmmod_net_cdn();
     build_wamr();
     build_wamrc();
+}
+
+const EXPORT_RS_STUBS: &[&str] = &[
+    "src/pymergetic/util/mem/__exports__.rs",
+    "src/pymergetic/util/zlib/__exports__.rs",
+    "src/pymergetic/util/pysample/__exports__.rs",
+    "src/pymergetic/wasmmod/io/__exports__.rs",
+    "src/pymergetic/wasmmod/net/cdn/__exports__.rs",
+];
+
+const EXPORT_RS_STUB: &str = "//! bootstrap stub — wasmmod-gen replaces this.\n";
+
+fn ensure_export_rs_stubs() {
+    let root = manifest_dir();
+    for rel in EXPORT_RS_STUBS {
+        println!("cargo:rerun-if-changed={rel}");
+        let path = format!("{root}/{rel}");
+        if !std::path::Path::new(&path).is_file() {
+            std::fs::write(&path, EXPORT_RS_STUB).unwrap_or_else(|e| {
+                panic!("bootstrap {rel}: {e}");
+            });
+        }
+    }
+}
+
+fn exports_h_exists(rel: &str) -> bool {
+    std::path::Path::new(&format!("{}/{rel}", manifest_dir())).is_file()
 }
 
 fn bundle_mbedtls() -> bool {
@@ -63,7 +96,6 @@ fn build_util_mem() {
     let root = manifest_dir();
     println!("cargo:rerun-if-changed=src/pymergetic/util/mem/__impl__.c");
     println!("cargo:rerun-if-changed=src/pymergetic/util/mem/__types__.h");
-    println!("cargo:rerun-if-changed=src/pymergetic/util/mem/__exports__.h");
     println!("cargo:rerun-if-changed=third_party/tlsf/tlsf.c");
     println!("cargo:rerun-if-changed=third_party/tlsf/tlsf.h");
 
@@ -94,7 +126,6 @@ fn build_util_zlib() {
     let mpy_top = format!("{root}/../..");
     let uzlib = format!("{mpy_top}/lib/uzlib");
     println!("cargo:rerun-if-changed=src/pymergetic/util/zlib/__impl__.c");
-    println!("cargo:rerun-if-changed=src/pymergetic/util/zlib/__exports__.h");
     println!("cargo:rerun-if-changed=src/pymergetic/util/zlib/__types__.h");
     println!("cargo:rerun-if-changed={uzlib}/tinflate.c");
     println!("cargo:rerun-if-changed={uzlib}/lz77.c"); // includes defl_static.c
@@ -243,29 +274,53 @@ fn build_mbedtls() {
     println!("cargo:rustc-link-lib=static:+whole-archive=pm_mbedtls");
 }
 
+fn build_wasmmod_boot() {
+    let root = manifest_dir();
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/boot/__impl__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/boot/__types__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/boot.h");
+
+    let mut build = cc::Build::new();
+    build
+        .file("src/pymergetic/wasmmod/boot/__impl__.c")
+        .include(&root)
+        .include(format!("{root}/src"))
+        .define("PM_WASMMOD_GUEST", "0")
+        .warnings(true)
+        .cargo_metadata(false)
+        .compile("pm_wasmmod_boot");
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static:+whole-archive=pm_wasmmod_boot");
+}
+
 fn build_wasmmod_io() {
     let root = manifest_dir();
     println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io/__impl__.c");
     println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io/__tests__.c");
-    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io/__exports__.h");
     println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io/__types__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io/__exports__.h");
     println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/io.h");
     println!("cargo:rerun-if-changed=ports/common/mbedtls/mbedtls_config_port.h");
 
     // cargo_metadata(false): emit static:+whole-archive so PM_MOD_EXPORT_C /
     // PM_MOD_TEST_C .init_array ctors survive --gc-sections.
+    // Tests include the consumer umbrella (`io.h` → generated __exports__.h).
+    // Skip them when faces are wiped so wasmmod-gen can recreate first.
     let mut build = cc::Build::new();
     mbedtls_cflags(&mut build, &root);
     build
         .file("src/pymergetic/wasmmod/io/__impl__.c")
-        .file("src/pymergetic/wasmmod/io/__tests__.c")
         .include(&root)
         .include(format!("{root}/src"))
         .define("PM_WASMMOD_GUEST", "0")
-        .define("PM_MOD_TESTS", "1")
         .warnings(true)
-        .cargo_metadata(false)
-        .compile("pm_wasmmod_io");
+        .cargo_metadata(false);
+    if exports_h_exists("src/pymergetic/wasmmod/io/__exports__.h") {
+        build.file("src/pymergetic/wasmmod/io/__tests__.c");
+        build.define("PM_MOD_TESTS", "1");
+    }
+    build.compile("pm_wasmmod_io");
     let out = std::env::var("OUT_DIR").expect("OUT_DIR");
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static:+whole-archive=pm_wasmmod_io");
@@ -275,21 +330,25 @@ fn build_wasmmod_net_cdn() {
     let root = manifest_dir();
     println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn/__impl__.c");
     println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn/__tests__.c");
-    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn/__exports__.h");
     println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn/__types__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn/__exports__.h");
     println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/net/cdn.h");
 
     let mut build = cc::Build::new();
     build
         .file("src/pymergetic/wasmmod/net/cdn/__impl__.c")
-        .file("src/pymergetic/wasmmod/net/cdn/__tests__.c")
         .include(&root)
         .include(format!("{root}/src"))
         .define("PM_WASMMOD_GUEST", "0")
-        .define("PM_MOD_TESTS", "1")
         .warnings(true)
-        .cargo_metadata(false)
-        .compile("pm_wasmmod_net_cdn");
+        .cargo_metadata(false);
+    if exports_h_exists("src/pymergetic/wasmmod/net/cdn/__exports__.h")
+        && exports_h_exists("src/pymergetic/wasmmod/io/__exports__.h")
+    {
+        build.file("src/pymergetic/wasmmod/net/cdn/__tests__.c");
+        build.define("PM_MOD_TESTS", "1");
+    }
+    build.compile("pm_wasmmod_net_cdn");
     let out = std::env::var("OUT_DIR").expect("OUT_DIR");
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static:+whole-archive=pm_wasmmod_net_cdn");

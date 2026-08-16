@@ -116,8 +116,13 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         if (n_args != 1) {
             mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
         }
+#if MICROPY_LONGINT_IMPL != MICROPY_LONGINT_IMPL_NONE
         return mp_obj_new_int_from_ll(((int64_t (*)(int64_t))p)((int64_t)mp_obj_get_ll(args[0])));
+#else
+        return mp_obj_new_int((mp_int_t)((int64_t (*)(int64_t))p)((int64_t)mp_obj_get_int(args[0])));
+#endif
     }
+#if MICROPY_FLOAT_IMPL != MICROPY_FLOAT_IMPL_NONE
     if (strcmp(sig, "float(float)") == 0) {
         if (n_args != 1) {
             mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
@@ -130,6 +135,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         return mp_obj_new_float((mp_float_t)((double (*)(double))p)((double)mp_obj_get_float(args[0])));
     }
+#endif
 
     mp_raise_ValueError(MP_ERROR_TEXT("unsupported native sig (use CONNECT from C/RS)"));
 }

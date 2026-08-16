@@ -8,9 +8,9 @@
 #include "ports/micropython/finder.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#include "extmod/vfs.h"
 #include "py/builtin.h"
 #include "py/mperrno.h"
 #include "py/nlr.h"
@@ -18,6 +18,9 @@
 #include "py/objmodule.h"
 #include "py/runtime.h"
 #include "py/stream.h"
+#if MICROPY_VFS
+#include "extmod/vfs.h"
+#endif
 
 #if !MICROPY_PY_SYS_PATH
 #error "wasmmod pack finder requires MICROPY_PY_SYS_PATH"
@@ -56,6 +59,88 @@
 
 /* Root pointer name must not match the getter (clangd/type confusion). */
 MP_REGISTER_ROOT_POINTER(mp_obj_t mp_wasm_path);
+
+#define MP_WASM_LOCAL_PACKS 4
+
+typedef struct {
+    const char *name;
+    const uint8_t *bytes;
+    size_t len;
+} mp_wasm_local_pack_t;
+
+static mp_wasm_local_pack_t s_local_packs[MP_WASM_LOCAL_PACKS];
+
+void mp_wasm_register_local_bytes(const char *dotted_name, const uint8_t *bytes, size_t len) {
+    size_t i;
+    if (dotted_name == NULL || dotted_name[0] == '\0' || bytes == NULL || len == 0) {
+        return;
+    }
+    for (i = 0; i < MP_WASM_LOCAL_PACKS; ++i) {
+        if (s_local_packs[i].name != NULL && strcmp(s_local_packs[i].name, dotted_name) == 0) {
+            s_local_packs[i].bytes = bytes;
+            s_local_packs[i].len = len;
+            return;
+        }
+    }
+    for (i = 0; i < MP_WASM_LOCAL_PACKS; ++i) {
+        if (s_local_packs[i].name == NULL) {
+            s_local_packs[i].name = dotted_name;
+            s_local_packs[i].bytes = bytes;
+            s_local_packs[i].len = len;
+            return;
+        }
+    }
+}
+
+static const mp_wasm_local_pack_t *local_pack_by_name(const char *dotted_name) {
+    size_t i;
+    for (i = 0; i < MP_WASM_LOCAL_PACKS; ++i) {
+        if (s_local_packs[i].name != NULL && strcmp(s_local_packs[i].name, dotted_name) == 0) {
+            return &s_local_packs[i];
+        }
+    }
+    return NULL;
+}
+
+static int bytes_is_local_pack(const uint8_t *bytes) {
+    size_t i;
+    if (bytes == NULL) {
+        return 0;
+    }
+    for (i = 0; i < MP_WASM_LOCAL_PACKS; ++i) {
+        if (s_local_packs[i].bytes == bytes) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void pack_bytes_free(uint8_t *bytes, size_t len) {
+    if (!bytes_is_local_pack(bytes)) {
+        m_del(uint8_t, bytes, len);
+    }
+}
+
+/* io.fetch / net.cdn bytes: cargo TUs malloc via alloc.h stdlib. Unix
+ * MICROPY_PY_METAL=1 redirects this TU's MICROPY_WASM_FREE to TLSF —
+ * do not mix. Firmware/emcc compile io in the same image. */
+static void io_fetch_free(uint8_t *buf) {
+#if defined(__EMSCRIPTEN__) || defined(PM_METAL_FIRMWARE)
+    MICROPY_WASM_FREE(buf);
+#else
+    free(buf);
+#endif
+}
+
+static bool local_pack_path(const char *dotted_name, vstr_t *path_out) {
+    if (local_pack_by_name(dotted_name) == NULL) {
+        return false;
+    }
+    vstr_init(path_out, 4 + strlen(dotted_name) + 1);
+    vstr_add_str(path_out, "mem:");
+    vstr_add_str(path_out, dotted_name);
+    return true;
+}
 
 bool mp_wasm_is_host_face(const char *dotted_name) {
     if (dotted_name == NULL || dotted_name[0] == '\0') {
@@ -293,6 +378,9 @@ bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out) {
     if (dotted_name == NULL || dotted_name[0] == '\0' || mp_wasm_is_host_face(dotted_name)) {
         return false;
     }
+    if (local_pack_path(dotted_name, path_out)) {
+        return true;
+    }
     vstr_t slash;
     dotted_to_slash(dotted_name, &slash);
     const char *slash_name = vstr_null_terminated_str(&slash);
@@ -314,6 +402,17 @@ bool mp_wasm_find_pack(const char *dotted_name, vstr_t *path_out) {
 bool mp_wasm_read_file(const char *path, uint8_t **out, size_t *out_len) {
     *out = NULL;
     *out_len = 0;
+    if (path != NULL && strncmp(path, "mem:", 4) == 0) {
+        const mp_wasm_local_pack_t *p = local_pack_by_name(path + 4);
+        if (p == NULL) {
+            return false;
+        }
+        /* Loader copies; do not m_new a second buffer (firmware GC-off
+         * bump has truncated this once). unload must not m_del the bake. */
+        *out = (uint8_t *)(uintptr_t)p->bytes;
+        *out_len = p->len;
+        return p->len > 0;
+    }
     if (pm_wasmmod_io_uri_is_http(path)) {
         uint8_t *buf = NULL;
         uint32_t len = 0;
@@ -325,11 +424,12 @@ bool mp_wasm_read_file(const char *path, uint8_t **out, size_t *out_len) {
         if (len > 0) {
             memcpy(mem, buf, len);
         }
-        MICROPY_WASM_FREE(buf);
+        io_fetch_free(buf);
         *out = mem;
         *out_len = len;
         return len > 0;
     }
+#if MICROPY_VFS
     mp_obj_t path_obj = mp_obj_new_str(path, strlen(path));
     mp_obj_t open_args[2] = { path_obj, MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
     mp_obj_t f = mp_vfs_open(2, open_args, (mp_map_t *)&mp_const_empty_map);
@@ -362,6 +462,10 @@ bool mp_wasm_read_file(const char *path, uint8_t **out, size_t *out_len) {
     *out_len = buf.len;
     vstr_clear(&buf);
     return true;
+#else
+    (void)path;
+    return false;
+#endif
 }
 
 void mp_wasm_store_handle_on_module(mp_obj_t mod, pm_wasmmod_registry_handle_t h) {
@@ -395,7 +499,7 @@ static void unwrap_artifact(uint8_t **bytes, size_t *blen) {
         mp_raise_ValueError(MP_ERROR_TEXT("corrupt MPZL artifact"));
     }
     if (owned != NULL) {
-        m_del(uint8_t, *bytes, *blen);
+        pack_bytes_free(*bytes, *blen);
         /* Move malloc'd inflate into GC heap so unload path is uniform. */
         uint8_t *mem = m_new(uint8_t, len);
         memcpy(mem, owned, len);
@@ -503,7 +607,7 @@ mp_obj_t mp_wasm_import_pack(const char *dotted_name) {
         if (n > 0) {
             memcpy(bytes, buf, n);
         }
-        MICROPY_WASM_FREE(buf);
+        io_fetch_free(buf);
         blen = n;
     } else {
         mp_raise_msg_varg(&mp_type_ImportError,
@@ -516,7 +620,7 @@ mp_obj_t mp_wasm_import_pack(const char *dotted_name) {
     {
         char err[160];
         if (!mp_wasm_verify_bytes(bytes, (uint32_t)blen, dotted_name, err, sizeof(err))) {
-            m_del(uint8_t, bytes, blen);
+            pack_bytes_free(bytes, blen);
             mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("wasm verify: %s"), err);
         }
     }
@@ -530,7 +634,7 @@ mp_obj_t mp_wasm_import_pack(const char *dotted_name) {
         mp_wasm_import_depth--;
     } else {
         mp_wasm_import_depth--;
-        m_del(uint8_t, bytes, blen);
+        pack_bytes_free(bytes, blen);
         nlr_jump(nlr_deps.ret_val);
     }
 
@@ -543,19 +647,19 @@ mp_obj_t mp_wasm_import_pack(const char *dotted_name) {
         void *img = NULL;
         h = mp_wasm_elf_publish(dotted_name, bytes, (uint32_t)blen, &img, err, sizeof(err));
         if (h.index == UINT32_MAX) {
-            m_del(uint8_t, bytes, blen);
+            pack_bytes_free(bytes, blen);
             mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("elf load: %s"), err);
         }
         mp_obj_t mod = mp_wasm_pack_bind(dotted_name, h, bytes, (uint32_t)blen);
         mp_obj_dict_store(MP_OBJ_FROM_PTR(mp_obj_module_get_globals(mod)),
             MP_OBJ_NEW_QSTR(MP_QSTR___wasm_elf__),
             mp_obj_new_int_from_ull((uint64_t)(uintptr_t)img));
-        m_del(uint8_t, bytes, blen);
+        pack_bytes_free(bytes, blen);
         return mod;
     }
 #else
     if (kind == MP_WASM_KIND_ELF) {
-        m_del(uint8_t, bytes, blen);
+        pack_bytes_free(bytes, blen);
         mp_raise_msg(&mp_type_RuntimeError,
             MP_ERROR_TEXT("ELF disabled (MICROPY_PY_WASM_ELF=0)"));
     }
@@ -564,12 +668,12 @@ mp_obj_t mp_wasm_import_pack(const char *dotted_name) {
     h = pm_wasmmod_loader_load((const uint8_t *)dotted_name, (uint32_t)strlen(dotted_name),
         bytes, (uint32_t)blen);
     if (h.index == UINT32_MAX) {
-        m_del(uint8_t, bytes, blen);
+        pack_bytes_free(bytes, blen);
         mp_raise_OSError(MP_EINVAL);
     }
 
     mp_obj_t mod = mp_wasm_pack_bind(dotted_name, h, bytes, (uint32_t)blen);
-    m_del(uint8_t, bytes, blen);
+    pack_bytes_free(bytes, blen);
     return mod;
 }
 

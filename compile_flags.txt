@@ -1,0 +1,17 @@
+# Fallback when clangd has no CDB hit (paths relative to this file).
+# µPy TOP is ../.. so py/obj.h exists and MP_REGISTER_ROOT_POINTER is a macro.
+-xc
+-std=gnu11
+-I.
+-Isrc
+-Ithird_party/wamr/core/iwasm/include
+-I../..
+-I../../ports/unix
+-I../../ports/unix/variants/standard
+-I../../ports/unix/build-wasm
+-include ports/micropython/mpconfig_wasm.h
+-DMICROPY_PY_WASM=1
+-DMICROPY_MODULE_BUILTIN_INIT=1
+-DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1
+-DPM_WASMMOD_GUEST=0
+-Wno-unknown-attributes

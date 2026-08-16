@@ -12,6 +12,10 @@ extern "C" {
 
 void mp_wasm_ensure_inited(void);
 void mp_wasm_presence_publish(const char *name);
+mp_obj_t mp_wasm_builtin_import(size_t n_args, const mp_obj_t *args);
+#if MICROPY_MODULE_ATTR_DELEGATION
+void mp_wasm_pymergetic_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest);
+#endif
 
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_install_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_uninstall_hook_obj);

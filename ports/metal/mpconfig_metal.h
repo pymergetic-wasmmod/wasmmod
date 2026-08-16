@@ -25,7 +25,7 @@
 /* leave unset */
 #endif
 
-/* GC / upy scheduler DEAD — Metal runners own concurrency. Py async = Metal async. */
+/* Py async = Metal async. Firmware includes mpconfig_firmware.h (GC off). */
 #ifndef MICROPY_ENABLE_GC
 #define MICROPY_ENABLE_GC (0)
 #endif

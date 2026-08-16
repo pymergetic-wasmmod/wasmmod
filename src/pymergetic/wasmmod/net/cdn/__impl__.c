@@ -1,8 +1,7 @@
 /* pymergetic.wasmmod.net.cdn — impl. Metal-cdn client on io_ops. No sockets. */
-#include "pymergetic/wasmmod/net/cdn/__exports__.h"
 #include "pymergetic/wasmmod/net/cdn/__types__.h"
+#include "pymergetic/wasmmod/io/__types__.h"
 
-#include "pymergetic/wasmmod/io.h"
 #include "pymergetic/wasmmod/pack/alloc.h"
 
 #include <stdio.h>

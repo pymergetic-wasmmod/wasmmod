@@ -1,13 +1,16 @@
-/* pymergetic.util.mem — impl. See __exports__.h for the module contract.
+/* pymergetic.util.mem — impl. Consumer face is generated __exports__.h.
  *
  * Ported from metal's proven pymergetic.metal.mem.{arena,tlsf} +
  * mem/port/mem.c (packages/metalpython/extmod/metal/...) down into
  * wasmmod, so that's the one place this logic lives — metal becomes a
  * consumer of this module instead of carrying its own copy. */
-#include "pymergetic/util/mem/__exports__.h"
+#include "pymergetic/util/mem/__types__.h"
+#include "pymergetic/util/lock/__types__.h"
 
-#include "pymergetic/util/lock.h"
 #include "third_party/tlsf/tlsf.h"
+
+#include <stddef.h>
+#include <stdint.h>
 
 #include <string.h>
 

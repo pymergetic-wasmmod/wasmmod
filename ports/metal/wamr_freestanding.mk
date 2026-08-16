@@ -53,7 +53,6 @@ LIB := $(OUT_DIR)/libwasmmod_wamr_freestanding.a
 OBJDIR := $(OUT_DIR)/obj
 
 SRCS := \
-	$(SHARED)/platform/common/math/math.c \
 	$(SHARED)/mem-alloc/ems/ems_alloc.c \
 	$(SHARED)/mem-alloc/ems/ems_gc.c \
 	$(SHARED)/mem-alloc/ems/ems_hmu.c \
@@ -82,6 +81,14 @@ SRCS := \
 	$(IWASM)/interpreter/wasm_loader.c \
 	$(IWASM)/interpreter/wasm_runtime.c
 
+ifeq ($(EMCC),1)
+# Nested WAMR inside emcc wasm32. Interp only; general C tramp (no host asm).
+SRCS += $(IWASM)/common/arch/invokeNative_general.c
+BUILD_TARGET_FLAG := -DBUILD_TARGET_X86_32
+CLANG_TARGET :=
+UEFI_CFLAGS :=
+CPPFLAGS_EXTRA :=
+else
 ifeq ($(ARCH),x86_32)
 # No mingw-ia32 trampoline in-tree; general C tramp works for both BIOS/UEFI.
 SRCS += $(IWASM)/common/arch/invokeNative_general.c
@@ -89,6 +96,7 @@ BUILD_TARGET_FLAG := -DBUILD_TARGET_X86_32
 ifeq ($(UEFI),1)
 CLANG_TARGET := i686-unknown-windows-gnu
 UEFI_CFLAGS := -fshort-wchar -mno-mmx -mno-sse -mno-sse2
+CPPFLAGS_EXTRA := -Dstrtok_s=strtok_r
 else
 CLANG_TARGET := i686-unknown-none-elf
 UEFI_CFLAGS :=
@@ -96,10 +104,12 @@ endif
 else
 BUILD_TARGET_FLAG := -DBUILD_TARGET_X86_64
 ifeq ($(UEFI),1)
-SRCS += $(IWASM)/common/arch/invokeNative_mingw_x64.s
+# general.c passes each uint32 as its own arg — 64-bit exec_env splits.
+# mingw_x64.s uses movsd; this seat is -mno-sse.
+TRAMP_WIN64_NOSSE := $(WASMMOD_DIR)/ports/metal/invokeNative_win64_nosse.s
 CLANG_TARGET := x86_64-unknown-windows-gnu
 UEFI_CFLAGS := -fshort-wchar -mno-red-zone -mno-mmx -mno-sse -mno-sse2
-CPPFLAGS_EXTRA := -DPM_METAL_WASM_TRAMP_WIN64
+CPPFLAGS_EXTRA := -DPM_METAL_WASM_TRAMP_WIN64 -Dstrtok_s=strtok_r
 else
 SRCS += $(IWASM)/common/arch/invokeNative_em64.s
 CLANG_TARGET := x86_64-unknown-none-elf
@@ -107,9 +117,13 @@ UEFI_CFLAGS :=
 CPPFLAGS_EXTRA :=
 endif
 endif
+endif
 
 # Unique object names (WAMR-relative path with / → _).
 OBJS := $(foreach s,$(SRCS),$(OBJDIR)/$(subst /,_,$(subst $(WAMR_DIR)/,,$(s))).o)
+ifneq ($(TRAMP_WIN64_NOSSE),)
+OBJS += $(OBJDIR)/invokeNative_win64_nosse.o
+endif
 
 CPPFLAGS := \
 	-I$(METAL_PLAT_INC) \
@@ -147,12 +161,32 @@ CPPFLAGS := \
 	-DBH_FREE=wasm_runtime_free \
 	$(CPPFLAGS_EXTRA)
 
+ifeq ($(EMCC),1)
+CC := emcc
+AR := emar
+CFLAGS := \
+	-std=c11 -O2 \
+	-fno-strict-aliasing \
+	-fno-stack-protector \
+	-Wno-unused-parameter \
+	-Wno-sign-compare \
+	-Wno-missing-field-initializers \
+	-Wno-format \
+	-Wno-unused-command-line-argument \
+	-U__linux__ -Ulinux -U__gnu_linux__ \
+	-include $(METAL_PLAT_INC)/emcc_skip_wamr_wasi.h
+ASFLAGS :=
+else
+# clang required for --target= (host CC=gcc breaks freestanding).
+CC := clang
+CLANG_RESOURCE_INC := $(shell $(CC) -print-resource-dir)/include
 CFLAGS := \
 	-std=c11 -O2 \
 	-fno-strict-aliasing \
 	-fno-stack-protector \
 	-ffreestanding \
 	-nostdinc \
+	-isystem $(CLANG_RESOURCE_INC) \
 	-Wno-unused-parameter \
 	-Wno-sign-compare \
 	-Wno-missing-field-initializers \
@@ -164,6 +198,7 @@ CFLAGS := \
 
 # Asm trampolines: do not pass C -D/-I (clang spam: argument unused).
 ASFLAGS := --target=$(CLANG_TARGET)
+endif
 
 .PHONY: all
 all: $(LIB)
@@ -182,6 +217,11 @@ else
 endif
 endef
 $(foreach s,$(SRCS),$(eval $(call COMPILE_one,$(s))))
+ifneq ($(TRAMP_WIN64_NOSSE),)
+$(OBJDIR)/invokeNative_win64_nosse.o: $(TRAMP_WIN64_NOSSE)
+	@mkdir -p $(dir $@)
+	$(CC) $(ASFLAGS) -c $< -o $@
+endif
 
 .PHONY: clean
 clean:

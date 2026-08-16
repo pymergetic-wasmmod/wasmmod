@@ -18,6 +18,7 @@
 #ifndef PM_GUEST_H_
 #define PM_GUEST_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #if defined(__wasm__) || defined(__wasm32__) || defined(__wasm64__)
@@ -48,7 +49,8 @@
 /* Legacy wasm i32 cast — prefer pm_addr_t / pm_buf_t (docs/CALLGRAPH.md). */
 #define MP_WASM_PTR(p) ((int32_t)(uintptr_t)(p))
 
-#include "registry/__exports__.h" /* IWYU pragma: keep — PM_MOD_CONNECT */
+#include "registry/__types__.h" /* IWYU pragma: keep — PM_MOD_CONNECT */
+#include "boot/__types__.h"     /* IWYU pragma: keep — PM_MOD_BOOT_* */
 
 /*
  * PM_MOD_EXPORT_C — C language face of host export registration.
@@ -69,6 +71,52 @@
 #else
 #define PM_MOD_EXPORT_C(mod, export_name, impl_fn, sig) /* guest: pack table */
 #endif
+
+/*
+ * PM_MOD_BOOT_C / PM_MOD_BOOTDEP_C / PM_MOD_BOOT_CHILD_C — lifecycle
+ * registry (linker sections `pm_mod_boot` / `pm_mod_bootdep`).
+ * Record lives in `pm_mod_boot` / `pm_mod_bootdep`. Every seat also emits a
+ * constructor that calls add() (browser .init_array, unix libc, BIOS
+ * crt0, UEFI .CRT$XCU). ELF walk of `__start_*` is extra; add() dedups.
+ * RS: `PM_MOD_BOOT_RS!` / `PM_MOD_BOOTDEP_RS!` in guest.rs.
+ * Python: `PM_MOD_BOOT` / `PM_MOD_BOOTDEP` / `PM_MOD_BOOT_CHILD` on
+ * `pymergetic.wasmmod.guest` (same names; runtime `pm_mod_boot_add`).
+ *
+ * BOOTDEP: hard — `mod` is linked so `dep` must be too.
+ * CHILD: parent names a submodule; skipped if the child TU is not linked.
+ */
+#define PM_MOD_BOOT_C(mod, init_fn, deinit_fn) \
+    PM_MOD_BOOT_READY_C(mod, init_fn, deinit_fn, NULL)
+
+#define PM_MOD_BOOT_CAT_(a, b) a##b
+#define PM_MOD_BOOT_CAT(a, b) PM_MOD_BOOT_CAT_(a, b)
+
+#define PM_MOD_BOOT_REG_(sym) \
+    static void __attribute__((constructor)) PM_MOD_BOOT_CAT(pm_mod_boot_reg_, __COUNTER__)(void) { \
+        (void)pm_mod_boot_add(&(sym)); \
+    }
+#define PM_MOD_BOOTDEP_REG_(sym) \
+    static void __attribute__((constructor)) PM_MOD_BOOT_CAT(pm_mod_bootdep_reg_, __COUNTER__)(void) { \
+        (void)pm_mod_bootdep_add(&(sym)); \
+    }
+
+#define PM_MOD_BOOT_READY_C(mod, init_fn, deinit_fn, ready_fn) \
+    static const pm_mod_boot_t __attribute__((section("pm_mod_boot"), used, aligned(8))) \
+        pm_mod_boot_##init_fn = { \
+            #mod, (pm_mod_boot_init_fn)(init_fn), (deinit_fn), (ready_fn) \
+        }; \
+    PM_MOD_BOOT_REG_(pm_mod_boot_##init_fn)
+
+#define PM_MOD_BOOTDEP_RECORD_(sym, mod, dep, flags) \
+    static const pm_mod_bootdep_t __attribute__((section("pm_mod_bootdep"), used, aligned(8))) \
+        sym = { #mod, #dep, (flags) }; \
+    PM_MOD_BOOTDEP_REG_(sym)
+
+#define PM_MOD_BOOTDEP_C(mod, dep) \
+    PM_MOD_BOOTDEP_RECORD_(PM_MOD_BOOT_CAT(pm_mod_bootdep_, __COUNTER__), mod, dep, PM_MOD_BOOTDEP_HARD)
+
+#define PM_MOD_BOOT_CHILD_C(mod, child) \
+    PM_MOD_BOOTDEP_RECORD_(PM_MOD_BOOT_CAT(pm_mod_bootdep_, __COUNTER__), child, mod, PM_MOD_BOOTDEP_CHILD)
 
 /*
  * Soft-connect one export into a typed or Bridge slot (hand-written

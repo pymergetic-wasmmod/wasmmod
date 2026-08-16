@@ -1,6 +1,8 @@
-/* pymergetic.util.zlib — impl. See __exports__.h for the module contract. */
-#include "pymergetic/util/zlib/__exports__.h"
+/* pymergetic.util.zlib — impl. Consumer face is generated __exports__.h. */
 #include "pymergetic/util/zlib/__types__.h"
+
+#include <stddef.h>
+#include <stdint.h>
 
 #include <string.h>
 

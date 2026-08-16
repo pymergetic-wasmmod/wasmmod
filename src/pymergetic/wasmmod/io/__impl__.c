@@ -1,10 +1,10 @@
-/* pymergetic.wasmmod.io — impl. See __exports__.h for the module contract.
+/* pymergetic.wasmmod.io — impl. Consumer face is generated __exports__.h.
  *
  * Host I/O table: fetch / probe / yield. Wait class lives on the face
  * (SOURCETREE.md): fetch/probe/request = async; yield = facade; uri/join/set/get
  * = sync. mpwm may block inside the fill; Metal later parks in the same slot.
  */
-#include "pymergetic/wasmmod/io/__exports__.h"
+#include "pymergetic/wasmmod/io/__types__.h"
 
 #include "pymergetic/wasmmod/pack/alloc.h"
 
@@ -64,6 +64,8 @@ static const pm_wasmmod_io_ops_t pm_wasmmod_io_builtin = {
 
 static const pm_wasmmod_io_ops_t *pm_wasmmod_io_cur;
 static char g_auth_bearer[256];
+
+const char *pm_wasmmod_net_cdn_session_id(void) __attribute__((weak));
 
 void pm_wasmmod_io_set(const pm_wasmmod_io_ops_t *ops) {
     pm_wasmmod_io_cur = (ops != NULL) ? ops : PM_WASMMOD_IO_DEFAULT;
@@ -139,6 +141,7 @@ typedef struct {
     uint32_t cap;
 } pm_io_buf_t;
 
+#if MICROPY_WASM_HTTP_NATIVE
 static int buf_append(pm_io_buf_t *b, const void *src, size_t n) {
     if (n == 0) {
         return 0;
@@ -182,7 +185,9 @@ static void buf_clear(pm_io_buf_t *b) {
     b->n = 0;
     b->cap = 0;
 }
+#endif
 
+#if !defined(PM_METAL_FIRMWARE)
 static pm_wasmmod_io_result_t fetch_file(const char *path, uint8_t **out_bytes, uint32_t *out_len,
     char *errbuf, size_t errbuf_len) {
     pm_wasmmod_io_yield();
@@ -204,7 +209,7 @@ static pm_wasmmod_io_result_t fetch_file(const char *path, uint8_t **out_bytes, 
         return PM_WASMMOD_IO_ERR;
     }
     long sz = ftell(f);
-    if (sz < 0 || sz > (long)0xffffffffu) {
+    if (sz < 0 || (unsigned long long)sz > 0xffffffffull) {
         fclose(f);
         err_set(errbuf, errbuf_len, "file too large");
         return PM_WASMMOD_IO_ERR;
@@ -228,6 +233,7 @@ static pm_wasmmod_io_result_t fetch_file(const char *path, uint8_t **out_bytes, 
     *out_len = n;
     return PM_WASMMOD_IO_OK;
 }
+#endif /* !PM_METAL_FIRMWARE */
 
 #if MICROPY_WASM_HTTP_NATIVE
 
@@ -519,45 +525,51 @@ static int http_exchange(const char *method, const char *uri, const uint8_t *req
     }
 
     char req[1792];
-    int nreq;
-    if (g_auth_bearer[0] != '\0' && req_body != NULL) {
-        nreq = snprintf(req, sizeof(req),
-            "%s %s HTTP/1.0\r\n"
-            "Host: %s\r\n"
-            "Authorization: Bearer %s\r\n"
-            "Content-Type: %s\r\n"
-            "Content-Length: %u\r\n"
-            "Connection: close\r\n"
-            "User-Agent: wasmmod\r\n"
-            "\r\n",
-            method, u.path, u.host, g_auth_bearer, content_type, (unsigned)req_len);
-    } else if (g_auth_bearer[0] != '\0') {
-        nreq = snprintf(req, sizeof(req),
-            "%s %s HTTP/1.0\r\n"
-            "Host: %s\r\n"
-            "Authorization: Bearer %s\r\n"
-            "Connection: close\r\n"
-            "User-Agent: wasmmod\r\n"
-            "\r\n",
-            method, u.path, u.host, g_auth_bearer);
-    } else if (req_body != NULL) {
-        nreq = snprintf(req, sizeof(req),
-            "%s %s HTTP/1.0\r\n"
-            "Host: %s\r\n"
-            "Content-Type: %s\r\n"
-            "Content-Length: %u\r\n"
-            "Connection: close\r\n"
-            "User-Agent: wasmmod\r\n"
-            "\r\n",
-            method, u.path, u.host, content_type, (unsigned)req_len);
-    } else {
-        nreq = snprintf(req, sizeof(req),
-            "%s %s HTTP/1.0\r\n"
-            "Host: %s\r\n"
-            "Connection: close\r\n"
-            "User-Agent: wasmmod\r\n"
-            "\r\n",
-            method, u.path, u.host);
+    const char *sid = pm_wasmmod_net_cdn_session_id ? pm_wasmmod_net_cdn_session_id() : NULL;
+    int nreq = snprintf(req, sizeof(req), "%s %s HTTP/1.0\r\nHost: %s\r\n", method, u.path, u.host);
+    if (nreq < 0 || (size_t)nreq >= sizeof(req)) {
+        err_set(errbuf, errbuf_len, "HTTP write failed");
+        conn_close(&conn);
+        return -1;
+    }
+    if (g_auth_bearer[0] != '\0') {
+        int k = snprintf(req + nreq, sizeof(req) - (size_t)nreq, "Authorization: Bearer %s\r\n",
+            g_auth_bearer);
+        if (k < 0 || (size_t)k >= sizeof(req) - (size_t)nreq) {
+            err_set(errbuf, errbuf_len, "HTTP write failed");
+            conn_close(&conn);
+            return -1;
+        }
+        nreq += k;
+    }
+    if (sid != NULL && sid[0] != '\0') {
+        int k = snprintf(req + nreq, sizeof(req) - (size_t)nreq, "X-Shell-Session-Id: %s\r\n", sid);
+        if (k < 0 || (size_t)k >= sizeof(req) - (size_t)nreq) {
+            err_set(errbuf, errbuf_len, "HTTP write failed");
+            conn_close(&conn);
+            return -1;
+        }
+        nreq += k;
+    }
+    if (req_body != NULL) {
+        int k = snprintf(req + nreq, sizeof(req) - (size_t)nreq,
+            "Content-Type: %s\r\nContent-Length: %u\r\n", content_type, (unsigned)req_len);
+        if (k < 0 || (size_t)k >= sizeof(req) - (size_t)nreq) {
+            err_set(errbuf, errbuf_len, "HTTP write failed");
+            conn_close(&conn);
+            return -1;
+        }
+        nreq += k;
+    }
+    {
+        int k = snprintf(req + nreq, sizeof(req) - (size_t)nreq,
+            "Connection: close\r\nUser-Agent: wasmmod\r\n\r\n");
+        if (k < 0 || (size_t)k >= sizeof(req) - (size_t)nreq) {
+            err_set(errbuf, errbuf_len, "HTTP write failed");
+            conn_close(&conn);
+            return -1;
+        }
+        nreq += k;
     }
     if (nreq <= 0 || (size_t)nreq >= sizeof(req) || conn_write(&conn, req, (size_t)nreq) < 0) {
         err_set(errbuf, errbuf_len, "HTTP write failed");
@@ -799,7 +811,12 @@ int32_t pm_wasmmod_io_fetch(const char *uri, uint8_t **out_bytes, uint32_t *out_
     if (pm_wasmmod_io_uri_is_http(uri)) {
         return native_http_fetch(uri, out_bytes, out_len, errbuf, errbuf_len);
     }
+#if !defined(PM_METAL_FIRMWARE)
     return (fetch_file(uri, out_bytes, out_len, errbuf, errbuf_len) == PM_WASMMOD_IO_OK) ? 0 : -1;
+#else
+    err_set(errbuf, errbuf_len, "file fetch requires host io_ops");
+    return -1;
+#endif
 }
 
 int32_t pm_wasmmod_io_probe(const char *uri) {

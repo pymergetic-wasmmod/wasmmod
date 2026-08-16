@@ -17,6 +17,9 @@ pub mod api;
 #[path = "wasmmod/guest.rs"]
 pub mod guest;
 
+#[path = "wasmmod/boot.rs"]
+pub mod boot;
+
 #[path = "wasmmod/io.rs"]
 pub mod io;
 

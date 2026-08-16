@@ -1,397 +1,627 @@
 [
     {
-        "directory": ".",
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "examples/hello/src/pymergetic/wasmmod_examples/hello/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -DPM_WASMMOD_GUEST=1 -c examples/hello/src/pymergetic/wasmmod_examples/hello/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
         "file": "examples/hello/src/pymergetic/wasmmod_examples/hello/__impl__.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -DPM_WASMMOD_GUEST=1 -c examples/hello/src/pymergetic/wasmmod_examples/hello/__impl__.c"
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -DPM_WASMMOD_GUEST=1 -c examples/hello/src/pymergetic/wasmmod_examples/hello/__impl__.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/lock/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/lock/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "examples/hello/src/pymergetic/wasmmod_examples/hello/__imports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -DPM_WASMMOD_GUEST=1 -c examples/hello/src/pymergetic/wasmmod_examples/hello/__imports__.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/lock.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/lock.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "examples/hello/src/pymergetic/wasmmod_examples/hello/__tests__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -DPM_WASMMOD_GUEST=1 -c examples/hello/src/pymergetic/wasmmod_examples/hello/__tests__.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/lz4/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/lz4/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "examples/hello/src/pymergetic/wasmmod_examples/hello/__version__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -DPM_WASMMOD_GUEST=1 -c examples/hello/src/pymergetic/wasmmod_examples/hello/__version__.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/lz4.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/lz4.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/common/boot.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/boot.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/mem/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/mem/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/common/boot.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/boot.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/mem/__impl__.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/mem/__impl__.c"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/common/load.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/load.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/mem/__types__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/mem/__types__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/common/load.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/load.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/mem.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/mem.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/common/mbedtls/mbedtls_config_port.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/mbedtls/mbedtls_config_port.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/mtar/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/mtar/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/common/memcookie.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/memcookie.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/mtar.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/mtar.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/common/memcookie.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/memcookie.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/pysample/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/pysample/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/_wasmmod.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/_wasmmod.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/pysample.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/pysample.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/finder.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/finder.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/zlib/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/zlib/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/finder.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/finder.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/zlib/__impl__.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/zlib/__impl__.c"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/hostready.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/hostready.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/zlib/__types__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/zlib/__types__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/hostready.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/hostready.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/util/zlib.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/util/zlib.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/importhook.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/importhook.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/guest.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/guest.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/importhook.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/importhook.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/loader/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/loader/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/modgen.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/modgen.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/loader.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/loader.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/modgen.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/modgen.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/registry/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/registry/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/nativecall.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/nativecall.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/registry/__types__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/registry/__types__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/nativecall.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/nativecall.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/registry.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/registry.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/objhandle.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/objhandle.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/io/__types__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/io/__types__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/objhandle.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/objhandle.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/io/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/io/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/packbind.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/packbind.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/io/__impl__.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/io/__impl__.c"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/packbind.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/packbind.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/io/__tests__.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DPM_WASMMOD_GUEST=0 -DPM_MOD_TESTS=1 -c src/pymergetic/wasmmod/io/__tests__.c"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/pyexport.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/pyexport.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/io.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/io.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/cpython/stubs/py/mpconfig.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/lib/uzlib -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c ports/cpython/stubs/py/mpconfig.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/net/cdn/__types__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/net/cdn/__types__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/metal/io_ops.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/metal/io_ops.c"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/net/cdn/__exports__.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/net/cdn/__exports__.h"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/metal/io_ops.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/metal/io_ops.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/net/cdn/__impl__.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/net/cdn/__impl__.c"
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/metal/mpconfig_metal.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/metal/mpconfig_metal.h"
     },
     {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/net/cdn/__tests__.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DPM_WASMMOD_GUEST=0 -DPM_MOD_TESTS=1 -c src/pymergetic/wasmmod/net/cdn/__tests__.c"
-    },
-    {
-        "directory": ".",
-        "file": "src/pymergetic/wasmmod/net/cdn.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c src/pymergetic/wasmmod/net/cdn.h"
-    },
-    {
-        "directory": ".",
-        "file": "target/debug/build/pymergetic-wasmmod-0ac8873fc5417a46/out/flag_check.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c target/debug/build/pymergetic-wasmmod-0ac8873fc5417a46/out/flag_check.c"
-    },
-    {
-        "directory": ".",
-        "file": "target/debug/build/pymergetic-wasmmod-0ac8873fc5417a46/out/vmlib/build/CMakeFiles/3.28.3/CompilerIdC/CMakeCCompilerId.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c target/debug/build/pymergetic-wasmmod-0ac8873fc5417a46/out/vmlib/build/CMakeFiles/3.28.3/CompilerIdC/CMakeCCompilerId.c"
-    },
-    {
-        "directory": ".",
-        "file": "target/debug/build/pymergetic-wasmmod-0ac8873fc5417a46/out/vmlib/build/test_wrgsbase.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c target/debug/build/pymergetic-wasmmod-0ac8873fc5417a46/out/vmlib/build/test_wrgsbase.c"
-    },
-    {
-        "directory": ".",
-        "file": "target/debug/build/pymergetic-wasmmod-0ac8873fc5417a46/out/wamrc/build/CMakeFiles/3.28.3/CompilerIdC/CMakeCCompilerId.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c target/debug/build/pymergetic-wasmmod-0ac8873fc5417a46/out/wamrc/build/CMakeFiles/3.28.3/CompilerIdC/CMakeCCompilerId.c"
-    },
-    {
-        "directory": ".",
-        "file": "target/debug/build/pymergetic-wasmmod-b54bc1aeb84cc3d3/out/flag_check.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c target/debug/build/pymergetic-wasmmod-b54bc1aeb84cc3d3/out/flag_check.c"
-    },
-    {
-        "directory": ".",
-        "file": "target/debug/build/pymergetic-wasmmod-b54bc1aeb84cc3d3/out/vmlib/build/CMakeFiles/3.28.3/CompilerIdC/CMakeCCompilerId.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c target/debug/build/pymergetic-wasmmod-b54bc1aeb84cc3d3/out/vmlib/build/CMakeFiles/3.28.3/CompilerIdC/CMakeCCompilerId.c"
-    },
-    {
-        "directory": ".",
-        "file": "target/debug/build/pymergetic-wasmmod-b54bc1aeb84cc3d3/out/vmlib/build/test_wrgsbase.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c target/debug/build/pymergetic-wasmmod-b54bc1aeb84cc3d3/out/vmlib/build/test_wrgsbase.c"
-    },
-    {
-        "directory": ".",
-        "file": "target/debug/build/pymergetic-wasmmod-b54bc1aeb84cc3d3/out/wamrc/build/CMakeFiles/3.28.3/CompilerIdC/CMakeCCompilerId.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -c target/debug/build/pymergetic-wasmmod-b54bc1aeb84cc3d3/out/wamrc/build/CMakeFiles/3.28.3/CompilerIdC/CMakeCCompilerId.c"
-    },
-    {
-        "directory": ".",
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
         "file": "ports/micropython/finder.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/finder.c"
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -DMICROPY_PY_WASM_ELF=1 -c ports/micropython/finder.c"
     },
     {
-        "directory": ".",
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
         "file": "ports/micropython/finder.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/finder.h"
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -DMICROPY_PY_WASM_ELF=1 -c ports/micropython/finder.h"
     },
     {
-        "directory": ".",
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/hostready.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/hostready.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/hostready.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/hostready.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/importhook.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/importhook.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/importhook.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/importhook.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/modcdn.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/modcdn.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/modcdn.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/modcdn.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/modgen.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/modgen.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/modgen.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/modgen.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/modguest.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/modguest.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/modutil.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/modutil.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "ports/micropython/modutil.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/modutil.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
         "file": "ports/micropython/modwasmmod.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/modwasmmod.c"
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/modwasmmod.c"
     },
     {
-        "directory": ".",
-        "file": "ports/micropython/packbind.c",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DMICROPY_PY_WASM_ELF=1 -c ports/micropython/packbind.c"
-    },
-    {
-        "directory": ".",
-        "file": "ports/micropython/packbind.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DMICROPY_PY_WASM_ELF=1 -c ports/micropython/packbind.h"
-    },
-    {
-        "directory": ".",
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
         "file": "ports/micropython/mpconfig_wasm.h",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/mpconfig_wasm.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/modutil.c",
-        "file": "ports/micropython/modutil.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/modutil.h",
-        "file": "ports/micropython/modutil.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/importhook.c",
-        "file": "ports/micropython/importhook.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/importhook.h",
-        "file": "ports/micropython/importhook.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/hostready.c",
-        "file": "ports/micropython/hostready.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/hostready.h",
-        "file": "ports/micropython/hostready.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/nativecall.c",
-        "file": "ports/micropython/nativecall.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/nativecall.h",
-        "file": "ports/micropython/nativecall.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/modgen.c",
-        "file": "ports/micropython/modgen.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -c ports/micropython/modgen.h",
-        "file": "ports/micropython/modgen.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/boot.c",
-        "file": "ports/common/boot.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/boot.h",
-        "file": "ports/common/boot.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/load.c",
-        "file": "ports/common/load.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/load.h",
-        "file": "ports/common/load.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/memcookie.c",
-        "file": "ports/common/memcookie.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/common/memcookie.h",
-        "file": "ports/common/memcookie.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/micropython/objhandle.c",
-        "file": "ports/micropython/objhandle.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/micropython/objhandle.h",
-        "file": "ports/micropython/objhandle.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pyexport/__impl__.c",
-        "file": "src/pymergetic/wasmmod/pyexport/__impl__.c"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pyexport/__exports__.h",
-        "file": "src/pymergetic/wasmmod/pyexport/__exports__.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/host/pyobj.h",
-        "file": "src/pymergetic/wasmmod/host/pyobj.h"
-    },
-    {
-        "directory": ".",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I. -Isrc -Ithird_party/wamr/core/iwasm/include -I../../. -I../../ports/unix -I../../ports/unix/variants/standard -I../../ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/host/__types__.h",
-        "file": "src/pymergetic/wasmmod/host/__types__.h"
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/mpconfig_wasm.h"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/_wasmmod.c",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/_wasmmod.c"
+        "file": "ports/micropython/nativecall.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/nativecall.c"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/objhandle.c",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/objhandle.c"
+        "file": "ports/micropython/nativecall.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/nativecall.h"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/objhandle.h",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/objhandle.h"
+        "file": "ports/micropython/objhandle.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/objhandle.c"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/nativecall.c",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/nativecall.c"
+        "file": "ports/micropython/objhandle.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -c ports/micropython/objhandle.h"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/nativecall.h",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/nativecall.h"
+        "file": "ports/micropython/packbind.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -DMICROPY_PY_WASM_ELF=1 -c ports/micropython/packbind.c"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/hostready.c",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/hostready.c"
+        "file": "ports/micropython/packbind.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-metal -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -include /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/micropython/mpconfig_wasm.h -DMICROPY_PY_WASM_ELF=1 -c ports/micropython/packbind.h"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/hostready.h",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/hostready.h"
+        "file": "ports/webassembly/io_browser.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/webassembly/io_browser.c"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/importhook.c",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/importhook.c"
+        "file": "ports/webassembly/io_browser.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c ports/webassembly/io_browser.h"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/importhook.h",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/importhook.h"
+        "file": "src/pymergetic/util/gen/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/gen/__exports__.h"
     },
     {
         "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
-        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/stubs -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../.. -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/../../lib/uzlib -I/usr/include/python3.12 -I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 -DMICROPY_PY_DEFLATE=1 -c /home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/pyexport.c",
-        "file": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/ports/cpython/pyexport.c"
+        "file": "src/pymergetic/util/gen/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/gen/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/lock/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/lock/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/lock/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/lock/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/lock.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/lock.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/lz4/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/lz4/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/lz4.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/lz4.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/mem/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/mem/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/mem/__impl__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/mem/__impl__.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/mem/__imports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/mem/__imports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/mem/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/mem/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/mem.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/mem.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/mtar/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/mtar/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/mtar/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/mtar/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/mtar.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/mtar.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/pysample/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/pysample/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/pysample.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/pysample.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/version/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/version/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/version/__version__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/version/__version__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/version.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/version.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/zlib/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/zlib/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/zlib/__impl__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/zlib/__impl__.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/zlib/__imports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/zlib/__imports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/zlib/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/zlib/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/util/zlib.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/util/zlib.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/__version__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/__version__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/api/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/api/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/boot/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/boot/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/boot/__impl__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/boot/__impl__.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/boot/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/boot/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/boot.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/boot.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/guest.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/guest.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/host/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/host/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/host/pyobj.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/host/pyobj.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/io/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/io/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/io/__impl__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/io/__impl__.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/io/__tests__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/io/__tests__.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/io/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/io/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/io.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/io.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/loader/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/loader/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/loader.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/loader.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/net/cdn/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/net/cdn/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/net/cdn/__impl__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/net/cdn/__impl__.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/net/cdn/__tests__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/net/cdn/__tests__.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/net/cdn/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/net/cdn/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/net/cdn.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/net/cdn.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/alloc.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/alloc.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/aot/section.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/aot/section.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/aot/section.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/aot/section.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/common/format.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/common/format.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/common/format.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/common/format.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/elf/load.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/elf/load.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/elf/load.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/elf/load.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/elf/section.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/elf/section.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/elf/section.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/elf/section.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/wasm/section.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/wasm/section.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/format/wasm/section.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/format/wasm/section.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/manifest.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/manifest.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/source.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/source.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/source.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/source.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/zlib_env.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/zlib_env.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pack/zlib_env.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pack/zlib_env.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pyexport/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pyexport/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/pyexport/__impl__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/pyexport/__impl__.c"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/registry/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/registry/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/registry/__types__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/registry/__types__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/registry.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/registry.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/verify/__exports__.h",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/verify/__exports__.h"
+    },
+    {
+        "directory": "/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod",
+        "file": "src/pymergetic/wasmmod/verify/__impl__.c",
+        "command": "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/src -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/extmod/wasmmod/third_party/wamr/core/iwasm/include -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/variants/standard -I/home/ladmin/Devel/os-sdk/packages/micropython-wasmmod/ports/unix/build-wasm -DMICROPY_PY_WASM=1 -DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 -DPM_WASMMOD_GUEST=0 -c src/pymergetic/wasmmod/verify/__impl__.c"
     }
 ]
