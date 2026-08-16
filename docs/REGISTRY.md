@@ -10,7 +10,7 @@ itself follows; this doc is the runtime design, not the tree shape.
 
 **Allocator-backed growable table** (`Vec<ModEntry>`), not a fixed-capacity
 static array. Fine everywhere in this tree's engines: `mp` always has TLSF,
-`upy`/`mpwm` always have `malloc`/`mmap`, by the time the registry runs —
+`upy`/`upywm` always have `malloc`/`mmap`, by the time the registry runs —
 see the allocator-rules discussion this doc assumes. A fixed cap would
 either be wastefully large or eventually insufficient, since packs are
 loaded at runtime, not known at compile time.
@@ -231,7 +231,7 @@ nothing about deferring the *attachment* required deferring the *shape*.
 - No `MICROPY_WASM_MALLOC`/TLSF wiring for the table's own storage — it
   uses whatever global allocator the crate is built against; a
   wasmmod-standalone build and a metal build get this for free from the
-  allocator-rules decision (`mp` → TLSF, `upy`/`mpwm` → `malloc`/`mmap`)
+  allocator-rules decision (`mp` → TLSF, `upy`/`upywm` → `malloc`/`mmap`)
   without the registry needing to know which one it is.
 
 ## Decision log

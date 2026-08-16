@@ -1,4 +1,4 @@
-# MicroPython CMake fragment for wasmmod (mpwm).
+# MicroPython CMake fragment for wasmmod (upywm).
 # Included from extmod/extmod.cmake when MICROPY_PY_WASM=1.
 # Prefer micropython.mk for the unix make path; this keeps cmake ports green.
 

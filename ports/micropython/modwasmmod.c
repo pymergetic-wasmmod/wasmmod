@@ -1,5 +1,5 @@
 /*
- * Thin MicroPython face for wasmmod (mpwm).
+ * Thin MicroPython face for wasmmod (upywm).
  *
  * Module tables + mp_obj wrappers only. Import hook → importhook.c;
  * util.gen → modgen.c; boot/load prepare → ports/common/.

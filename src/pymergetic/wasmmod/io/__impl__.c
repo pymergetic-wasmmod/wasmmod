@@ -2,7 +2,7 @@
  *
  * Host I/O table: fetch / probe / yield. Wait class lives on the face
  * (SOURCETREE.md): fetch/probe/request = async; yield = facade; uri/join/set/get
- * = sync. mpwm may block inside the fill; Metal later parks in the same slot.
+ * = sync. upywm may block inside the fill; Metal later parks in the same slot.
  */
 #include "pymergetic/wasmmod/io/__types__.h"
 

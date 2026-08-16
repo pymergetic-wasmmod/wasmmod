@@ -1,4 +1,4 @@
-# MicroPython (mpwm) make fragment for wasmmod.
+# MicroPython (upywm) make fragment for wasmmod.
 # Included from extmod/extmod.mk when MICROPY_PY_WASM=1.
 #
 #   make -C ports/unix MICROPY_PY_WASM=1

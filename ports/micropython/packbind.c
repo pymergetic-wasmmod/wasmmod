@@ -1,5 +1,5 @@
 /*
- * MPWP mount bind + export funobjs for the mpwm µPy host.
+ * MPWP mount bind + export funobjs for the upywm µPy host.
  */
 
 #include "ports/micropython/packbind.h"

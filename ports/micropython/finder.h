@@ -1,5 +1,5 @@
 /*
- * Pack path finder for the mpwm µPy host (ports/micropython).
+ * Pack path finder for the upywm µPy host (ports/micropython).
  *
  * Searches wasm.path then sys.path for a .wasm artifact matching a dotted
  * import name. Forms tried (under each root):

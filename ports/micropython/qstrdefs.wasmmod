@@ -1,4 +1,4 @@
-// QSTR definitions for the thin mpwm wasmmod face (not a C header).
+// QSTR definitions for the thin upywm wasmmod face (not a C header).
 Q(pymergetic)
 Q(pymergetic.wasmmod)
 Q(pymergetic.wasmmod.guest)

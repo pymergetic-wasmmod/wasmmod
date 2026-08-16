@@ -1,4 +1,4 @@
-/* MicroPython / make knobs for wasmmod (mpwm).
+/* MicroPython / make knobs for wasmmod (upywm).
  *
  * Enabling the module: `make MICROPY_PY_WASM=1` (see micropython.mk).
  * This header is the menuconfig surface — defaults + docs for every

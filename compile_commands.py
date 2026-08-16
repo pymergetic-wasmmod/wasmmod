@@ -7,7 +7,7 @@ import sys
 wasm = pathlib.Path(sys.argv[1]).resolve()
 ws = pathlib.Path(sys.argv[2]).resolve()
 vscode_cdb = pathlib.Path(sys.argv[3]) if len(sys.argv) > 3 else None
-mpwm = wasm.parent.parent
+host = wasm.parent.parent
 
 skip = {"target", "build", "third_party", ".git"}
 # -I must not depend on CDB directory: clangd treats "." as the workspace,
@@ -15,16 +15,16 @@ skip = {"target", "build", "third_party", ".git"}
 host_cflags = (
     "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes "
     f"-I{wasm} -I{wasm / 'src'} -I{wasm / 'third_party/wamr/core/iwasm/include'} "
-    f"-I{mpwm} -I{mpwm / 'ports/unix'} -I{mpwm / 'ports/unix/variants/standard'} "
-    f"-I{mpwm / 'ports/unix/build-wasm'} -DMICROPY_PY_WASM=1 "
+    f"-I{host} -I{host / 'ports/unix'} -I{host / 'ports/unix/variants/standard'} "
+    f"-I{host / 'ports/unix/build-wasm'} -DMICROPY_PY_WASM=1 "
     "-DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 "
     "-DPM_WASMMOD_GUEST=0"
 )
 upy_cflags = (
     "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes "
     f"-I{wasm} -I{wasm / 'src'} -I{wasm / 'third_party/wamr/core/iwasm/include'} "
-    f"-I{mpwm} -I{mpwm / 'ports/unix'} -I{mpwm / 'ports/unix/variants/standard'} "
-    f"-I{mpwm / 'ports/unix/build-metal'} -DMICROPY_PY_WASM=1 "
+    f"-I{host} -I{host / 'ports/unix'} -I{host / 'ports/unix/variants/standard'} "
+    f"-I{host / 'ports/unix/build-metal'} -DMICROPY_PY_WASM=1 "
     "-DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 "
     "-DPM_WASMMOD_GUEST=0"
     f" -include {wasm / 'ports/micropython/mpconfig_wasm.h'}"
@@ -35,8 +35,8 @@ guest_cflags = (
 )
 cpy_cflags = (
     "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes "
-    f"-I{wasm} -I{wasm / 'src'} -I{wasm / 'ports/cpython/stubs'} -I{mpwm} "
-    f"-I{mpwm / 'lib/uzlib'} "
+    f"-I{wasm} -I{wasm / 'src'} -I{wasm / 'ports/cpython/stubs'} -I{host} "
+    f"-I{host / 'lib/uzlib'} "
     "-I/usr/include/python3.12 -DPM_WASMMOD_CPYTHON=1 -DPM_WASMMOD_GUEST=0 "
     "-DMICROPY_PY_DEFLATE=1"
 )
