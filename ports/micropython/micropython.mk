@@ -2,7 +2,7 @@
 # Included from extmod/extmod.mk when MICROPY_PY_WASM=1.
 #
 #   make -C ports/unix MICROPY_PY_WASM=1
-#   make -C ports/webassembly MICROPY_PY_WASM=1 MICROPY_PY_METAL=1
+#   make -C ports/webassembly MICROPY_PY_WASM=1
 #
 # Menuconfig surface: ports/micropython/mpconfig_wasm.h
 # Make forwards (override any of these on the command line):
@@ -75,15 +75,15 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/pack/format/aot/section.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/pack/format/elf/section.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/verify/__impl__.c \
-	extmod/metal/port/wamr/metal_platform.c
+	$(WASMMOD_DIR)/ports/webassembly/wamr/metal_platform.c
 
 PY_O += $(addprefix $(BUILD)/, $(SRC_WASMMOD:.c=.o))
-SRC_QSTR += $(filter-out extmod/metal/port/wamr/metal_platform.c,$(SRC_WASMMOD))
+SRC_QSTR += $(filter-out $(WASMMOD_DIR)/ports/webassembly/wamr/metal_platform.c,$(SRC_WASMMOD))
 
 $(addprefix $(BUILD)/, $(SRC_WASMMOD:.c=.o)): CFLAGS += -std=gnu99
 
-$(BUILD)/extmod/metal/port/wamr/metal_platform.o: CFLAGS += \
-	-I$(TOP)/extmod/metal/port/wamr \
+$(BUILD)/$(WASMMOD_DIR)/ports/webassembly/wamr/metal_platform.o: CFLAGS += \
+	-I$(WASMMOD_ABS)/ports/webassembly/wamr \
 	-I$(WASMMOD_ABS)/third_party/wamr/core/iwasm/include \
 	-I$(WASMMOD_ABS)/third_party/wamr/core/shared/platform/include \
 	-I$(WASMMOD_ABS)/third_party/wamr/core \
@@ -92,9 +92,9 @@ $(BUILD)/extmod/metal/port/wamr/metal_platform.o: CFLAGS += \
 	-DWASM_ENABLE_SHARED_HEAP=1 -DWASM_DISABLE_HW_BOUND_CHECK=1 \
 	-D_PLATFORM_WASI_TYPES_H
 
-# Same RS lock/registry/loader/version as firmware.
+# Same RS lock/registry/loader/version as firmware; crate lives in wasmmod.
 WASMMOD_LOCK_A := $(BUILD)/libfw_lock.a
-$(WASMMOD_LOCK_A): $(TOP)/extmod/metal/port/fw_lock/lib.rs | $(BUILD)
+$(WASMMOD_LOCK_A): $(WASMMOD_ABS)/ports/webassembly/fw_lock/lib.rs | $(BUILD)
 	$(ECHO) "RUSTC loader wasm32"
 	$(Q)rustc --edition 2024 --crate-type staticlib --crate-name fw_lock \
 		--target wasm32-unknown-unknown -C panic=abort -C opt-level=s \
@@ -105,11 +105,6 @@ $(WASMMOD_WAMR_A): | $(BUILD)
 	$(ECHO) "WAMR emcc interp"
 	$(Q)$(MAKE) -f $(WASMMOD_ABS)/ports/metal/wamr_freestanding.mk \
 		EMCC=1 OUT_DIR=$(BUILD)/wamr \
-		METAL_PLAT_INC=$(TOP)/extmod/metal/port/wamr \
-		METAL_PORT_INC=$(TOP)/extmod/metal/port \
-		METAL_LIBC_INC=$(TOP)/extmod/metal/port/wamr \
-		METAL_SRC_INC=$(TOP)/extmod/metal/src \
-		METAL_INCLUDE_INC=$(TOP)/extmod/metal/src \
 		WASMMOD_DIR=$(WASMMOD_ABS)
 	$(Q)cp $(BUILD)/wamr/libwasmmod_wamr_freestanding.a $@
 

@@ -41,8 +41,9 @@ Freestanding interp recipe: `wamr_freestanding.mk`.
 |-------|--------|
 | Source list + `-D` / target flags | this mk |
 | WAMR tree | `third_party/wamr` only |
-| Platform glue (`metal_platform.c`, TLSF, ticks) | Metal |
-| Final link of `libwasmmod_wamr_freestanding.a` | Metal |
+| Firmware platform glue | Metal `extmod/metal/port/wamr` |
+| emcc platform glue | `ports/webassembly/wamr` (upywm has no metal) |
+| Final link of `libwasmmod_wamr_freestanding.a` | firmware: Metal; browser: `micropython.mk` |
 
 Unix host WAMR stays cargo `build.rs` (cmake `vmlib`, AOT + shared heap).
 This mk is interp + **shared heap** (rewrite loader) + AOT/JIT off.

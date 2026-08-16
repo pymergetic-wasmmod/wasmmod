@@ -1,15 +1,15 @@
-# wasmmod OWN: freestanding WAMR (interp + shared heap) for Metal.
-# Metal supplies platform GLUE includes + links the resulting .a.
-# Metal does not optionally stub this — boards that nest wamr_host link this.
+# wasmmod OWN: freestanding WAMR (interp + shared heap).
+# Firmware: Metal supplies platform GLUE includes + links the .a.
+# emcc (EMCC=1): defaults to ports/webassembly/wamr — no metal tree required.
 #
 # Required:
 #   WAMR_DIR          — path to WAMR tree (default: $(WASMMOD_DIR)/third_party/wamr)
 #   OUT_DIR           — object/archive output directory
-#   METAL_PLAT_INC    — Metal wasm/port/platform (platform_internal.h)
-#   METAL_PORT_INC    — Metal wasm/port
-#   METAL_LIBC_INC    — Metal freestanding libc headers
-#   METAL_SRC_INC     — packages/metal/src
-#   METAL_INCLUDE_INC — packages/metal/include
+#   METAL_PLAT_INC    — platform_internal.h (firmware: Metal; emcc: wasmmod default)
+#   METAL_PORT_INC    — extra -I (firmware Metal port; emcc: same as PLAT)
+#   METAL_LIBC_INC    — extra -I
+#   METAL_SRC_INC     — extra -I
+#   METAL_INCLUDE_INC — extra -I
 #
 # Optional:
 #   ARCH=x86_64|x86_32  — default x86_64
@@ -32,6 +32,13 @@ AR ?= ar
 
 ifeq ($(strip $(OUT_DIR)),)
 $(error OUT_DIR is required)
+endif
+ifeq ($(EMCC),1)
+METAL_PLAT_INC ?= $(WASMMOD_DIR)/ports/webassembly/wamr
+METAL_PORT_INC ?= $(METAL_PLAT_INC)
+METAL_LIBC_INC ?= $(METAL_PLAT_INC)
+METAL_SRC_INC ?= $(WASMMOD_DIR)/src
+METAL_INCLUDE_INC ?= $(WASMMOD_DIR)/src
 endif
 ifeq ($(strip $(METAL_PLAT_INC)),)
 $(error METAL_PLAT_INC is required)
