@@ -2,12 +2,36 @@
 
 #include <string.h>
 
+#include "py/mperrno.h"
 #include "py/runtime.h"
 
 #include "ports/common/memcookie.h"
 #include "ports/micropython/objhandle.h"
 #include "pymergetic/wasmmod/registry/__exports__.h"
 #include "pymergetic/wasmmod/registry/__types__.h"
+
+/* Wasm/AOT exports are registry_fn_t trampolines (args/results), not a
+ * C ABI symbol. Casting them to int32_t(void) returns the trampoline
+ * status (-1) instead of the guest i32. ELF/resident stay a real C fn. */
+static int wasm_container(const char *fqn) {
+    int32_t k = pm_wasmmod_registry_container((const uint8_t *)fqn, (uint32_t)strlen(fqn));
+    return k == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_WASM
+        || k == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_AOT;
+}
+
+static int32_t call_registry_i32(const char *fqn, const char *export_name,
+    const pm_wasmmod_registry_value_t *args, uint32_t nargs) {
+    pm_wasmmod_registry_value_t res;
+    int32_t st;
+    res.kind = PM_WASMMOD_REGISTRY_VALKIND_I32;
+    res.of.i32 = 0;
+    st = pm_wasmmod_registry_call((const uint8_t *)fqn, (uint32_t)strlen(fqn),
+        (const uint8_t *)export_name, (uint32_t)strlen(export_name), args, nargs, &res, 1u);
+    if (st < 0) {
+        mp_raise_OSError(MP_EINVAL);
+    }
+    return res.of.i32;
+}
 
 static int fetch_sig(const char *fqn, const char *export_name, char *sig, size_t sig_sz) {
     size_t flen = strlen(fqn);
@@ -52,25 +76,52 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
         }
         if (n_args == 0) {
+            if (wasm_container(fqn)) {
+                return mp_obj_new_int(call_registry_i32(fqn, export_name, NULL, 0));
+            }
             return mp_obj_new_int(((int32_t (*)(void))p)());
         }
     }
     if (strcmp(sig, "int32_t(int32_t)") == 0 || (sig[0] == '\0' && n_args == 1)) {
+        pm_wasmmod_registry_value_t a;
         if (n_args != 1) {
             mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        if (wasm_container(fqn)) {
+            a.kind = PM_WASMMOD_REGISTRY_VALKIND_I32;
+            a.of.i32 = (int32_t)mp_obj_get_int(args[0]);
+            return mp_obj_new_int(call_registry_i32(fqn, export_name, &a, 1));
         }
         return mp_obj_new_int(((int32_t (*)(int32_t))p)((int32_t)mp_obj_get_int(args[0])));
     }
     if (strcmp(sig, "int32_t(int32_t, int32_t)") == 0 || (sig[0] == '\0' && n_args == 2)) {
+        pm_wasmmod_registry_value_t a[2];
         if (n_args != 2) {
             mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        if (wasm_container(fqn)) {
+            a[0].kind = PM_WASMMOD_REGISTRY_VALKIND_I32;
+            a[0].of.i32 = (int32_t)mp_obj_get_int(args[0]);
+            a[1].kind = PM_WASMMOD_REGISTRY_VALKIND_I32;
+            a[1].of.i32 = (int32_t)mp_obj_get_int(args[1]);
+            return mp_obj_new_int(call_registry_i32(fqn, export_name, a, 2));
         }
         return mp_obj_new_int(((int32_t (*)(int32_t, int32_t))p)(
             (int32_t)mp_obj_get_int(args[0]), (int32_t)mp_obj_get_int(args[1])));
     }
     if (strcmp(sig, "int32_t(int32_t, int32_t, int32_t)") == 0 || (sig[0] == '\0' && n_args == 3)) {
+        pm_wasmmod_registry_value_t a[3];
         if (n_args != 3) {
             mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        if (wasm_container(fqn)) {
+            a[0].kind = PM_WASMMOD_REGISTRY_VALKIND_I32;
+            a[0].of.i32 = (int32_t)mp_obj_get_int(args[0]);
+            a[1].kind = PM_WASMMOD_REGISTRY_VALKIND_I32;
+            a[1].of.i32 = (int32_t)mp_obj_get_int(args[1]);
+            a[2].kind = PM_WASMMOD_REGISTRY_VALKIND_I32;
+            a[2].of.i32 = (int32_t)mp_obj_get_int(args[2]);
+            return mp_obj_new_int(call_registry_i32(fqn, export_name, a, 3));
         }
         return mp_obj_new_int(((int32_t (*)(int32_t, int32_t, int32_t))p)(
             (int32_t)mp_obj_get_int(args[0]), (int32_t)mp_obj_get_int(args[1]),
