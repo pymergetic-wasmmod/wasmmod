@@ -13,10 +13,10 @@
 #define MICROPY_PY_WASM (0)
 #endif
 
-/* No OS under this image: wasmmod's POSIX io fill and modwasmmod.c are left out
- * of the build, and io bytes come from the image heap (MICROPY_WASM_*) rather
- * than libc malloc. Describes the image, not the module, so it is answered even
- * where MICROPY_PY_WASM is off. An emcc cell is freestanding by construction; a
+/* No OS under this image: wasmmod's POSIX io fill is left out of the build and
+ * io bytes come from the image heap (MICROPY_WASM_*) rather than libc malloc.
+ * Describes the image, not the module, so it is answered even where
+ * MICROPY_PY_WASM is off. An emcc cell is freestanding by construction; a
  * firmware seat says so through ports/freestanding/mpconfig_freestanding.h.
  * This is the one axis those seats differ on — not a downstream's name. */
 #ifndef MICROPY_WASM_FREESTANDING
@@ -25,6 +25,15 @@
 #else
 #define MICROPY_WASM_FREESTANDING (0)
 #endif
+#endif
+
+/* modwasmmod.c is in the build, so `pymergetic.wasmmod` is the full face (gen,
+ * test, publish, the pack/ELF machinery behind them). A seat that leaves that
+ * TU out takes the smaller face from modcdn.c instead and says so here. Which
+ * TUs a seat compiles is a build fact — it is not "freestanding", and a seat
+ * with room for the full face may well have no OS under it. */
+#ifndef MICROPY_PY_WASM_FULL
+#define MICROPY_PY_WASM_FULL (1)
 #endif
 
 #if MICROPY_PY_WASM

@@ -45,6 +45,7 @@ CFLAGS_EXTMOD += -include $(WASMMOD_ABS)/ports/micropython/mpconfig_wasm.h \
 	-DMICROPY_MODULE_BUILTIN_INIT=1 \
 	-DMICROPY_CAN_OVERRIDE_BUILTINS=1 \
 	-DPM_WASMMOD_GUEST=0 \
+	-DMICROPY_PY_WASM_FULL=0 \
 	-DMICROPY_WASM_HTTP_NATIVE=0 \
 	-DMICROPY_PY_WASM_GEN=0 \
 	-DMICROPY_PY_WASM_ELF=0 \
@@ -62,6 +63,7 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/ports/common/boot.c \
 	$(WASMMOD_DIR)/ports/common/load.c \
 	$(WASMMOD_DIR)/ports/common/memcookie.c \
+	$(WASMMOD_DIR)/ports/micropython/modpymergetic.c \
 	$(WASMMOD_DIR)/ports/micropython/modguest.c \
 	$(WASMMOD_DIR)/ports/micropython/modcdn.c \
 	$(WASMMOD_DIR)/ports/micropython/importhook.c \
@@ -161,6 +163,7 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/ports/common/boot.c \
 	$(WASMMOD_DIR)/ports/common/load.c \
 	$(WASMMOD_DIR)/ports/common/memcookie.c \
+	$(WASMMOD_DIR)/ports/micropython/modpymergetic.c \
 	$(WASMMOD_DIR)/ports/micropython/modwasmmod.c \
 	$(WASMMOD_DIR)/ports/micropython/modcdn.c \
 	$(WASMMOD_DIR)/ports/micropython/modguest.c \

@@ -384,13 +384,24 @@ void mp_wasm_pymergetic_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     memcpy(child + plen + 1, leaf, llen);
     child[plen + 1 + llen] = '\0';
 
+    qstr child_q = qstr_from_str(child);
     mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
-        MP_OBJ_NEW_QSTR(qstr_from_str(child)), MP_MAP_LOOKUP);
+        MP_OBJ_NEW_QSTR(child_q), MP_MAP_LOOKUP);
     if (el != NULL && el->value != MP_OBJ_NULL) {
         dest[0] = el->value;
         return;
     }
-    mp_obj_t mod = mp_wasm_registry_module(child);
+    /* A statically registered child (MP_REGISTER_MODULE of the dotted name),
+     * still unimported. Reaching it here is what lets the package dict hold no
+     * child at all — a downstream tree's modules arrive by registration, and
+     * every seat resolves them the same way whether or not it links the TU that
+     * used to spell them out. */
+    mp_obj_t mod = mp_module_get_builtin(child_q, false);
+    if (mod != MP_OBJ_NULL) {
+        dest[0] = mod;
+        return;
+    }
+    mod = mp_wasm_registry_module(child);
     if (mod != MP_OBJ_NULL) {
         dest[0] = mod;
     }

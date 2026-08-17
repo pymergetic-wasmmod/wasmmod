@@ -5,17 +5,14 @@
 
 #include "py/obj.h"
 
-#include "ports/micropython/mpconfig_wasm.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 extern const mp_obj_module_t mp_module_pymergetic_wasmmod_net;
 extern const mp_obj_module_t mp_module_pymergetic_wasmmod_net_cdn;
-#if MICROPY_WASM_FREESTANDING
+/* Defined here or in modwasmmod.c, depending on MICROPY_PY_WASM_FULL. */
 extern const mp_obj_module_t mp_module_pymergetic_wasmmod;
-#endif
 
 #ifdef __cplusplus
 }

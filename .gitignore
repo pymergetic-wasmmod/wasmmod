@@ -18,6 +18,10 @@ build/
 *.swp
 .DS_Store
 
+# clangd database. Absolute -I paths naming one checkout, so committing it makes
+# a sibling checkout compile against this one's headers (make compile-commands).
+/compile_commands.json
+
 # Rust workspace
 /target/
 crates/*/target/

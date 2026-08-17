@@ -21,7 +21,6 @@
 #include "ports/micropython/finder.h"
 #include "ports/micropython/hostready.h"
 #include "ports/micropython/importhook.h"
-#include "ports/micropython/modutil.h"
 #include "ports/micropython/mpconfig_wasm.h"
 #include "ports/micropython/nativecall.h"
 #include "ports/micropython/packbind.h"
@@ -533,12 +532,6 @@ static mp_obj_t mod_wasm___init__(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm___init___obj, mod_wasm___init__);
 
-static mp_obj_t mod_pymergetic___init__(void) {
-    mp_wasm_ensure_inited();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_pymergetic___init___obj, mod_pymergetic___init__);
-
 static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_wasmmod) },
     { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&mod_wasm___init___obj) },
@@ -580,26 +573,6 @@ const mp_obj_module_t mp_module_pymergetic_wasmmod = {
     .globals = (mp_obj_dict_t *)&mp_module_pymergetic_wasmmod_globals,
 };
 
-static const mp_rom_map_elem_t mp_module_pymergetic_globals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic) },
-    { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&mod_pymergetic___init___obj) },
-    { MP_ROM_QSTR(MP_QSTR_wasmmod), MP_ROM_PTR(&mp_module_pymergetic_wasmmod) },
-    { MP_ROM_QSTR(MP_QSTR_util), MP_ROM_PTR(&mp_module_pymergetic_util) },
-    /* wasmmod's own children only. A downstream card tree hangs itself off this
-     * package through MP_REGISTER_MODULE plus the attr delegation below, which
-     * resolves pymergetic.<child> out of the registry — this dict never learns
-     * a downstream's name. */
-};
-static MP_DEFINE_CONST_DICT(mp_module_pymergetic_globals, mp_module_pymergetic_globals_table);
-
-const mp_obj_module_t mp_module_pymergetic = {
-    .base = { &mp_type_module },
-    .globals = (mp_obj_dict_t *)&mp_module_pymergetic_globals,
-};
-
-#if MICROPY_MODULE_ATTR_DELEGATION
-MP_REGISTER_MODULE_DELEGATION(mp_module_pymergetic, mp_wasm_pymergetic_attr);
-#endif
-
-MP_REGISTER_MODULE(MP_QSTR_pymergetic, mp_module_pymergetic);
+/* The `pymergetic` package itself is modpymergetic.c — every seat links that
+ * TU, this one only on seats that want the full face. */
 MP_REGISTER_MODULE(MP_QSTR_pymergetic_dot_wasmmod, mp_module_pymergetic_wasmmod);

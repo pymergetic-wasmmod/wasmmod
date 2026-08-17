@@ -11,8 +11,10 @@
 #include "py/runtime.h"
 #include "pymergetic/wasmmod/io/__exports__.h"
 #include "pymergetic/wasmmod/net/cdn.h"
-#if MICROPY_WASM_FREESTANDING
+#if !MICROPY_PY_WASM_FULL
 #include "ports/micropython/importhook.h"
+#endif
+#if MICROPY_WASM_FREESTANDING
 #include "pymergetic/wasmmod/pack/alloc.h"
 #endif
 
@@ -204,9 +206,9 @@ const mp_obj_module_t mp_module_pymergetic_wasmmod_net = {
     .globals = (mp_obj_dict_t *)&net_globals,
 };
 
-/* A freestanding image leaves modwasmmod.c out, so the pymergetic.wasmmod
- * package is defined here instead — same name, smaller face. */
-#if MICROPY_WASM_FREESTANDING
+/* Seats without modwasmmod.c take pymergetic.wasmmod from here instead — same
+ * name, smaller face. */
+#if !MICROPY_PY_WASM_FULL
 static mp_obj_t wasmmod___init__(void) {
     mp_wasm_ensure_inited();
     return mp_const_none;

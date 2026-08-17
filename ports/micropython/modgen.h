@@ -1,7 +1,8 @@
 #ifndef PM_WASMMOD_PORTS_UPY_MODGEN_H
 #define PM_WASMMOD_PORTS_UPY_MODGEN_H
 
-#include "ports/micropython/mpconfig_wasm.h"
+/* MICROPY_PY_WASM_GEN default below — see modcdn.h on the pragma. */
+#include "ports/micropython/mpconfig_wasm.h" // IWYU pragma: keep
 
 #ifndef MICROPY_PY_WASM_GEN
 #define MICROPY_PY_WASM_GEN (0)

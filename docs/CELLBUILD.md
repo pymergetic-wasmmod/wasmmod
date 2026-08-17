@@ -100,7 +100,8 @@ Defaults: `ports/micropython/mpconfig_wasm.h`.
 | Path | Role |
 |------|------|
 | `ports/common/` | C ABI boot/load/memcookie (µPy + CPython) |
-| `ports/micropython/modwasmmod.c` | Thin module tables + wrappers |
+| `ports/micropython/modpymergetic.c` | The `pymergetic` root package. Every seat links it; children come from their own `MP_REGISTER_MODULE` plus the attr delegation, so it names none of them |
+| `ports/micropython/modwasmmod.c` | Thin module tables + wrappers. Full `pymergetic.wasmmod` face (`MICROPY_PY_WASM_FULL=1`); seats that omit this TU take the smaller face from `modcdn.c` |
 | `ports/micropython/finder.c` | Pack path: VFS + HTTP `io` + artifact CDN `artifacts/` when configured |
 | `ports/micropython/modutil.c` | Builtin `pymergetic.util` + `__path__` → host `src/` |
 | `ports/micropython/importhook.c` | `__import__` wrap + `ensure_inited` + auto-ready |
