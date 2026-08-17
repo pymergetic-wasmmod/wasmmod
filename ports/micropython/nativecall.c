@@ -136,6 +136,24 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_float((mp_float_t)((double (*)(double))p)((double)mp_obj_get_float(args[0])));
     }
 #endif
+    if (strcmp(sig, "int32_t(const char *, const char *)") == 0) {
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        return mp_obj_new_int(((int32_t (*)(const char *, const char *))p)(
+            mp_obj_str_get_str(args[0]), mp_obj_str_get_str(args[1])));
+    }
+    if (strcmp(sig, "const char *(void)") == 0) {
+        const char *s;
+        if (n_args != 0) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        s = ((const char *(*)(void))p)();
+        if (s == NULL) {
+            return mp_const_none;
+        }
+        return mp_obj_new_str(s, strlen(s));
+    }
 
     mp_raise_ValueError(MP_ERROR_TEXT("unsupported native sig (use CONNECT from C/RS)"));
 }

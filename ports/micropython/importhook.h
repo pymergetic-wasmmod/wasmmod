@@ -21,6 +21,7 @@ void mp_wasm_pymergetic_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_install_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_uninstall_hook_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(mod_wasm_publish_presence_obj);
+MP_DECLARE_CONST_FUN_OBJ_0(mod_wasm_modules_obj);
 
 #ifdef __cplusplus
 }

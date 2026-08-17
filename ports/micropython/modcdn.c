@@ -218,6 +218,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(wasmmod___init___obj, wasmmod___init__);
 static const mp_rom_map_elem_t wasmmod_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_pymergetic_dot_wasmmod) },
     { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&wasmmod___init___obj) },
+    { MP_ROM_QSTR(MP_QSTR_modules), MP_ROM_PTR(&mod_wasm_modules_obj) },
     { MP_ROM_QSTR(MP_QSTR_guest), MP_ROM_PTR(&mp_module_pymergetic_wasmmod_guest) },
     { MP_ROM_QSTR(MP_QSTR_net), MP_ROM_PTR(&mp_module_pymergetic_wasmmod_net) },
 };

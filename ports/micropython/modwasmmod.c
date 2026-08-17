@@ -537,6 +537,7 @@ static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&mod_wasm___init___obj) },
     { MP_ROM_QSTR(MP_QSTR_version), MP_ROM_PTR(&mod_wasm_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_has), MP_ROM_PTR(&mod_wasm_has_obj) },
+    { MP_ROM_QSTR(MP_QSTR_modules), MP_ROM_PTR(&mod_wasm_modules_obj) },
     { MP_ROM_QSTR(MP_QSTR_load), MP_ROM_PTR(&mod_wasm_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_unload), MP_ROM_PTR(&mod_wasm_unload_obj) },
     { MP_ROM_QSTR(MP_QSTR_call), MP_ROM_PTR(&mod_wasm_call_obj) },

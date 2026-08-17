@@ -7,6 +7,7 @@
 #include "py/builtin.h"
 #include "py/nlr.h"
 #include "py/obj.h"
+#include "py/objlist.h"
 #include "py/objmodule.h"
 #include "py/qstr.h"
 #include "py/runtime.h"
@@ -472,9 +473,6 @@ mp_obj_t mp_wasm_builtin_import(size_t n_args, const mp_obj_t *args) {
         return res;
     }
     mp_wasm_hook_depth--;
-    if (mp_obj_exception_match(MP_OBJ_FROM_PTR(nlr2.ret_val), MP_OBJ_FROM_PTR(&mp_type_ImportError))) {
-        nlr_jump(nlr.ret_val);
-    }
     nlr_jump(nlr2.ret_val);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_import_hook_obj, 1, 5, mp_wasm_builtin_import);
@@ -545,3 +543,24 @@ static mp_obj_t mod_wasm_publish_presence(mp_obj_t name_in) {
     return mp_const_none;
 }
 MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_publish_presence_obj, mod_wasm_publish_presence);
+
+/* Live inventory. Inspect (and anyone else) lists what this seat registered —
+ * not a second ledger. On every seat that links this TU. */
+static mp_obj_t mod_wasm_modules(void) {
+    uint32_t n;
+    uint32_t i;
+    mp_obj_t lst;
+    mp_wasm_ensure_inited();
+    n = pm_wasmmod_registry_module_count();
+    lst = mp_obj_new_list(0, NULL);
+    for (i = 0; i < n; i++) {
+        uint8_t buf[MP_WASM_FQN_MAX];
+        uint32_t len = (uint32_t)sizeof(buf);
+        if (!pm_wasmmod_registry_module_at(i, buf, &len) || len == 0) {
+            continue;
+        }
+        mp_obj_list_append(lst, mp_obj_new_str((const char *)buf, len));
+    }
+    return lst;
+}
+MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_modules_obj, mod_wasm_modules);

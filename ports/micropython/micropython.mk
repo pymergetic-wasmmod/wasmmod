@@ -98,9 +98,17 @@ $(BUILD)/$(WASMMOD_DIR)/ports/webassembly/wamr/platform.o: CFLAGS += \
 	-DWASM_ENABLE_SHARED_HEAP=1 -DWASM_DISABLE_HW_BOUND_CHECK=1 \
 	-D_PLATFORM_WASI_TYPES_H
 
-# Same RS lock/registry/loader/version as a firmware seat; crate lives here.
+# Same RS lock/registry/loader/version as a firmware seat. Metal adds ASGI
+# in its own fw_lock (superset); wasmmod-only keeps the crate here.
 WASMMOD_LOCK_A := $(BUILD)/libfw_lock.a
-$(WASMMOD_LOCK_A): $(WASMMOD_ABS)/ports/webassembly/fw_lock/lib.rs | $(BUILD)
+ifeq ($(MICROPY_PY_METAL),1)
+WASMMOD_LOCK_SRC := $(TOP)/extmod/metal/port/fw_lock/lib.rs
+WASMMOD_LOCK_EXTRA := $(TOP)/extmod/metal/src/pymergetic/metal/net/http/asgi/__impl__.rs
+else
+WASMMOD_LOCK_SRC := $(WASMMOD_ABS)/ports/webassembly/fw_lock/lib.rs
+WASMMOD_LOCK_EXTRA :=
+endif
+$(WASMMOD_LOCK_A): $(WASMMOD_LOCK_SRC) $(WASMMOD_LOCK_EXTRA) | $(BUILD)
 	$(ECHO) "RUSTC loader wasm32"
 	$(Q)rustc --edition 2024 --crate-type staticlib --crate-name fw_lock \
 		--target wasm32-unknown-unknown -C panic=abort -C opt-level=s \
