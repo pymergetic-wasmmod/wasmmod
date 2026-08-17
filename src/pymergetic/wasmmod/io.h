@@ -4,7 +4,7 @@
 
 #include "pymergetic/wasmmod/io/__exports__.h" /* IWYU pragma: export */
 
-/* 1 if io_set already ran. host_boot must not wipe a Metal table. */
+/* 1 if io_set already ran. host_boot must not wipe a kernel's table. */
 int pm_wasmmod_io_is_set(void);
 
 #endif /* PYMERGETIC_WASMMOD_IO_H */

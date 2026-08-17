@@ -6,11 +6,11 @@
 #include "pymergetic/wasmmod/loader/__exports__.h"
 #include "pymergetic/wasmmod/registry/__exports__.h"
 #include "pymergetic/wasmmod/registry/__types__.h"
-#include "pymergetic/wasmmod/verify/__exports__.h"
+#include "pymergetic/wasmmod/verify.h"
 
 static int g_booted;
 
-__attribute__((weak)) int pm_metal_boot(void) {
+__attribute__((weak)) int pm_wasmmod_host_kernel_ready(void) {
     return 0;
 }
 

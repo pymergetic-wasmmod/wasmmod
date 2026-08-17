@@ -1,4 +1,4 @@
-# Metal OWN Win64 WAMR trampoline. Same argv slots as WAMR
+# wasmmod OWN Win64 WAMR trampoline. Same argv slots as WAMR
 # invokeNative_mingw_x64.s; no XMM (UEFI is -mno-sse).
 # rcx = func, rdx = argv, r8 = n_stacks.
 	.text

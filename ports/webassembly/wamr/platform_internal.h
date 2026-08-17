@@ -16,8 +16,8 @@
 #include <string.h>
 #include <time.h>
 
-#ifndef BH_PLATFORM_METAL
-#define BH_PLATFORM_METAL
+#ifndef BH_PLATFORM_WASMMOD
+#define BH_PLATFORM_WASMMOD
 #endif
 
 #define BH_APPLET_PRESERVED_STACK_SIZE (2 * BH_KB)
@@ -34,11 +34,11 @@ typedef struct {
     int dummy;
 } korp_cond;
 
-#define os_printf pm_metal_wamr_printf
-#define os_vprintf pm_metal_wamr_vprintf
+#define os_printf pm_wasmmod_wamr_printf
+#define os_vprintf pm_wasmmod_wamr_vprintf
 
-int pm_metal_wamr_printf(const char *fmt, ...);
-int pm_metal_wamr_vprintf(const char *fmt, va_list ap);
+int pm_wasmmod_wamr_printf(const char *fmt, ...);
+int pm_wasmmod_wamr_vprintf(const char *fmt, va_list ap);
 
 typedef int os_file_handle;
 typedef void *os_dir_stream;

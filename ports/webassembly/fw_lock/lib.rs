@@ -1,6 +1,6 @@
-//! Firmware/emcc face of lock + registry + loader + version.
-//! Same `__impl__.rs` cards as unix cargo. `PM_MOD_EXPORT_RS!` is a no-op:
-//! these seats are `-DPM_WASMMOD_GUEST=1` (no GNU start/stop walk).
+//! emcc face of lock + lz4 + mtar + registry + loader + version.
+//! Same `__impl__.rs` cards as unix cargo, and the same registry: exports
+//! stage from a constructor, replayed once a heap exists.
 #![no_std]
 #![allow(clippy::missing_safety_doc)]
 #![allow(non_camel_case_types)]
@@ -47,7 +47,33 @@ pub extern "C" fn rust_eh_personality() {}
 
 #[macro_export]
 macro_rules! PM_MOD_EXPORT_RS {
-    ($($t:tt)*) => {};
+    ($fqn:expr, $fn:ident, $sig:expr) => {
+        const _: () = {
+            #[used]
+            #[unsafe(link_section = ".init_array")]
+            static __PM_MOD_EXPORT: extern "C" fn() = {
+                extern "C" fn __pm_mod_export_ctor() {
+                    let fqn: &str = $fqn;
+                    let name: &str = stringify!($fn);
+                    let sig: &str = $sig;
+                    let ptr = $fn as *mut core::ffi::c_void;
+                    unsafe {
+                        let _ = $crate::wasmmod::registry::pm_wasmmod_registry_mod_export(
+                            fqn.as_ptr(),
+                            fqn.len() as u32,
+                            name.as_ptr(),
+                            name.len() as u32,
+                            $crate::wasmmod::registry::pm_wasmmod_registry_export_kind_t::Fn,
+                            ptr,
+                            sig.as_ptr(),
+                            sig.len() as u32,
+                        );
+                    }
+                }
+                __pm_mod_export_ctor
+            };
+        };
+    };
 }
 
 pub mod util;

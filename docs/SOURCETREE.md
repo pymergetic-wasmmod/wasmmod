@@ -5,18 +5,20 @@
 Purpose: one import tree that behaves like normal Python packages, whether the
 muscle is Python, C, or Rust.
 
-### Two `wasmmod` trees — don't confuse them
+### One repo, one checkout per seat
 
-- `packages/metalpython/extmod/wasmmod/` — **old, read-only reference.**
-  Pinned to `metalpython`'s `master` branch's own submodule commit. Still has
-  the real `pack.toml`-based packer (`dev/tools/.../tools/pack.py`,
-  `pack_elf.py`, `pack_tree.py`), every example package (`hello`, `mixed`,
-  `client`, `ticks`, `ticks_elf`, `host_elf`, `bridge`, `tree/*`, ...), and the
-  `run_matrix.py`/`run_elf.py`/`Makefile` test runners. Port **from** here;
-  never edit it as part of this redesign.
-- `packages/metalpython-wasmmod/extmod/wasmmod/` (this tree) — **the
-  destination.** Blank-main rewrite this doc's own decisions apply to. Port
-  **to** here.
+Each superproject nests this repo at `extmod/wasmmod`, so an os-sdk workspace
+holds several checkouts of it (`packages/micropython-wasmmod/extmod/wasmmod`,
+`packages/metalpython/extmod/wasmmod`, …). They are **seats, not variants**:
+
+- Same commit in every superproject's pin. A change lands once here, then each
+  superproject moves its pin; the trees are never allowed to drift.
+- Each checkout keeps its **own gitdir** under its superproject's
+  `.git/modules/…`. Two `.git` files pointing at one gitdir share an index, so
+  `git status` in one reports the other tree's checkout and syncs silently skip
+  files — if you see that, repoint, don't rsync.
+- No seat-only edits: `metal` and any other downstream lives in its own repo and
+  fills weak hooks (`ports/freestanding`), it never gets a branch of this one.
 
 ---
 
@@ -25,19 +27,19 @@ muscle is Python, C, or Rust.
 ### Tree
 
 - One tree under `src/`. **No parallel `include/`.**
-- **Path == module:** `src/pymergetic/metal/net/ssh.*` → `pymergetic.metal.net.ssh`.
+- **Path == module:** `src/pymergetic/tree/net/ssh.*` → `pymergetic.tree.net.ssh`.
 
 ### Sample (`src/`) — current shape, see "Faces live in the module's own
 folder" and "Impl body also moves in" below for the reasoning
 
 ```text
-src/pymergetic/metal/
+src/pymergetic/tree/                     # any card tree; wasmmod's own is wasmmod/
 ├── util/
 │   └── string_utils.py              # trivial leaf, no folder needed yet:
 │   └── string_utils.pmm.toml        # no children, no cross-language faces
 │                                     # → stays a bare sibling pair. impl = "py"
 │
-├── microdot/                        # →  pymergetic.metal.microdot
+├── microdot/                        # →  pymergetic.tree.microdot
 │   ├── __pmm__.toml                 # impl = "py"
 │   ├── __init__.py                  # package body (Py's own convention)
 │   └── request/                     # only if request is its own module
@@ -46,7 +48,7 @@ src/pymergetic/metal/
 │
 └── net/
     ├── ip.h                         # umbrella — canonical include, path == module
-    ├── ip/                          # →  pymergetic.metal.net.ip
+    ├── ip/                          # →  pymergetic.tree.net.ip
     │   ├── __pmm__.toml             # impl = "rs"
     │   ├── __impl__.rs              # types SoT lives here too (human)
     │   ├── __types__.h              # emitted (cbindgen)
@@ -55,7 +57,7 @@ src/pymergetic/metal/
     │
     ├── ssh.h                        # umbrella — canonical include, path == module
     ├── ssh.rs                       # barrel — not optional, makes the Rust path resolve
-    └── ssh/                         # →  pymergetic.metal.net.ssh
+    └── ssh/                         # →  pymergetic.tree.net.ssh
         ├── __pmm__.toml             # impl = "c"
         ├── __impl__.c
         ├── __types__.h              # types SoT (human)
@@ -107,9 +109,9 @@ Wait-y exports are tagged `sync` | `facade` | `async` on the **face**
 |---|---|
 | `sync` | bounded CPU; never waits (`uri_is_http`, `join_uri`, `set`/`get`) |
 | `facade` | enqueue / checkpoint; never parks (`yield`) |
-| `async` | may wait; Metal parks **inside the same symbol**; upywm/unix may **block** in the same fill (`fetch`, `probe`, `request`) |
+| `async` | may wait; a freestanding kernel parks **inside the same symbol**; upywm/unix may **block** in the same fill (`fetch`, `probe`, `request`) |
 
-Engine stays in Metal ("Py async = Metal async"). Wasmmod owns the async
+The engine stays in the kernel that fills the hook. Wasmmod owns the async
 **border**: `io_ops` is sync-looking C; the fill is where wait happens.
 `build = ["wasm", "elf"]` remains the only artifact twin. Do not invent
 `foo_async/` trees or a second asyncio.
@@ -147,7 +149,8 @@ impl = "c"   # c | rs | py
 
 Some path segments aren't owned by any single distribution — `pymergetic`
 itself, and `pymergetic.util`, are meant to be contributed to independently
-by whichever repo needs them (`metal`, `wasmmod`, `metalpython`, ...), same
+by whichever repo needs them (`wasmmod`, a kernel's card tree, a product µPy,
+...), same
 as Python's own [PEP 420](https://peps.python.org/pep-0420/) implicit
 namespace packages: no single `__init__.py`, no single `impl`, just a
 directory that different installs each add children under.
@@ -205,8 +208,8 @@ compiler demands, same status as any other barrel/umbrella file (see
 
 One crate today (`wasmmod` is the only `build`-marked deliverable that
 exists) — a Cargo **workspace** only earns its keep once a second,
-genuinely separate deliverable crate shows up (metal's own crate,
-depending on this one, later). `Cargo.toml` is build config, so it lives
+genuinely separate deliverable crate shows up (a downstream card tree's own
+crate, depending on this one, later). `Cargo.toml` is build config, so it lives
 at the wasmmod repo root, a sibling of `src/`/`docs/`/`dev/`/`tools/`,
 never inside `src/` (same reasoning as "`src/` holds module content only,
 scaffolding stays out" already established above).
@@ -363,8 +366,8 @@ boundary already can't be bypassed this way, nothing changes there.
   else already built — `pm_wasmmod_registry_connect_import`/`pm_wasmmod_registry_connect_guest`), not
   lazily per call.
 - Registration is **one macro invocation placed in the same file, right
-  after the static definition** — same call-site idiom `PM_METAL_REG_MOD`
-  already uses today, generator-inserted, never a separate `*.reg.c` (which
+  after the static definition** — same call-site idiom the `PM_MOD_EXPORT_*`
+  macros already use, generator-inserted, never a separate `*.reg.c` (which
   would be a different translation unit and couldn't take a `static`
   function's address at all):
 

@@ -1,6 +1,6 @@
 /*
  * WAMR platform glue for the emcc browser cell (upywm and mp).
- * Firmware keeps extmod/metal/port/wamr/metal_platform.c.
+ * A bare-metal kernel brings its own platform instead; this one is emcc's.
  */
 #include "platform_api_vmcore.h"
 #if defined(__EMSCRIPTEN__)
@@ -21,7 +21,7 @@ void uart_write(const char *s, size_t n);
 int vsnprintf(char *str, size_t size, const char *fmt, va_list ap);
 #endif
 
-int pm_metal_wamr_vprintf(const char *fmt, va_list ap) {
+int pm_wasmmod_wamr_vprintf(const char *fmt, va_list ap) {
     char buf[256];
     int n;
 #if defined(__EMSCRIPTEN__)
@@ -40,11 +40,11 @@ int pm_metal_wamr_vprintf(const char *fmt, va_list ap) {
 #endif
 }
 
-int pm_metal_wamr_printf(const char *fmt, ...) {
+int pm_wasmmod_wamr_printf(const char *fmt, ...) {
     va_list ap;
     int n;
     va_start(ap, fmt);
-    n = pm_metal_wamr_vprintf(fmt, ap);
+    n = pm_wasmmod_wamr_vprintf(fmt, ap);
     va_end(ap);
     return n;
 }

@@ -148,8 +148,40 @@ struct ModEntry {
     live: bool,
 }
 
+/// How many `PM_MOD_EXPORT_*` registrations can be held before the heap
+/// exists. Around 330 across wasmmod's own C/RS cards and a downstream card
+/// tree today; the spare is headroom.
+const STAGE_MAX: usize = 512;
+
+/// One `PM_MOD_EXPORT_*` registration captured before the allocator is
+/// usable. Every field the macros pass is already static storage — string
+/// literals and a function address — so staging one costs no allocation.
+/// Addresses are held as `usize` so the struct stays plain-data and the
+/// enclosing static needs no extra unsafe auto-trait promises.
+#[derive(Clone, Copy)]
+struct StagedExport {
+    fqn: usize,
+    fqn_len: u32,
+    name: usize,
+    name_len: u32,
+    sig: usize,
+    sig_len: u32,
+    ptr: usize,
+    kind: pm_wasmmod_registry_export_kind_t,
+}
+
 struct Table {
     entries: Vec<ModEntry>,
+    /// Registrations that arrived from a constructor. Freestanding seats run
+    /// `.init_array` / `.CRT$XCU` before any heap exists (firmware `malloc` is
+    /// often a bump pointer that is still NULL at that point), so an
+    /// insert here would allocate against nothing. They are replayed by
+    /// `drain_staged` on the first read, once the heap is up.
+    staged: [StagedExport; STAGE_MAX],
+    nstaged: usize,
+    /// Registrations dropped because `staged` was full and no heap was
+    /// available to take them directly. Nonzero means STAGE_MAX is too small.
+    ndropped: u32,
 }
 
 // SAFETY: the raw pointers `Table` holds (`Export::ptr`) are opaque
@@ -163,6 +195,77 @@ impl Table {
     const fn new() -> Self {
         Self {
             entries: Vec::new(),
+            staged: [StagedExport {
+                fqn: 0,
+                fqn_len: 0,
+                name: 0,
+                name_len: 0,
+                sig: 0,
+                sig_len: 0,
+                ptr: 0,
+                kind: pm_wasmmod_registry_export_kind_t::Fn,
+            }; STAGE_MAX],
+            nstaged: 0,
+            ndropped: 0,
+        }
+    }
+
+    /// Record a constructor-time registration without touching the heap.
+    /// Returns false only when the buffer is full, so the caller can fall
+    /// back to a direct insert on a seat that does have an allocator.
+    fn stage_export(
+        &mut self,
+        fqn: &str,
+        name: &str,
+        kind: pm_wasmmod_registry_export_kind_t,
+        ptr: *mut c_void,
+        sig: Option<&str>,
+    ) -> bool {
+        if self.nstaged >= STAGE_MAX {
+            return false;
+        }
+        let (sig_ptr, sig_len) = match sig {
+            Some(s) => (s.as_ptr() as usize, s.len() as u32),
+            None => (0usize, 0u32),
+        };
+        self.staged[self.nstaged] = StagedExport {
+            fqn: fqn.as_ptr() as usize,
+            fqn_len: fqn.len() as u32,
+            name: name.as_ptr() as usize,
+            name_len: name.len() as u32,
+            sig: sig_ptr,
+            sig_len,
+            ptr: ptr as usize,
+            kind,
+        };
+        self.nstaged += 1;
+        true
+    }
+
+    /// Replay everything staged before the heap existed. Called on the first
+    /// read of the table, by which point an allocator is always up.
+    fn drain_staged(&mut self) {
+        if self.nstaged == 0 {
+            return;
+        }
+        let n = core::mem::replace(&mut self.nstaged, 0);
+        for i in 0..n {
+            let s = self.staged[i];
+            // SAFETY: every address came from a `&str` backed by a string
+            // literal in the image, so the bytes outlive the whole program.
+            let (Some(fqn), Some(name)) = (
+                str_from_raw(s.fqn as *const u8, s.fqn_len),
+                str_from_raw(s.name as *const u8, s.name_len),
+            ) else {
+                continue;
+            };
+            let sig = if s.sig_len == 0 {
+                None
+            } else {
+                str_from_raw(s.sig as *const u8, s.sig_len)
+            };
+            let handle = self.ensure_resident(fqn);
+            self.export_set_sig(handle, name, s.kind, s.ptr as *mut c_void, sig);
         }
     }
 
@@ -418,9 +521,31 @@ impl Table {
 
 /// The table itself. `Mutex` (== `SpinLock`, see pymergetic.util.lock) —
 /// registry access is expected under multithreaded *and* cooperative
-/// scheduling (metal's own one-runner-per-CPU model included), so a real
+/// scheduling (a one-runner-per-CPU kernel included), so a real
 /// lock is load-bearing here, not decoration.
-static TABLE: Mutex<Table> = Mutex::new(Table::new());
+static TABLE_CELL: Mutex<Table> = Mutex::new(Table::new());
+
+/// Handle to the one registry table. `lock()` replays constructor-time
+/// registrations before handing the table over, so no reader can observe a
+/// half-populated registry and no future call site has to remember to.
+struct TableRef;
+
+static TABLE: TableRef = TableRef;
+
+impl TableRef {
+    fn lock(&self) -> crate::util::lock::MutexGuard<'static, Table> {
+        let mut guard = TABLE_CELL.lock();
+        guard.drain_staged();
+        guard
+    }
+
+    /// The table without a replay. Only the staging path may use this: it runs
+    /// from a constructor, where draining would allocate against a heap that
+    /// does not exist yet.
+    fn lock_staging(&self) -> crate::util::lock::MutexGuard<'static, Table> {
+        TABLE_CELL.lock()
+    }
+}
 
 fn str_from_raw<'a>(ptr: *const u8, len: u32) -> Option<&'a str> {
     if ptr.is_null() {
@@ -612,9 +737,21 @@ pub unsafe extern "C" fn pm_wasmmod_registry_mod_export(
     } else {
         str_from_raw(sig_ptr, sig_len)
     };
-    let mut table = TABLE.lock();
-    let handle = table.ensure_resident(fqn);
-    table.export_set_sig(handle, name, kind, ptr, sig) as i32
+    // Reached from a constructor on every seat, which on freestanding images
+    // is before any allocator exists. Stage the plain-data record now and let
+    // the first reader replay it; only fall back to allocating inline when the
+    // staging buffer is full.
+    let mut guard = TABLE.lock_staging();
+    if guard.stage_export(fqn, name, kind, ptr, sig) {
+        return 1;
+    }
+    guard.drain_staged();
+    let handle = guard.ensure_resident(fqn);
+    let ok = guard.export_set_sig(handle, name, kind, ptr, sig);
+    if !ok {
+        guard.ndropped = guard.ndropped.saturating_add(1);
+    }
+    ok as i32
 }
 
 fn copy_str_to_buf(src: &str, buf: *mut u8, buf_len_io: *mut u32) -> i32 {

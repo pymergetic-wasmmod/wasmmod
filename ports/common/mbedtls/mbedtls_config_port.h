@@ -1,6 +1,6 @@
 /* Default-fill TLS for pymergetic.wasmmod.io (unix/CPython cargo).
  * Same shape as ports/unix/mbedtls: platform entropy, not bare-metal.
- * Metal / browser never compile this — they fill io_ops instead.
+ * Freestanding seats never compile this — they fill io_ops instead.
  */
 #ifndef MICROPY_INCLUDED_MBEDTLS_CONFIG_H
 #define MICROPY_INCLUDED_MBEDTLS_CONFIG_H

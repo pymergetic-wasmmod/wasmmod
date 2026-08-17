@@ -5,7 +5,7 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 
-#include "pymergetic/wasmmod/pyexport/__exports__.h"
+#include "pymergetic/wasmmod/pyexport.h"
 #include "pymergetic/wasmmod/registry/__exports__.h"
 #include "pymergetic/wasmmod/registry/__types__.h"
 

@@ -17,6 +17,7 @@
 #include "ports/micropython/importhook.h"
 #include "pymergetic/wasmmod/__version__.h"
 #include "pymergetic/wasmmod/net/cdn.h"
+#include "pymergetic/wasmmod/registry/__exports__.h"
 
 #ifndef MICROPY_WASM_VERSION
 #define MICROPY_WASM_VERSION PYMERGETIC_WASMMOD_VERSION
@@ -31,19 +32,26 @@ void mp_wasm_presence_publish(const char *name) {
     pm_wasmmod_host_presence_publish(name);
 }
 
-/* Presence + auto-ready (bind_py + attach typed funobjs) for pymergetic.* leaves. */
+/* A ROM module's globals cannot take new attrs; binding into one raises. */
+static bool mp_wasm_module_is_writable(mp_obj_t module) {
+    if (!mp_obj_is_type(module, &mp_type_module)) {
+        return false;
+    }
+    mp_obj_module_t *m = MP_OBJ_TO_PTR(module);
+    return !m->globals->map.is_fixed;
+}
+
+/* Presence + auto-ready (bind_py + attach typed funobjs). Membership comes
+ * from the registry, not from a baked name prefix. */
 static void mp_wasm_after_import(const char *name) {
     mp_wasm_presence_publish(name);
-    if (name == NULL || strncmp(name, "pymergetic.", 11) != 0) {
-        return;
-    }
-    /* Skip package shells; ready leaves (and namespace dirs with exports). */
-    if (strcmp(name, "pymergetic.util") == 0 || strcmp(name, "pymergetic.wasmmod") == 0) {
+    if (name == NULL
+        || !pm_wasmmod_registry_has((const uint8_t *)name, (uint32_t)strlen(name))) {
         return;
     }
     mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
         MP_OBJ_NEW_QSTR(qstr_from_str(name)), MP_MAP_LOOKUP);
-    if (el != NULL && el->value != MP_OBJ_NULL) {
+    if (el != NULL && el->value != MP_OBJ_NULL && mp_wasm_module_is_writable(el->value)) {
         mp_wasm_host_ready(name, el->value);
     }
 }
@@ -174,23 +182,217 @@ static mp_obj_t mp_wasm_finish_pack_import(size_t n_args, const mp_obj_t *args, 
     return cur;
 }
 
-#if MICROPY_MODULE_ATTR_DELEGATION
-void mp_wasm_pymergetic_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
-    (void)self_in;
+static mp_obj_t mp_wasm_registry_module(const char *name);
+
+/* Direct children of `name` in the registry. `into` may be NULL to just test
+ * for existence; the walk stops at the first hit in that case. */
+static bool mp_wasm_registry_children(const char *name, size_t nlen, mp_obj_t into) {
+    uint32_t count = pm_wasmmod_registry_module_count();
+    bool any = false;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint8_t fqn[MP_WASM_FQN_MAX];
+        uint32_t len = sizeof(fqn);
+        if (!pm_wasmmod_registry_module_at(i, fqn, &len) || len <= nlen + 1) {
+            continue;
+        }
+        if (fqn[nlen] != '.' || memcmp(fqn, name, nlen) != 0) {
+            continue;
+        }
+        any = true;
+        if (into == MP_OBJ_NULL) {
+            return true;
+        }
+        /* Only the next component: a.b.c and a.b.c.d both contribute `c`. */
+        size_t leaf = nlen + 1;
+        size_t end = leaf;
+        while (end < len && fqn[end] != '.') {
+            ++end;
+        }
+        char child[MP_WASM_FQN_MAX];
+        if (end >= MP_WASM_FQN_MAX) {
+            continue;
+        }
+        memcpy(child, fqn, end);
+        child[end] = '\0';
+        mp_obj_t cmod = mp_wasm_registry_module(child);
+        if (cmod != MP_OBJ_NULL) {
+            mp_obj_dict_store(into,
+                MP_OBJ_NEW_QSTR(qstr_from_strn(child + leaf, end - leaf)), cmod);
+        }
+    }
+    return any;
+}
+
+/* A namespace node has no code of its own, only registered descendants. It
+ * resolves children on attribute access so touching a package never binds the
+ * whole subtree, and it works at any depth without a per-name registration. */
+typedef struct _mp_wasm_ns_t {
+    mp_obj_base_t base;
+    uint16_t nlen;
+    char name[];
+} mp_wasm_ns_t;
+
+static void mp_wasm_ns_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    mp_wasm_ns_t *ns = MP_OBJ_TO_PTR(self_in);
     if (dest[0] != MP_OBJ_NULL) {
         return;
     }
-    const char *leaf = qstr_str(attr);
-    size_t llen = strlen(leaf);
-    vstr_t name;
-    vstr_init(&name, 11 + llen);
-    vstr_add_strn(&name, "pymergetic.", 11);
-    vstr_add_strn(&name, leaf, llen);
+    if (attr == MP_QSTR___name__ || attr == MP_QSTR___path__) {
+        dest[0] = mp_obj_new_str(ns->name, ns->nlen);
+        return;
+    }
+    if (attr == MP_QSTR___dict__) {
+        mp_obj_t d = mp_obj_new_dict(0);
+        mp_wasm_registry_children(ns->name, ns->nlen, d);
+        dest[0] = d;
+        return;
+    }
+    size_t alen;
+    const char *an = (const char *)qstr_data(attr, &alen);
+    if ((size_t)ns->nlen + 1 + alen >= MP_WASM_FQN_MAX) {
+        return;
+    }
+    char child[MP_WASM_FQN_MAX];
+    memcpy(child, ns->name, ns->nlen);
+    child[ns->nlen] = '.';
+    memcpy(child + ns->nlen + 1, an, alen);
+    child[ns->nlen + 1 + alen] = '\0';
+    mp_obj_t cmod = mp_wasm_registry_module(child);
+    if (cmod != MP_OBJ_NULL) {
+        dest[0] = cmod;
+    }
+}
+
+static void mp_wasm_ns_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
+    (void)kind;
+    mp_wasm_ns_t *ns = MP_OBJ_TO_PTR(self_in);
+    mp_printf(print, "<module '%s'>", ns->name);
+}
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    mp_type_wasm_ns,
+    MP_QSTR_module,
+    MP_TYPE_FLAG_NONE,
+    print, mp_wasm_ns_print,
+    attr, mp_wasm_ns_attr
+);
+
+/* Registry → module. An exact FQN with exports becomes a bound module; a node
+ * with registered descendants becomes a namespace. Anything else stays
+ * MP_OBJ_NULL so an unknown name fails as ImportError rather than importing
+ * as a silent empty shell. */
+static mp_obj_t mp_wasm_registry_module(const char *name) {
+    if (name == NULL) {
+        return MP_OBJ_NULL;
+    }
+    size_t nlen = strlen(name);
+    if (nlen == 0 || nlen >= MP_WASM_FQN_MAX) {
+        return MP_OBJ_NULL;
+    }
+    qstr q = qstr_from_strn(name, nlen);
     mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
-        MP_OBJ_NEW_QSTR(qstr_from_strn(name.buf, name.len)), MP_MAP_LOOKUP);
-    vstr_clear(&name);
+        MP_OBJ_NEW_QSTR(q), MP_MAP_LOOKUP);
+    if (el != NULL && el->value != MP_OBJ_NULL) {
+        return el->value;
+    }
+    /* A ROM/builtin module owns this name — hand it back rather than shadow
+     * it with a heap object of the same qstr. */
+    mp_obj_t builtin = mp_module_get_builtin(q, false);
+    if (builtin == MP_OBJ_NULL) {
+        builtin = mp_module_get_builtin(q, true);
+    }
+    if (builtin != MP_OBJ_NULL) {
+        return builtin;
+    }
+    if (pm_wasmmod_registry_has((const uint8_t *)name, (uint32_t)nlen)
+        && pm_wasmmod_registry_export_count((const uint8_t *)name, (uint32_t)nlen) > 0) {
+        mp_obj_t mod = mp_obj_new_module(q);
+        if (mp_wasm_module_is_writable(mod)) {
+            mp_wasm_host_ready(name, mod);
+        }
+        return mod;
+    }
+    if (!mp_wasm_registry_children(name, nlen, MP_OBJ_NULL)) {
+        return MP_OBJ_NULL;
+    }
+    mp_wasm_ns_t *ns = m_new_obj_var(mp_wasm_ns_t, name, char, nlen + 1);
+    ns->base.type = &mp_type_wasm_ns;
+    ns->nlen = (uint16_t)nlen;
+    memcpy(ns->name, name, nlen);
+    ns->name[nlen] = '\0';
+    mp_obj_t obj = MP_OBJ_FROM_PTR(ns);
+    mp_obj_dict_store(MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_loaded_modules_dict)),
+        MP_OBJ_NEW_QSTR(q), obj);
+    return obj;
+}
+
+/* Walk the dotted ancestors of `name`, materialise each as a namespace module
+ * and hang the child off it, so an attribute walk reaches the leaf. Ancestors
+ * with a fixed ROM dict take nothing; the delegation hook resolves those. */
+static void mp_wasm_link_registry_parents(const char *name, mp_obj_t leaf) {
+    mp_obj_t child = leaf;
+    size_t end = strlen(name);
+    while (end > 0) {
+        size_t dot = end;
+        while (dot > 0 && name[dot - 1] != '.') {
+            --dot;
+        }
+        if (dot == 0) {
+            return;
+        }
+        char parent[MP_WASM_FQN_MAX];
+        memcpy(parent, name, dot - 1);
+        parent[dot - 1] = '\0';
+        mp_obj_t pmod = mp_wasm_registry_module(parent);
+        if (pmod == MP_OBJ_NULL) {
+            return;
+        }
+        if (mp_wasm_module_is_writable(pmod)) {
+            mp_obj_module_t *pm = MP_OBJ_TO_PTR(pmod);
+            mp_obj_dict_store(MP_OBJ_FROM_PTR(pm->globals),
+                MP_OBJ_NEW_QSTR(qstr_from_strn(name + dot, end - dot)), child);
+        }
+        child = pmod;
+        end = dot - 1;
+    }
+}
+
+#if MICROPY_MODULE_ATTR_DELEGATION
+/* `pkg.<attr>` for a ROM package whose fixed dict cannot hold new children.
+ * The parent name comes from the package's own __name__, so this works at any
+ * depth; misses fall through to the registry. */
+void mp_wasm_pymergetic_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    if (dest[0] != MP_OBJ_NULL || !mp_obj_is_type(self_in, &mp_type_module)) {
+        return;
+    }
+    mp_obj_module_t *pkg = MP_OBJ_TO_PTR(self_in);
+    mp_map_elem_t *nel = mp_map_lookup(&pkg->globals->map,
+        MP_OBJ_NEW_QSTR(MP_QSTR___name__), MP_MAP_LOOKUP);
+    if (nel == NULL || !mp_obj_is_qstr(nel->value)) {
+        return;
+    }
+    size_t plen;
+    const char *pkg_name = (const char *)qstr_data(MP_OBJ_QSTR_VALUE(nel->value), &plen);
+    size_t llen;
+    const char *leaf = (const char *)qstr_data(attr, &llen);
+    if (plen + 1 + llen >= MP_WASM_FQN_MAX) {
+        return;
+    }
+    char child[MP_WASM_FQN_MAX];
+    memcpy(child, pkg_name, plen);
+    child[plen] = '.';
+    memcpy(child + plen + 1, leaf, llen);
+    child[plen + 1 + llen] = '\0';
+
+    mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
+        MP_OBJ_NEW_QSTR(qstr_from_str(child)), MP_MAP_LOOKUP);
     if (el != NULL && el->value != MP_OBJ_NULL) {
         dest[0] = el->value;
+        return;
+    }
+    mp_obj_t mod = mp_wasm_registry_module(child);
+    if (mod != MP_OBJ_NULL) {
+        dest[0] = mod;
     }
 }
 #endif
@@ -239,6 +441,15 @@ mp_obj_t mp_wasm_builtin_import(size_t n_args, const mp_obj_t *args) {
     }
 
     const char *name = mp_obj_str_get_str(args[0]);
+    /* Builtins and the filesystem win first; the registry fills the gap they
+     * leave, before we reach for a pack over the network. */
+    mp_obj_t native = mp_wasm_registry_module(name);
+    if (native != MP_OBJ_NULL) {
+        mp_wasm_link_registry_parents(name, native);
+        mp_obj_t res = mp_wasm_finish_pack_import(n_args, args, native);
+        mp_wasm_after_import(name);
+        return res;
+    }
     mp_wasm_hook_depth++;
     nlr_buf_t nlr2;
     if (nlr_push(&nlr2) == 0) {
@@ -277,9 +488,21 @@ static mp_obj_t mod_wasm_install_hook(void) {
 }
 MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_install_hook_obj, mod_wasm_install_hook);
 
+/* Port init: put the hook in place before any user code runs, so a cold
+ * `import a.b.c` is caught. Deliberately does not boot the host — that stays
+ * lazy in mp_wasm_ensure_inited(). */
+void mp_wasm_port_init(void) {
+#if MICROPY_CAN_OVERRIDE_BUILTINS
+    if (MP_STATE_VM(mp_wasm_prev_import) == MP_OBJ_NULL) {
+        (void)mod_wasm_install_hook();
+    }
+#endif
+}
+
 void mp_wasm_ensure_inited(void) {
     if (!mp_wasm_inited) {
-        /* Metal boots from pymergetic.metal.__init__ so PM_MOD_BOOT can queue first. */
+        /* A host kernel boots from its own package __init__, so its PM_MOD_BOOT
+         * cards can queue before this. */
         if (pm_wasmmod_host_boot("pymergetic.wasmmod", MICROPY_WASM_VERSION) != 0) {
             mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasmmod loader_init failed"));
         }

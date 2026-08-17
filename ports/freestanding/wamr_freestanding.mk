@@ -1,18 +1,21 @@
 # wasmmod OWN: freestanding WAMR (interp + shared heap).
-# Firmware: Metal supplies platform GLUE includes + links the .a.
-# emcc (EMCC=1): defaults to ports/webassembly/wamr — no metal tree required.
+# A host kernel with no OS under it supplies the platform GLUE and links the .a;
+# it passes its own WAMR platform name and include dirs, so this file names no
+# downstream tree. emcc (EMCC=1) needs none of that: wasmmod's own
+# ports/webassembly/wamr is the platform there.
 #
 # Required:
-#   WAMR_DIR          — path to WAMR tree (default: $(WASMMOD_DIR)/third_party/wamr)
-#   OUT_DIR           — object/archive output directory
-#   METAL_PLAT_INC    — platform_internal.h (firmware: Metal; emcc: wasmmod default)
-#   METAL_PORT_INC    — extra -I (firmware Metal port; emcc: same as PLAT)
-#   METAL_LIBC_INC    — extra -I
-#   METAL_SRC_INC     — extra -I
-#   METAL_INCLUDE_INC — extra -I
+#   WAMR_DIR         — path to WAMR tree (default: $(WASMMOD_DIR)/third_party/wamr)
+#   OUT_DIR          — object/archive output directory
+#   PLAT_BH_PLATFORM — WAMR platform selector, compiled as BH_PLATFORM_<this>
+#   PLAT_INC         — platform_internal.h
+#   PLAT_PORT_INC    — extra -I (the kernel's port root)
+#   PLAT_LIBC_INC    — extra -I (freestanding libc headers)
+#   PLAT_SRC_INC     — extra -I (card tree)
+#   PLAT_EXTRA_INC   — extra -I
 #
 # Optional:
-#   ARCH=x86_64|x86_32  — default x86_64
+#   ARCH=x86_64|x86_32|armv7  — default x86_64
 #   UEFI=0|1            — Windows-gnu vs none-elf target (default 0)
 #   CC / AR
 #   WASMMOD_DIR         — this wasmmod root (auto from this mk location)
@@ -34,22 +37,24 @@ ifeq ($(strip $(OUT_DIR)),)
 $(error OUT_DIR is required)
 endif
 ifeq ($(EMCC),1)
-METAL_PLAT_INC ?= $(WASMMOD_DIR)/ports/webassembly/wamr
-METAL_PORT_INC ?= $(METAL_PLAT_INC)
-METAL_LIBC_INC ?= $(METAL_PLAT_INC)
-METAL_SRC_INC ?= $(WASMMOD_DIR)/src
-METAL_INCLUDE_INC ?= $(WASMMOD_DIR)/src
+PLAT_BH_PLATFORM ?= WASMMOD
+PLAT_INC ?= $(WASMMOD_DIR)/ports/webassembly/wamr
+PLAT_PORT_INC ?= $(PLAT_INC)
+PLAT_LIBC_INC ?= $(PLAT_INC)
+PLAT_SRC_INC ?= $(WASMMOD_DIR)/src
+PLAT_EXTRA_INC ?= $(WASMMOD_DIR)/src
 endif
-ifeq ($(strip $(METAL_PLAT_INC)),)
-$(error METAL_PLAT_INC is required)
+ifeq ($(strip $(PLAT_INC)),)
+$(error PLAT_INC is required)
+endif
+ifeq ($(strip $(PLAT_BH_PLATFORM)),)
+$(error PLAT_BH_PLATFORM is required)
 endif
 ifeq ($(wildcard $(WAMR_DIR)/core/iwasm/include/wasm_export.h),)
 $(error WAMR missing at $(WAMR_DIR) — wasmmod OWN third_party/wamr only)
 endif
-ifneq ($(ARCH),x86_64)
-ifneq ($(ARCH),x86_32)
-$(error ARCH must be x86_64 or x86_32 (got $(ARCH)))
-endif
+ifeq ($(filter $(ARCH),x86_64 x86_32 armv7),)
+$(error ARCH must be x86_64, x86_32 or armv7 (got $(ARCH)))
 endif
 
 CORE := $(WAMR_DIR)/core
@@ -93,9 +98,20 @@ ifeq ($(EMCC),1)
 SRCS += $(IWASM)/common/arch/invokeNative_general.c
 BUILD_TARGET_FLAG := -DBUILD_TARGET_X86_32
 CLANG_TARGET :=
+ARCH_CFLAGS :=
 UEFI_CFLAGS :=
 CPPFLAGS_EXTRA :=
 else
+ifeq ($(ARCH),armv7)
+# Cortex-A7 hard-float: WAMR's own VFP trampoline, no UEFI variant.
+SRCS += $(IWASM)/common/arch/invokeNative_arm_vfp.s
+BUILD_TARGET_FLAG := -DBUILD_TARGET_ARM_VFP
+CLANG_TARGET := armv7-none-eabihf
+ARCH_CFLAGS := -marm -mfpu=neon-vfpv4 -mfloat-abi=hard
+UEFI_CFLAGS :=
+CPPFLAGS_EXTRA :=
+else
+ARCH_CFLAGS :=
 ifeq ($(ARCH),x86_32)
 # No mingw-ia32 trampoline in-tree; general C tramp works for both BIOS/UEFI.
 SRCS += $(IWASM)/common/arch/invokeNative_general.c
@@ -113,15 +129,16 @@ BUILD_TARGET_FLAG := -DBUILD_TARGET_X86_64
 ifeq ($(UEFI),1)
 # general.c passes each uint32 as its own arg — 64-bit exec_env splits.
 # mingw_x64.s uses movsd; this seat is -mno-sse.
-TRAMP_WIN64_NOSSE := $(WASMMOD_DIR)/ports/metal/invokeNative_win64_nosse.s
+TRAMP_WIN64_NOSSE := $(WASMMOD_DIR)/ports/freestanding/invokeNative_win64_nosse.s
 CLANG_TARGET := x86_64-unknown-windows-gnu
 UEFI_CFLAGS := -fshort-wchar -mno-red-zone -mno-mmx -mno-sse -mno-sse2
-CPPFLAGS_EXTRA := -DPM_METAL_WASM_TRAMP_WIN64 -Dstrtok_s=strtok_r
+CPPFLAGS_EXTRA := -Dstrtok_s=strtok_r
 else
 SRCS += $(IWASM)/common/arch/invokeNative_em64.s
 CLANG_TARGET := x86_64-unknown-none-elf
 UEFI_CFLAGS :=
 CPPFLAGS_EXTRA :=
+endif
 endif
 endif
 endif
@@ -133,11 +150,11 @@ OBJS += $(OBJDIR)/invokeNative_win64_nosse.o
 endif
 
 CPPFLAGS := \
-	-I$(METAL_PLAT_INC) \
-	-I$(METAL_PORT_INC) \
-	-I$(METAL_LIBC_INC) \
-	-I$(METAL_SRC_INC) \
-	-I$(METAL_INCLUDE_INC) \
+	-I$(PLAT_INC) \
+	-I$(PLAT_PORT_INC) \
+	-I$(PLAT_LIBC_INC) \
+	-I$(PLAT_SRC_INC) \
+	-I$(PLAT_EXTRA_INC) \
 	-I$(IWASM)/include \
 	-I$(IWASM)/interpreter \
 	-I$(IWASM)/common \
@@ -147,7 +164,7 @@ CPPFLAGS := \
 	-I$(SHARED)/utils \
 	-I$(SHARED)/utils/uncommon \
 	-I$(CORE) \
-	-DBH_PLATFORM_METAL \
+	-DBH_PLATFORM_$(PLAT_BH_PLATFORM) \
 	$(BUILD_TARGET_FLAG) \
 	-DWASM_ENABLE_INTERP=1 \
 	-DWASM_ENABLE_FAST_INTERP=1 \
@@ -181,7 +198,7 @@ CFLAGS := \
 	-Wno-format \
 	-Wno-unused-command-line-argument \
 	-U__linux__ -Ulinux -U__gnu_linux__ \
-	-include $(METAL_PLAT_INC)/emcc_skip_wamr_wasi.h
+	-include $(PLAT_INC)/emcc_skip_wamr_wasi.h
 ASFLAGS :=
 else
 # clang required for --target= (host CC=gcc breaks freestanding).
@@ -201,10 +218,11 @@ CFLAGS := \
 	-Wno-unused-command-line-argument \
 	-U__linux__ -Ulinux -U__gnu_linux__ \
 	--target=$(CLANG_TARGET) \
+	$(ARCH_CFLAGS) \
 	$(UEFI_CFLAGS)
 
 # Asm trampolines: do not pass C -D/-I (clang spam: argument unused).
-ASFLAGS := --target=$(CLANG_TARGET)
+ASFLAGS := --target=$(CLANG_TARGET) $(ARCH_CFLAGS)
 endif
 
 .PHONY: all

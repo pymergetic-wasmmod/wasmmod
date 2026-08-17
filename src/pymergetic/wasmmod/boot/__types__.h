@@ -35,6 +35,8 @@ typedef struct pm_mod_bootdep {
 int32_t pm_mod_boot_add(const pm_mod_boot_t *rec);
 int32_t pm_mod_bootdep_add(const pm_mod_bootdep_t *rec);
 const pm_mod_boot_t *pm_mod_boot_current(void);
+uint32_t pm_mod_boot_count(void);
+const char *pm_mod_boot_fqn(uint32_t i);
 
 #ifdef __cplusplus
 }

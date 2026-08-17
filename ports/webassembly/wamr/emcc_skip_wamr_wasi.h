@@ -1,5 +1,5 @@
-#ifndef PM_METAL_EMCC_SKIP_WAMR_WASI_H
-#define PM_METAL_EMCC_SKIP_WAMR_WASI_H
+#ifndef PM_WASMMOD_EMCC_SKIP_WAMR_WASI_H
+#define PM_WASMMOD_EMCC_SKIP_WAMR_WASI_H
 /* emcc libc already typedefs __wasi_*; WAMR's platform_wasi_types.h
  * clashes (__wasi_size_t uint32 vs unsigned long). Skip that header
  * and use the emcc types for platform_api_extension.h declarations. */

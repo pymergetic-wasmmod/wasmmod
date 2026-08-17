@@ -2,7 +2,7 @@
  * Browser HTTP I/O for wasmmod (js.fetch via Emscripten Asyncify).
  *
  * Port fill — not a card. Do not edit ports/webassembly/library.js.
- * WAN HTTP is js.fetch; Metal sim L2 stays packets.
+ * WAN HTTP is js.fetch; a kernel's simulated L2 stays packets.
  *
  * Host clangd: no emscripten.h — declarations only; EM_ASYNC_JS is JS.
  */

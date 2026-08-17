@@ -35,7 +35,7 @@
 
 #if MICROPY_PY_WASM
 
-#include "pymergetic/wasmmod/pyexport/__exports__.h"
+#include "pymergetic/wasmmod/pyexport.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -706,7 +706,7 @@ int pm_wasmmod_pyexport_bind_module(const char *fqn, mp_obj_t module) {
 
 #else /* !MICROPY_PY_WASM — stubs when neither µPy nor CPython port compiles this TU */
 
-#include "pymergetic/wasmmod/pyexport/__exports__.h"
+#include "pymergetic/wasmmod/pyexport.h"
 
 int pm_wasmmod_pyexport_export_py(const char *fqn, const char *export_name,
     pm_wasmmod_py_obj_t callable, uint32_t nargs) {

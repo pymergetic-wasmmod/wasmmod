@@ -196,6 +196,17 @@ void pm_mod_boot_unwind(void) {
     s_arena = NULL;
 }
 
+uint32_t pm_mod_boot_count(void) {
+    return s_n;
+}
+
+const char *pm_mod_boot_fqn(uint32_t i) {
+    if (i >= s_n || s_order[i] == NULL) {
+        return NULL;
+    }
+    return s_order[i]->fqn;
+}
+
 int32_t pm_mod_boot_run(pm_util_mem_arena_t *arena) {
     const pm_mod_boot_t *boots[PM_MOD_BOOT_MAX];
     const pm_mod_bootdep_t *deps[PM_MOD_BOOTDEP_MAX];
@@ -334,3 +345,5 @@ PM_MOD_EXPORT_C(pymergetic.wasmmod.boot, pm_mod_boot_run, pm_mod_boot_run, int32
 PM_MOD_EXPORT_C(pymergetic.wasmmod.boot, pm_mod_boot_unwind, pm_mod_boot_unwind, void(void));
 PM_MOD_EXPORT_C(pymergetic.wasmmod.boot, pm_mod_boot_add, pm_mod_boot_add, int32_t(const pm_mod_boot_t *));
 PM_MOD_EXPORT_C(pymergetic.wasmmod.boot, pm_mod_bootdep_add, pm_mod_bootdep_add, int32_t(const pm_mod_bootdep_t *));
+PM_MOD_EXPORT_C(pymergetic.wasmmod.boot, pm_mod_boot_count, pm_mod_boot_count, uint32_t(void));
+PM_MOD_EXPORT_C(pymergetic.wasmmod.boot, pm_mod_boot_fqn, pm_mod_boot_fqn, const char *(uint32_t));

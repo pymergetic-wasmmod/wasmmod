@@ -84,8 +84,8 @@ fn bundle_mbedtls() -> bool {
 }
 
 /// Runtime, not `env!("CARGO_MANIFEST_DIR")` — the compile-time macro bakes
-/// the path into `build-script-build`, so a directory rename (e.g.
-/// metalpython-wasmmod → micropython-wasmmod) leaves a stale `-I` until
+/// the path into `build-script-build`, so a directory rename, or a second
+/// checkout of this crate elsewhere, leaves a stale `-I` until
 /// something touches `build.rs`. Cargo always sets this when *running*
 /// the script.
 fn manifest_dir() -> String {

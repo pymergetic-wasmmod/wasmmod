@@ -5,7 +5,7 @@
 
 #include "pymergetic/wasmmod/loader/__exports__.h"
 #include "pymergetic/wasmmod/pack/zlib_env.h"
-#include "pymergetic/wasmmod/verify/__exports__.h"
+#include "pymergetic/wasmmod/verify.h"
 
 int pm_wasmmod_host_prepare(const uint8_t *in, uint32_t in_len, const char *path_hint,
     pm_wasmmod_host_prepared_t *out, char *err, size_t err_len) {

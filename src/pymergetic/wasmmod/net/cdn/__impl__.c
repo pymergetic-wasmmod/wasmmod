@@ -1,4 +1,4 @@
-/* pymergetic.wasmmod.net.cdn — impl. Metal-cdn client on io_ops. No sockets. */
+/* pymergetic.wasmmod.net.cdn — impl. Artifact CDN client on io_ops. No sockets. */
 #include "pymergetic/wasmmod/net/cdn/__types__.h"
 #include "pymergetic/wasmmod/io/__types__.h"
 
@@ -122,7 +122,7 @@ void pm_wasmmod_net_cdn_configure(const char *base_url, const char *token) {
     pm_wasmmod_io_set_auth_bearer(NULL);
     if (base_url != NULL && base_url[0] != '\0' && store_base_at(0, base_url)) {
         g_n_bases = 1;
-        g_driver = PM_WASMMOD_NET_CDN_DRIVER_METAL;
+        g_driver = PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS;
     }
     set_token(token);
 }
@@ -138,7 +138,7 @@ int32_t pm_wasmmod_net_cdn_add(const char *base_url, const char *token) {
         return 0;
     }
     g_n_bases++;
-    g_driver = PM_WASMMOD_NET_CDN_DRIVER_METAL;
+    g_driver = PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS;
     if (token != NULL && token[0] != '\0') {
         set_token(token);
     }
@@ -159,7 +159,7 @@ int32_t pm_wasmmod_net_cdn_prepend(const char *base_url, const char *token) {
         return 0;
     }
     g_n_bases++;
-    g_driver = PM_WASMMOD_NET_CDN_DRIVER_METAL;
+    g_driver = PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS;
     if (token != NULL && token[0] != '\0') {
         set_token(token);
     }
@@ -183,11 +183,11 @@ const char *pm_wasmmod_net_cdn_base_at(uint32_t index) {
 }
 
 int32_t pm_wasmmod_net_cdn_require_explicit_deps(void) {
-    return g_driver == PM_WASMMOD_NET_CDN_DRIVER_METAL ? 1 : 0;
+    return g_driver == PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS ? 1 : 0;
 }
 
 const char *pm_wasmmod_net_cdn_driver_name(void) {
-    return g_driver == PM_WASMMOD_NET_CDN_DRIVER_METAL ? "metal-cdn" : "path";
+    return g_driver == PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS ? "artifacts" : "path";
 }
 
 void pm_wasmmod_net_cdn_set_session_id(const char *session_id) {
@@ -289,7 +289,7 @@ static unsigned collect_exts(const char **exts, unsigned cap, char *aot_ext, siz
     return n;
 }
 
-static int32_t metal_fetch_one(const char *base, const char *name, const char *version,
+static int32_t artifact_fetch_one(const char *base, const char *name, const char *version,
     uint8_t **out_bytes, uint32_t *out_len, char *out_origin, uint32_t origin_len, char *errbuf,
     size_t errbuf_len) {
     const char *ver = (version != NULL) ? version : "";
@@ -341,12 +341,12 @@ int32_t pm_wasmmod_net_cdn_fetch_pack_ex(const char *name, const char *version, 
         err_set(errbuf, errbuf_len, "cdn: empty name");
         return -1;
     }
-    if (g_driver != PM_WASMMOD_NET_CDN_DRIVER_METAL || g_n_bases == 0) {
-        err_set(errbuf, errbuf_len, "cdn: configure metal-cdn base first");
+    if (g_driver != PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS || g_n_bases == 0) {
+        err_set(errbuf, errbuf_len, "cdn: configure an artifact base first");
         return -1;
     }
     for (unsigned bi = 0; bi < g_n_bases; ++bi) {
-        if (metal_fetch_one(g_bases[bi], name, version, out_bytes, out_len, out_origin, origin_len,
+        if (artifact_fetch_one(g_bases[bi], name, version, out_bytes, out_len, out_origin, origin_len,
                 errbuf, errbuf_len)
             == 0) {
             return 0;
@@ -374,8 +374,8 @@ int32_t pm_wasmmod_net_cdn_fetch_index(const char *channel, uint8_t **out_bytes,
         err_set(errbuf, errbuf_len, "cdn: null out");
         return -1;
     }
-    if (g_n_bases == 0 || g_driver != PM_WASMMOD_NET_CDN_DRIVER_METAL) {
-        err_set(errbuf, errbuf_len, "cdn: configure metal-cdn base first");
+    if (g_n_bases == 0 || g_driver != PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS) {
+        err_set(errbuf, errbuf_len, "cdn: configure an artifact base first");
         return -1;
     }
     const char *ch = (channel != NULL && channel[0] != '\0') ? channel : "lead";
@@ -421,8 +421,8 @@ int32_t pm_wasmmod_net_cdn_publish(const char *name, const char *version, const 
         err_set(errbuf, errbuf_len, "cdn: null data");
         return -1;
     }
-    if (g_driver != PM_WASMMOD_NET_CDN_DRIVER_METAL || g_n_bases == 0) {
-        err_set(errbuf, errbuf_len, "cdn: configure metal-cdn base first");
+    if (g_driver != PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS || g_n_bases == 0) {
+        err_set(errbuf, errbuf_len, "cdn: configure an artifact base first");
         return -1;
     }
 

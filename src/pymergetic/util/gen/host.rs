@@ -147,7 +147,7 @@ fn plane_of(source: FaceSource, fqn: &str, build: GuestKinds) -> Plane {
             }
         }
         // Unlinked C: `build = […]` is a guest pack; no build list is in-bin
-        // host muscle the gen binary did not link (Metal, etc.).
+        // host muscle the gen binary did not link.
         FaceSource::Guest => {
             if build.any() {
                 Plane::Guest(build)
@@ -290,9 +290,10 @@ fn gen_card_faces(
     dir: &str,
     fqn: &str,
     impl_lang: ImplLang,
+    types_on_disk: bool,
     check: bool,
 ) -> i32 {
-    let Some(faces) = faces_for_fqn(fqn) else {
+    let Some(faces) = faces_for_fqn(fqn, types_on_disk) else {
         return -1;
     };
     let paths: Vec<(String, String)> = faces
@@ -313,6 +314,7 @@ fn scrub_py_pyi(dir: &Path) {
 
 /// Per-card ignore for generated faces. Identical bytes every run (no git
 /// noise). The `.gitignore` itself is tracked; the names listed are not.
+/// `__init__.pyi` stays visible so the IDE can resolve native Python attrs.
 /// Recreate faces with `wasmmod-gen` after a clean.
 const CARD_GITIGNORE: &str = "\
 # pymergetic.util.gen — generated faces. Recreate with wasmmod-gen.
@@ -320,7 +322,6 @@ __exports__.h
 __exports__.rs
 __imports__.h
 __imports__.rs
-__init__.pyi
 __version__.h
 !.gitignore
 ";
@@ -672,6 +673,7 @@ pub fn gen_run_paths(roots: &[&Path], check: bool) -> i32 {
             continue;
         };
         let dir_s = dir.display().to_string();
+        let types_on_disk = dir.join("__types__.h").is_file();
         let impl_lang = impl_of(load_impl(&card).as_deref());
         let source = ensure_card_exports(dir, &fqn);
         let build = load_build(&card);
@@ -688,7 +690,7 @@ pub fn gen_run_paths(roots: &[&Path], check: bool) -> i32 {
         if impl_lang == ImplLang::Py {
             scrub_py_pyi(dir);
         }
-        match gen_card_faces(&mut sink, &dir_s, &fqn, impl_lang, check) {
+        match gen_card_faces(&mut sink, &dir_s, &fqn, impl_lang, types_on_disk, check) {
             0 => {
                 let outcome = if check {
                     Outcome::Ok

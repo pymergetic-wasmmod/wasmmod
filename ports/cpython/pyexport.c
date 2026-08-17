@@ -9,7 +9,7 @@
 #define PM_WASMMOD_CPYTHON (1)
 #endif
 
-#include "pymergetic/wasmmod/pyexport/__exports__.h"
+#include "pymergetic/wasmmod/pyexport.h"
 
 #include <stdbool.h>
 #include <stdint.h>

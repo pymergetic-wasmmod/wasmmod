@@ -10,6 +10,18 @@ vscode_cdb = pathlib.Path(sys.argv[3]) if len(sys.argv) > 3 else None
 host = wasm.parent.parent
 
 skip = {"target", "build", "third_party", ".git"}
+
+
+def unix_build_dir():
+    """The superproject's unix µPy build (genhdr for clangd). Its directory name
+    is that seat's own (build-wasm, build-standard, …), so discover it."""
+    hdrs = sorted((host / "ports/unix").glob("build-*/genhdr/qstrdefs.generated.h"))
+    if hdrs:
+        return hdrs[0].parents[1]
+    return host / "ports/unix/build-standard"
+
+
+
 # -I must not depend on CDB directory: clangd treats "." as the workspace,
 # then py/obj.h is missing and MP_REGISTER_ROOT_POINTER looks like implicit int.
 host_cflags = (
@@ -24,7 +36,7 @@ upy_cflags = (
     "clang -xc -std=gnu11 -Wall -Wno-unknown-attributes "
     f"-I{wasm} -I{wasm / 'src'} -I{wasm / 'third_party/wamr/core/iwasm/include'} "
     f"-I{host} -I{host / 'ports/unix'} -I{host / 'ports/unix/variants/standard'} "
-    f"-I{host / 'ports/unix/build-metal'} -DMICROPY_PY_WASM=1 "
+    f"-I{unix_build_dir()} -DMICROPY_PY_WASM=1 "
     "-DMICROPY_MODULE_BUILTIN_INIT=1 -DMICROPY_MODULE_BUILTIN_SUBPACKAGES=1 "
     "-DPM_WASMMOD_GUEST=0"
     f" -include {wasm / 'ports/micropython/mpconfig_wasm.h'}"

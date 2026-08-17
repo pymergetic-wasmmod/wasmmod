@@ -3,7 +3,7 @@
  *
  * Same candidate forms as µPy: dotted / slash / __init__ + .elf/.aotN/.aot/.wasm
  * (+ .zlib). HTTP roots use pymergetic.wasmmod.io. Local roots use POSIX
- * stat/fopen (CPython has no µPy VFS). Metal-cdn bases skip flat HTTP probes.
+ * stat/fopen (CPython has no µPy VFS). Artifact CDN bases skip flat HTTP probes.
  */
 #ifndef PM_WASMMOD_PORTS_CPY_FINDER_H
 #define PM_WASMMOD_PORTS_CPY_FINDER_H

@@ -13,6 +13,20 @@
 #define MICROPY_PY_WASM (0)
 #endif
 
+/* No OS under this image: wasmmod's POSIX io fill and modwasmmod.c are left out
+ * of the build, and io bytes come from the image heap (MICROPY_WASM_*) rather
+ * than libc malloc. Describes the image, not the module, so it is answered even
+ * where MICROPY_PY_WASM is off. An emcc cell is freestanding by construction; a
+ * firmware seat says so through ports/freestanding/mpconfig_freestanding.h.
+ * This is the one axis those seats differ on — not a downstream's name. */
+#ifndef MICROPY_WASM_FREESTANDING
+#if defined(__EMSCRIPTEN__)
+#define MICROPY_WASM_FREESTANDING (1)
+#else
+#define MICROPY_WASM_FREESTANDING (0)
+#endif
+#endif
+
 #if MICROPY_PY_WASM
 
 #ifndef MICROPY_MODULE_BUILTIN_SUBPACKAGES
@@ -25,6 +39,13 @@
  * `import a.b.c as d` resolves `pymergetic.<leaf>` via sys.modules. */
 #ifndef MICROPY_MODULE_ATTR_DELEGATION
 #define MICROPY_MODULE_ATTR_DELEGATION (1)
+#endif
+
+/* The import hook must be live before user code runs. A seat that owns
+ * MICROPY_PORT_INIT_FUNC calls mp_wasm_port_init() from its own init. */
+void mp_wasm_port_init(void);
+#ifndef MICROPY_PORT_INIT_FUNC
+#define MICROPY_PORT_INIT_FUNC mp_wasm_port_init()
 #endif
 
 /* In-bin / host facegen (`pymergetic.util.gen` + cargo feature `gen`).

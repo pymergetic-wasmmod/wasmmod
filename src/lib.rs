@@ -81,10 +81,3 @@ pub mod util;
 
 #[path = "pymergetic/wasmmod.rs"]
 pub mod wasmmod;
-
-// RS Metal cards live in extmod/metal (path == module). Only the upy-host
-// staticlib (unix METAL=1 / host prove) includes them; metal.mk supplies the
-// C at final link. gen CLI and `cargo test` stay free of pm_metal_*.
-#[cfg(all(feature = "upy-host", not(test)))]
-#[path = "../../metal/src/pymergetic/metal.rs"]
-pub mod metal;

@@ -7,11 +7,11 @@
  *   <slash>.wasm           (a/b/c.wasm)
  *   <slash>/__init__.wasm
  *
- * Host faces (pymergetic.wasmmod / .upy / .metal) are never treated as
- * guest packs. Containers: .elf / .aotN / .aot / .wasm (+ .zlib).
+ * Host faces — any namespace the registry holds a RESIDENT card at — are never
+ * treated as guest packs. Containers: .elf / .aotN / .aot / .wasm (+ .zlib).
  * HTTP roots on wasm.path / sys.path use pymergetic.wasmmod.io (probe to
- * find, fetch to load). Local roots stay on µPy VFS. Configured metal-cdn
- * bases skip flat HTTP probes; import uses net.cdn artifacts/lead|pin.
+ * find, fetch to load). Local roots stay on µPy VFS. Configured CDN bases skip
+ * flat HTTP probes; import uses net.cdn artifacts/lead|pin.
  */
 
 #ifndef MICROPY_INCLUDED_WASMMOD_PORTS_FINDER_H
@@ -26,7 +26,14 @@
 
 #include "pymergetic/wasmmod/registry/__types__.h"
 
+/* Longest FQN a registry walk will copy out. */
+#define MP_WASM_FQN_MAX 192
+
 bool mp_wasm_is_host_face(const char *dotted_name);
+
+/* True when the registry holds a RESIDENT (statically linked C/Rust) card at,
+ * above, or below this dotted name. */
+bool mp_wasm_resident_covers(const char *dotted_name);
 
 /* Search wasm.path then sys.path (file + HTTP roots). On success fills
  * *path_out (caller vstr_clear). */
@@ -41,8 +48,10 @@ bool mp_wasm_read_file(const char *path, uint8_t **out, size_t *out_len);
 /* Find + read + loader_load + sys.modules face. Raises on failure. */
 mp_obj_t mp_wasm_import_pack(const char *dotted_name);
 
-/* Seat fill: baked/ROM bytes (firmware cake). Path becomes mem:<name>. */
+/* Seat fill: ROM bytes (firmware). Path becomes mem:<name>. */
 void mp_wasm_register_local_bytes(const char *dotted_name, const uint8_t *bytes, size_t len);
+uint32_t mp_wasm_local_pack_count(void);
+const char *mp_wasm_local_pack_name(uint32_t i);
 
 void mp_wasm_store_handle_on_module(mp_obj_t mod, pm_wasmmod_registry_handle_t h);
 bool mp_wasm_load_handle_from_module(mp_obj_t mod, pm_wasmmod_registry_handle_t *out);

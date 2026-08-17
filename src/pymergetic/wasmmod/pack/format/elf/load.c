@@ -7,7 +7,7 @@
  *
  * In-tree ELF64 ET_REL loader (x86_64 / aarch64). No dlopen / ld.so.
  *
- * Linked only when MICROPY_PY_WASM_ELF=1 (unix/Metal). Browser/Emscripten
+ * Linked only when MICROPY_PY_WASM_ELF=1 (native seats). Browser/Emscripten
  * builds omit this file entirely (WASMMOD_EMSCRIPTEN → ELF=0).
  */
 

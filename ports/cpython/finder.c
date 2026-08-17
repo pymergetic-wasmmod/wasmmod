@@ -1,7 +1,7 @@
 /*
  * Pack path finder — CPython twin of ports/micropython/finder.c.
  * Containers: .elf / .aotN / .aot / .wasm, each optionally + .zlib.
- * HTTP: io.probe / io.fetch. Metal-cdn bases skipped as flat HTTP roots.
+ * HTTP: io.probe / io.fetch. Artifact CDN bases skipped as flat HTTP roots.
  * Local: POSIX stat/fopen.
  */
 
@@ -41,6 +41,10 @@
 #define PM_CPY_PATH_CAP (1536)
 #endif
 
+#ifndef PM_CPY_FQN_MAX
+#define PM_CPY_FQN_MAX (192)
+#endif
+
 static PyObject *g_wasm_path;
 static int g_import_depth;
 
@@ -51,15 +55,31 @@ bool pm_cpy_is_host_face(const char *dotted_name) {
     if (strcmp(dotted_name, "pymergetic") == 0) {
         return true;
     }
-    static const char *const faces[] = {
-        "pymergetic.wasmmod",
-        "pymergetic.upy",
-        "pymergetic.metal",
-    };
-    for (size_t i = 0; i < sizeof(faces) / sizeof(faces[0]); ++i) {
-        size_t n = strlen(faces[i]);
-        if (strncmp(dotted_name, faces[i], n) == 0
-            && (dotted_name[n] == '\0' || dotted_name[n] == '.')) {
+    /* Everything else the live registry answers: a name is a host face when a
+     * RESIDENT card sits at it, above it, or below it. Guest packs come in a
+     * WASM/AOT/ELF container and never match. No list of namespace roots here —
+     * a downstream card tree is a host face because it registered, not because
+     * this file was taught its name. Name relation first, container kind only
+     * on a hit, so this stays one pass per import. */
+    size_t nlen = strlen(dotted_name);
+    uint32_t count = pm_wasmmod_registry_module_count();
+    for (uint32_t i = 0; i < count; ++i) {
+        uint8_t fqn[PM_CPY_FQN_MAX];
+        uint32_t flen = (uint32_t)sizeof(fqn);
+        if (!pm_wasmmod_registry_module_at(i, fqn, &flen)) {
+            continue;
+        }
+        bool related;
+        if (flen == nlen) {
+            related = memcmp(fqn, dotted_name, nlen) == 0;
+        } else if (flen > nlen) {
+            related = fqn[nlen] == '.' && memcmp(fqn, dotted_name, nlen) == 0;
+        } else {
+            related = dotted_name[flen] == '.' && memcmp(fqn, dotted_name, flen) == 0;
+        }
+        if (related
+            && pm_wasmmod_registry_container(fqn, flen)
+            == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_RESIDENT) {
             return true;
         }
     }
@@ -270,7 +290,7 @@ static bool find_in_list(PyObject *list_obj, const char *dotted, const char *sla
             continue;
         }
         if (pm_wasmmod_io_uri_is_http(root)
-            && pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_METAL
+            && pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS
             && pm_wasmmod_net_cdn_url_is_base(root)) {
             continue;
         }
@@ -464,7 +484,7 @@ PyObject *pm_cpy_import_pack(const char *dotted_name) {
             PyErr_SetFromErrnoWithFilename(PyExc_OSError, path);
             return NULL;
         }
-    } else if (pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_METAL) {
+    } else if (pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS) {
         uint8_t *buf = NULL;
         uint32_t n = 0;
         if (pm_wasmmod_net_cdn_fetch_pack(dotted_name, NULL, &buf, &n, err, sizeof(err)) != 0) {

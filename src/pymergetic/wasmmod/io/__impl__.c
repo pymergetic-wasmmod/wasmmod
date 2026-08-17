@@ -2,7 +2,7 @@
  *
  * Host I/O table: fetch / probe / yield. Wait class lives on the face
  * (SOURCETREE.md): fetch/probe/request = async; yield = facade; uri/join/set/get
- * = sync. upywm may block inside the fill; Metal later parks in the same slot.
+ * = sync. upywm may block inside the fill; a kernel parks in the same slot.
  */
 #include "pymergetic/wasmmod/io/__types__.h"
 
@@ -19,6 +19,13 @@
 #else
 #define MICROPY_WASM_HTTP_NATIVE (0)
 #endif
+#endif
+
+/* The file:// backend wants a POSIX filesystem. A seat with none — firmware —
+ * sets this to 0 and answers those URIs from its own io_ops fill, or DECLINEs.
+ * emcc keeps it: Emscripten has a virtual FS. */
+#ifndef PM_WASMMOD_IO_FILE
+#define PM_WASMMOD_IO_FILE (1)
 #endif
 
 static void err_set(char *errbuf, size_t errbuf_len, const char *msg) {
@@ -187,7 +194,7 @@ static void buf_clear(pm_io_buf_t *b) {
 }
 #endif
 
-#if !defined(PM_METAL_FIRMWARE)
+#if PM_WASMMOD_IO_FILE
 static pm_wasmmod_io_result_t fetch_file(const char *path, uint8_t **out_bytes, uint32_t *out_len,
     char *errbuf, size_t errbuf_len) {
     pm_wasmmod_io_yield();
@@ -233,7 +240,7 @@ static pm_wasmmod_io_result_t fetch_file(const char *path, uint8_t **out_bytes, 
     *out_len = n;
     return PM_WASMMOD_IO_OK;
 }
-#endif /* !PM_METAL_FIRMWARE */
+#endif /* PM_WASMMOD_IO_FILE */
 
 #if MICROPY_WASM_HTTP_NATIVE
 
@@ -811,7 +818,7 @@ int32_t pm_wasmmod_io_fetch(const char *uri, uint8_t **out_bytes, uint32_t *out_
     if (pm_wasmmod_io_uri_is_http(uri)) {
         return native_http_fetch(uri, out_bytes, out_len, errbuf, errbuf_len);
     }
-#if !defined(PM_METAL_FIRMWARE)
+#if PM_WASMMOD_IO_FILE
     return (fetch_file(uri, out_bytes, out_len, errbuf, errbuf_len) == PM_WASMMOD_IO_OK) ? 0 : -1;
 #else
     err_set(errbuf, errbuf_len, "file fetch requires host io_ops");

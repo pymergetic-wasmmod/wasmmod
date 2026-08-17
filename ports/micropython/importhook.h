@@ -10,6 +10,7 @@
 extern "C" {
 #endif
 
+void mp_wasm_port_init(void);
 void mp_wasm_ensure_inited(void);
 void mp_wasm_presence_publish(const char *name);
 mp_obj_t mp_wasm_builtin_import(size_t n_args, const mp_obj_t *args);

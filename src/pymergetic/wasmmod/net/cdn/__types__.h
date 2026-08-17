@@ -1,4 +1,4 @@
-/* pymergetic.wasmmod.net.cdn — metal-cdn client protocol (not a net stack).
+/* pymergetic.wasmmod.net.cdn — artifact CDN client protocol (not a net stack).
  *
  * Wait class: fetch_pack / fetch_index / publish = async (via io.fetch /
  * io.request). configure / add / reset / url_is_base = sync.
@@ -18,8 +18,8 @@ extern "C" {
 #endif
 
 typedef enum {
-    PM_WASMMOD_NET_CDN_DRIVER_PATH = 0,  /* no metal-cdn base configured */
-    PM_WASMMOD_NET_CDN_DRIVER_METAL = 1, /* artifacts/lead|pin on configured bases */
+    PM_WASMMOD_NET_CDN_DRIVER_PATH = 0,  /* no artifact base configured */
+    PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS = 1, /* artifacts/lead|pin on configured bases */
 } pm_wasmmod_net_cdn_driver_t;
 
 #ifdef __cplusplus

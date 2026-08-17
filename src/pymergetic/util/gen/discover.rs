@@ -540,8 +540,8 @@ PM_MOD_EXPORT_C(hello, add, add, int(int, int));
     fn scans_rs_export_macro() {
         let text = r#"
 crate::PM_MOD_EXPORT_RS!(
-    "pymergetic.metal.net.http.asgi",
-    pm_metal_net_http_asgi_init,
+    "pymergetic.wasmmod.loader",
+    pm_wasmmod_loader_init,
     "int32_t(pm_util_mem_arena_t *)"
 );
 "#;
@@ -550,7 +550,7 @@ crate::PM_MOD_EXPORT_RS!(
         assert_eq!(
             ex[0],
             (
-                "pm_metal_net_http_asgi_init".into(),
+                "pm_wasmmod_loader_init".into(),
                 "int32_t(pm_util_mem_arena_t *)".into()
             )
         );
@@ -617,17 +617,20 @@ def bad(x: str) -> int:
         );
     }
 
+    /// Scans a real card of this crate, not a fixture — the point is that the
+    /// scanner survives a full-size `__impl__.c`. It must be one of ours: a
+    /// wasmmod test that reads a downstream tree fails wherever that tree
+    /// isn't checked out.
     #[test]
-    fn scans_metal_async_impl() {
+    fn scans_own_cdn_impl() {
         let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../metal/src/pymergetic/metal/async/__impl__.c");
-        let text = std::fs::read_to_string(&p).expect("metal async __impl__.c");
+            .join("src/pymergetic/wasmmod/net/cdn/__impl__.c");
+        let text = std::fs::read_to_string(&p).expect("wasmmod net.cdn __impl__.c");
         let ex = scan_pm_mod_export_c(&text);
         assert!(
-            ex.iter().any(|(n, s)| n == "pm_metal_async_init"
-                && s == "int32_t(pm_util_mem_arena_t *, uint32_t)"),
-            "metal.async PM_MOD_EXPORT_C missing/wrong: {ex:?}"
+            ex.iter().any(|(n, _)| n.starts_with("pm_wasmmod_net_cdn_")),
+            "wasmmod.net.cdn PM_MOD_EXPORT_C missing: {ex:?}"
         );
-        assert!(ex.iter().any(|(n, _)| n == "pm_metal_async_yield"));
+        assert!(ex.len() > 1, "expected a full card's exports: {ex:?}");
     }
 }

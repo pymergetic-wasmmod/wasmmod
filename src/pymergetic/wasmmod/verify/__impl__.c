@@ -34,7 +34,7 @@
 #include <string.h>
 
 #include "py/mpconfig.h"
-#include "pymergetic/wasmmod/verify/__exports__.h"
+#include "pymergetic/wasmmod/verify.h"
 
 #include "pymergetic/wasmmod/pack/alloc.h"
 #ifndef MP_WEAK

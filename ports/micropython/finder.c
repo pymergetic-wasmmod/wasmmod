@@ -1,7 +1,7 @@
 /*
  * Pack path finder — see finder.h.
  * Containers: .elf / .aotN / .aot / .wasm, each optionally + .zlib.
- * HTTP roots: io.probe / io.fetch. Metal-cdn bases on wasm.path are skipped
+ * HTTP roots: io.probe / io.fetch. Artifact CDN bases on wasm.path are skipped
  * (artifacts/lead|pin via net.cdn). Local: µPy VFS.
  */
 
@@ -54,7 +54,7 @@
 #endif
 
 #if MICROPY_WASM_VERIFY
-#include "pymergetic/wasmmod/verify/__exports__.h"
+#include "pymergetic/wasmmod/verify.h"
 #endif
 
 /* Root pointer name must not match the getter (clangd/type confusion). */
@@ -69,6 +69,32 @@ typedef struct {
 } mp_wasm_local_pack_t;
 
 static mp_wasm_local_pack_t s_local_packs[MP_WASM_LOCAL_PACKS];
+
+uint32_t mp_wasm_local_pack_count(void) {
+    uint32_t n = 0;
+    size_t i;
+    for (i = 0; i < MP_WASM_LOCAL_PACKS; ++i) {
+        if (s_local_packs[i].name != NULL) {
+            n++;
+        }
+    }
+    return n;
+}
+
+const char *mp_wasm_local_pack_name(uint32_t i) {
+    uint32_t n = 0;
+    size_t k;
+    for (k = 0; k < MP_WASM_LOCAL_PACKS; ++k) {
+        if (s_local_packs[k].name == NULL) {
+            continue;
+        }
+        if (n == i) {
+            return s_local_packs[k].name;
+        }
+        n++;
+    }
+    return NULL;
+}
 
 void mp_wasm_register_local_bytes(const char *dotted_name, const uint8_t *bytes, size_t len) {
     size_t i;
@@ -121,11 +147,12 @@ static void pack_bytes_free(uint8_t *bytes, size_t len) {
     }
 }
 
-/* io.fetch / net.cdn bytes: cargo TUs malloc via alloc.h stdlib. Unix
- * MICROPY_PY_METAL=1 redirects this TU's MICROPY_WASM_FREE to TLSF —
- * do not mix. Firmware/emcc compile io in the same image. */
+/* io.fetch / net.cdn bytes: on a freestanding seat the io fill sits in this
+ * image and allocated from the image heap, so free it there. Elsewhere the fill
+ * is a cargo TU on libc malloc, and a host heap macro would be the wrong
+ * allocator for those bytes. */
 static void io_fetch_free(uint8_t *buf) {
-#if defined(__EMSCRIPTEN__) || defined(PM_METAL_FIRMWARE)
+#if MICROPY_WASM_FREESTANDING
     MICROPY_WASM_FREE(buf);
 #else
     free(buf);
@@ -151,15 +178,37 @@ bool mp_wasm_is_host_face(const char *dotted_name) {
     if (strcmp(dotted_name, "pymergetic") == 0) {
         return true;
     }
-    static const char *const faces[] = {
-        "pymergetic.wasmmod",
-        "pymergetic.upy",
-        "pymergetic.metal",
-    };
-    for (size_t i = 0; i < MP_ARRAY_SIZE(faces); ++i) {
-        size_t n = strlen(faces[i]);
-        if (strncmp(dotted_name, faces[i], n) == 0
-            && (dotted_name[n] == '\0' || dotted_name[n] == '.')) {
+    /* Everything else the live registry answers: a name is a host face when a
+     * RESIDENT card sits at it, above it, or below it. Guest packs come in a
+     * WASM/AOT/ELF container and never match. No list of namespace roots here —
+     * a downstream card tree is a host face because it registered, not because
+     * this file was taught its name. */
+    return mp_wasm_resident_covers(dotted_name);
+}
+
+/* Does the registry hold a statically-linked (RESIDENT) card at, above, or
+ * below `dotted_name`? Name relation first, container kind only on a hit —
+ * that keeps this one pass over the registry per import. */
+bool mp_wasm_resident_covers(const char *dotted_name) {
+    size_t nlen = strlen(dotted_name);
+    uint32_t count = pm_wasmmod_registry_module_count();
+    for (uint32_t i = 0; i < count; ++i) {
+        uint8_t fqn[MP_WASM_FQN_MAX];
+        uint32_t flen = (uint32_t)sizeof(fqn);
+        if (!pm_wasmmod_registry_module_at(i, fqn, &flen)) {
+            continue;
+        }
+        bool related = false;
+        if (flen == nlen) {
+            related = memcmp(fqn, dotted_name, nlen) == 0;
+        } else if (flen > nlen) {
+            related = fqn[nlen] == '.' && memcmp(fqn, dotted_name, nlen) == 0;
+        } else {
+            related = dotted_name[flen] == '.' && memcmp(fqn, dotted_name, flen) == 0;
+        }
+        if (related
+            && pm_wasmmod_registry_container(fqn, flen)
+            == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_RESIDENT) {
             return true;
         }
     }
@@ -361,9 +410,9 @@ static bool find_in_list(mp_obj_t list_obj, const char *dotted, const char *slas
         if (strcmp(root, ".frozen") == 0) {
             continue;
         }
-        /* Metal-cdn bases are artifacts/ only — probing {base}/name.wasm 200s HTML. */
+        /* Artifact CDN bases are artifacts/ only — probing {base}/name.wasm 200s HTML. */
         if (pm_wasmmod_io_uri_is_http(root)
-            && pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_METAL
+            && pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS
             && pm_wasmmod_net_cdn_url_is_base(root)) {
             continue;
         }
@@ -513,7 +562,7 @@ static void unwrap_artifact(uint8_t **bytes, size_t *blen) {
 
 static int mp_wasm_import_depth;
 
-/* Local MPWD + metal-cdn: import_pack resolves deps (finder, then cdn). */
+/* Local MPWD + artifact CDN: import_pack resolves deps (finder, then cdn). */
 static void load_local_deps(const uint8_t *bytes, uint32_t blen) {
     if (mp_wasm_import_depth > 16) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("wasm deps: nest limit"));
@@ -595,7 +644,7 @@ mp_obj_t mp_wasm_import_pack(const char *dotted_name) {
             mp_raise_OSError(MP_ENOENT);
         }
         vstr_clear(&path);
-    } else if (pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_METAL) {
+    } else if (pm_wasmmod_net_cdn_driver() == PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS) {
         uint8_t *buf = NULL;
         uint32_t n = 0;
         char err[160];

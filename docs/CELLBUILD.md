@@ -2,9 +2,9 @@
 
 **Status:** sinks, included-bytes diff, rich live `__init__.pyi`, µPy VFS glue,
 `PM_MOD_EXPORT_C` / `PM_MOD_EXPORT_RS!` → one registry; live `pm_wasmmod_pyexport_*`
-thunks + `wasmmod.bind_py` (2026-08-13); host `io` table + metal-cdn client + µPy
+thunks + `wasmmod.bind_py` (2026-08-13); host `io` table + artifact CDN client + µPy
 `wasm.cdn` / `catalog` / `publish` (POST via `io.request`); default `https://` via
-mbedtls in the io fill (2026-08-14); `ports/metal/` io_ops stub; CPython pack finder / `pack_bind` / ELF
+mbedtls in the io fill (2026-08-14); `ports/freestanding/` io_ops stub; CPython pack finder / `pack_bind` / ELF
 + util.gen VFS.
 **Owns:** why `pymergetic.util.gen` and in-bin build machinery exist.
 **Does not own:** pack format bits, WAMR engine details (see REGISTRY / CALLGRAPH / SOURCETREE).
@@ -101,15 +101,15 @@ Defaults: `ports/micropython/mpconfig_wasm.h`.
 |------|------|
 | `ports/common/` | C ABI boot/load/memcookie (µPy + CPython) |
 | `ports/micropython/modwasmmod.c` | Thin module tables + wrappers |
-| `ports/micropython/finder.c` | Pack path: VFS + HTTP `io` + metal-cdn `artifacts/` when configured |
+| `ports/micropython/finder.c` | Pack path: VFS + HTTP `io` + artifact CDN `artifacts/` when configured |
 | `ports/micropython/modutil.c` | Builtin `pymergetic.util` + `__path__` → host `src/` |
 | `ports/micropython/importhook.c` | `__import__` wrap + `ensure_inited` + auto-ready |
 | `ports/micropython/hostready.c` | Import → `bind_py` + attach typed export funobjs |
 | `ports/micropython/nativecall.c` | Typed resolve dispatch (`wasmmod.call` / pack funobjs) |
 | `ports/micropython/modgen.c` | `util.gen` / `wasmmod.gen` (GEN=1) |
 | `ports/cpython/` | CPython twin: `_wasmmod` + finder/packbind/ELF + `modgen.c` VFS + objhandle + import→ready |
-| `ports/metal/` | io_ops stub (weak DECLINE + yield + runtime init) + freestanding WAMR mk |
-| `extmod/metal/` | `pymergetic.metal` cards; faces from `util.gen` (`PM_MOD_EXPORT_C`); heap is `pymergetic.util.mem` |
+| `ports/freestanding/` | io_ops stub (weak DECLINE + yield + runtime init) + freestanding WAMR mk |
+| a kernel's `extmod/<tree>/` | its own cards, in its own repo; faces from `util.gen` (`PM_MOD_EXPORT_C`); heap is `pymergetic.util.mem` |
 
 ## Import → ready (no extrawurst)
 
@@ -133,7 +133,7 @@ Defaults: `ports/micropython/mpconfig_wasm.h`.
 
 ## Next
 
-Metal leaves on `pymergetic.metal`: `async` + `net.ip` + `net.tls` + `net.http`; faces from `util.gen`. Unix `METAL=1` boots. Heap stays `pymergetic.util.mem`. Next: RS ASGI, tap.
+Downstream kernels grow their own leaves (async, net stack) against these faces; wasmmod ships the border, not the stack. Heap stays `pymergetic.util.mem`.
 
 ## Anti-patterns
 

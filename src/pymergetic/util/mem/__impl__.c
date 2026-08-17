@@ -1,9 +1,7 @@
 /* pymergetic.util.mem — impl. Consumer face is generated __exports__.h.
  *
- * Ported from metal's proven pymergetic.metal.mem.{arena,tlsf} +
- * mem/port/mem.c (packages/metalpython/extmod/metal/...) down into
- * wasmmod, so that's the one place this logic lives — metal becomes a
- * consumer of this module instead of carrying its own copy. */
+ * The one arena + TLSF in the tree: a downstream card tree consumes this
+ * module rather than carrying its own copy. */
 #include "pymergetic/util/mem/__types__.h"
 #include "pymergetic/util/lock/__types__.h"
 
@@ -17,7 +15,7 @@
 enum {
     PM_UTIL_MEM_PAGE_SIZE = 4096u,
     PM_UTIL_MEM_MIN_SPAN = PM_UTIL_MEM_PAGE_SIZE * 8u,
-    /* Initial TLSF seed clamps — mirrors metal's initial_tlsf_bytes: keep
+    /* Initial TLSF seed clamps: keep
      * the hole the majority share at every scale so map() and later
      * heap_grow_pool() calls both still have room. */
     PM_UTIL_MEM_TLSF_INIT_MIN = 256u * 1024u,
@@ -29,6 +27,7 @@ struct pm_util_mem_arena {
     unsigned char *end;
     unsigned char *map_brk;  /* low side, bump-up, LIFO unmap */
     unsigned char *heap_brk; /* high side, bump-down; TLSF pools live above this */
+    size_t spare;            /* extra TLSF pools outside [base, end) */
     tlsf_t tlsf;             /* NULL until the first pool is seeded */
     pm_util_lock_t lock;
 };
@@ -118,6 +117,7 @@ pm_util_mem_arena_t *pm_util_mem_arena_create(void *base, size_t size) {
     arena->end = usable + usable_span;
     arena->map_brk = usable;
     arena->heap_brk = arena->end - want;
+    arena->spare = 0;
     arena->tlsf = tlsf_create_with_pool(arena->heap_brk, want);
     if (arena->tlsf == NULL) {
         return NULL;
@@ -266,6 +266,39 @@ size_t pm_util_mem_arena_heap_used(const pm_util_mem_arena_t *arena) {
     return (size_t)(arena->end - arena->heap_brk);
 }
 
+size_t pm_util_mem_arena_spare(const pm_util_mem_arena_t *arena) {
+    if (arena == NULL) {
+        return 0;
+    }
+    return arena->spare;
+}
+
+int32_t pm_util_mem_arena_add_pool(pm_util_mem_arena_t *arena, void *base, size_t size) {
+    uintptr_t lo;
+    uintptr_t hi;
+    size_t n;
+    if (arena == NULL || arena->tlsf == NULL || base == NULL || size == 0) {
+        return -1;
+    }
+    lo = align_up((uintptr_t)base, PM_UTIL_MEM_PAGE_SIZE);
+    hi = align_down((uintptr_t)base + size, PM_UTIL_MEM_PAGE_SIZE);
+    if (hi <= lo) {
+        return -1;
+    }
+    n = (size_t)(hi - lo);
+    if (n < (size_t)PM_UTIL_MEM_TLSF_INIT_MIN) {
+        return -1;
+    }
+    pm_util_lock_acquire(&arena->lock);
+    if (tlsf_add_pool(arena->tlsf, (void *)lo, n) == NULL) {
+        pm_util_lock_release(&arena->lock);
+        return -1;
+    }
+    arena->spare += n;
+    pm_util_lock_release(&arena->lock);
+    return 0;
+}
+
 size_t pm_util_mem_arena_hole(const pm_util_mem_arena_t *arena) {
     if (arena == NULL) {
         return 0;
@@ -293,5 +326,7 @@ PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_unmap, pm_util_mem_unmap, int32
 PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_bytes, pm_util_mem_arena_bytes, size_t(const pm_util_mem_arena_t *));
 PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_map_used, pm_util_mem_arena_map_used, size_t(const pm_util_mem_arena_t *));
 PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_heap_used, pm_util_mem_arena_heap_used, size_t(const pm_util_mem_arena_t *));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_spare, pm_util_mem_arena_spare, size_t(const pm_util_mem_arena_t *));
 PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_hole, pm_util_mem_arena_hole, size_t(const pm_util_mem_arena_t *));
 PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_overhead, pm_util_mem_arena_overhead, size_t(void));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_add_pool, pm_util_mem_arena_add_pool, int32_t(pm_util_mem_arena_t *, void *, size_t));

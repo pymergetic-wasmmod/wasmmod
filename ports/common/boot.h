@@ -11,12 +11,14 @@
 extern "C" {
 #endif
 
-/* Weak no-op; Metal provides strong (MICROPY_PY_METAL=1). Metal module __init__ calls this
- * after Python PM_MOD_BOOT* have queued extras. */
-int pm_metal_boot(void);
+/* Host-kernel readiness hook. Weak here and returns 0: a plain wasmmod seat has
+ * no kernel under it. A downstream kernel provides the strong symbol and boots
+ * itself on first call, so wasmmod needs no name from that tree.
+ * 0 = ready, nonzero = boot failed. */
+int pm_wasmmod_host_kernel_ready(void);
 
 /* Init registry + builtin io_ops + loader, seed kernel fqn version, start verify trust session.
- * Keeps an io table already installed (Metal). Returns 0 on success, -1 if loader_init fails.
+ * Keeps an io table the kernel already installed. Returns 0 on success, -1 if loader_init fails.
  * Idempotent. */
 int pm_wasmmod_host_boot(const char *kernel_fqn, const char *version);
 

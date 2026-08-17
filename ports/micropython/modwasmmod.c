@@ -8,9 +8,6 @@
 #ifndef MICROPY_PY_WASM
 #define MICROPY_PY_WASM (1)
 #endif
-#ifndef MICROPY_PY_METAL
-#define MICROPY_PY_METAL (0)
-#endif
 
 #include <string.h>
 
@@ -28,9 +25,6 @@
 #include "ports/micropython/mpconfig_wasm.h"
 #include "ports/micropython/nativecall.h"
 #include "ports/micropython/packbind.h"
-#if MICROPY_PY_METAL
-#include "extmod/metal/modmetal.h"
-#endif
 
 extern const mp_obj_module_t mp_module_pymergetic_wasmmod_guest;
 extern const mp_obj_module_t mp_module_pymergetic_wasmmod_net;
@@ -43,7 +37,7 @@ extern const mp_obj_module_t mp_module_pymergetic_wasmmod_net;
 #include "pymergetic/wasmmod/pack/source.h"
 #include "pymergetic/wasmmod/pack/zlib_env.h"
 #include "pymergetic/wasmmod/registry/__exports__.h"
-#include "pymergetic/wasmmod/verify/__exports__.h"
+#include "pymergetic/wasmmod/verify.h"
 
 #ifndef MICROPY_PY_WASM_ELF
 #define MICROPY_PY_WASM_ELF (0)
@@ -199,7 +193,7 @@ static const char *wasm_cdn_token_arg(size_t n_args, const mp_obj_t *args) {
     return mp_obj_str_get_str(args[1]);
 }
 
-/* wasm.cdn(url, token=None) — replace bases with one metal-cdn root. */
+/* wasm.cdn(url, token=None) — replace bases with one artifact CDN root. */
 static mp_obj_t mod_wasm_cdn(size_t n_args, const mp_obj_t *args) {
     mp_wasm_ensure_inited();
     if (!mp_obj_is_str(args[0])) {
@@ -591,9 +585,10 @@ static const mp_rom_map_elem_t mp_module_pymergetic_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___init__), MP_ROM_PTR(&mod_pymergetic___init___obj) },
     { MP_ROM_QSTR(MP_QSTR_wasmmod), MP_ROM_PTR(&mp_module_pymergetic_wasmmod) },
     { MP_ROM_QSTR(MP_QSTR_util), MP_ROM_PTR(&mp_module_pymergetic_util) },
-#if MICROPY_PY_METAL
-    { MP_ROM_QSTR(MP_QSTR_metal), MP_ROM_PTR(&mp_module_pymergetic_metal) },
-#endif
+    /* wasmmod's own children only. A downstream card tree hangs itself off this
+     * package through MP_REGISTER_MODULE plus the attr delegation below, which
+     * resolves pymergetic.<child> out of the registry — this dict never learns
+     * a downstream's name. */
 };
 static MP_DEFINE_CONST_DICT(mp_module_pymergetic_globals, mp_module_pymergetic_globals_table);
 

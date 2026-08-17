@@ -73,9 +73,9 @@ static int32_t case_configure_bases(void) {
         return fail("path");
     }
     pm_wasmmod_net_cdn_configure("http://cdn.example/", "tok");
-    if (pm_wasmmod_net_cdn_driver() != PM_WASMMOD_NET_CDN_DRIVER_METAL) {
+    if (pm_wasmmod_net_cdn_driver() != PM_WASMMOD_NET_CDN_DRIVER_ARTIFACTS) {
         teardown();
-        return fail("metal");
+        return fail("artifacts");
     }
     if (strcmp(pm_wasmmod_net_cdn_base(), "http://cdn.example") != 0) {
         teardown();
@@ -105,7 +105,7 @@ static int32_t case_configure_bases(void) {
         teardown();
         return fail("order");
     }
-    if (strcmp(pm_wasmmod_net_cdn_driver_name(), "metal-cdn") != 0) {
+    if (strcmp(pm_wasmmod_net_cdn_driver_name(), "artifacts") != 0) {
         teardown();
         return fail("name");
     }

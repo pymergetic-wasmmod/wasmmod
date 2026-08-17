@@ -6,12 +6,12 @@
  */
 #include "ports/micropython/modcdn.h"
 
-#include "extmod/metal/boot.h"
+#include "ports/common/boot.h"
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "pymergetic/wasmmod/io/__exports__.h"
 #include "pymergetic/wasmmod/net/cdn.h"
-#if defined(__EMSCRIPTEN__) || defined(PM_METAL_FIRMWARE)
+#if MICROPY_WASM_FREESTANDING
 #include "ports/micropython/importhook.h"
 #include "pymergetic/wasmmod/pack/alloc.h"
 #endif
@@ -21,20 +21,23 @@
 
 extern const mp_obj_module_t mp_module_pymergetic_wasmmod_guest;
 
-/* io.fetch bytes: cargo TUs malloc via alloc.h stdlib; firmware/emcc io
- * is compiled in the same image as this face (MICROPY_WASM_*). Unix
- * MICROPY_PY_METAL=1 redirects this TU's FREE to TLSF — do not mix. */
+/* io.fetch bytes: on a freestanding seat the io fill sits in this image and
+ * allocated from the image heap, so free it there. Elsewhere the fill is a
+ * cargo TU on libc malloc — and a host heap macro here would be the wrong
+ * allocator for those bytes. */
 static void cdn_fetch_free(uint8_t *buf) {
-#if defined(__EMSCRIPTEN__) || defined(PM_METAL_FIRMWARE)
+#if MICROPY_WASM_FREESTANDING
     MICROPY_WASM_FREE(buf);
 #else
     free(buf);
 #endif
 }
 
+/* A CDN fetch needs whatever kernel is under us up first. Weak default on a
+ * plain wasmmod seat says "nothing to boot, io is already up". */
 static void cdn_ensure(void) {
-    if (!pm_metal_ready() && pm_metal_boot() != 0) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("metal boot failed"));
+    if (pm_wasmmod_host_kernel_ready() != 0) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("host kernel boot failed"));
     }
 }
 
@@ -201,7 +204,9 @@ const mp_obj_module_t mp_module_pymergetic_wasmmod_net = {
     .globals = (mp_obj_dict_t *)&net_globals,
 };
 
-#if defined(__EMSCRIPTEN__) || defined(PM_METAL_FIRMWARE)
+/* A freestanding image leaves modwasmmod.c out, so the pymergetic.wasmmod
+ * package is defined here instead — same name, smaller face. */
+#if MICROPY_WASM_FREESTANDING
 static mp_obj_t wasmmod___init__(void) {
     mp_wasm_ensure_inited();
     return mp_const_none;

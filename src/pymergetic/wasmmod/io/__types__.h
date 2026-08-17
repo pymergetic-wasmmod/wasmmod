@@ -1,6 +1,6 @@
 /* pymergetic.wasmmod.io — host I/O table (fetch / probe / yield).
  *
- * Wait class (SOURCETREE.md): fetch / probe / request = async (Metal parks
+ * Wait class (SOURCETREE.md): fetch / probe / request = async (a kernel parks
  * inside the same symbol; upywm may block). yield = facade. uri/join/set/get
  * = sync. Not a second module tree; not an async engine.
  */
