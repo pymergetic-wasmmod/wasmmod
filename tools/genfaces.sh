@@ -6,10 +6,10 @@
 #
 #   genfaces.sh [--force] [ROOT ...]
 #
-# This crate's src/ and examples/ are always scanned. A downstream card tree —
-# a kernel's card tree, say — names itself as a ROOT argument; wasmmod keeps no
-# who depends on it. The stamp is keyed on the root set, so a wasmmod-only build
-# never convinces a later downstream build that its faces are already there.
+# This crate's src/ and examples/ are always scanned. A downstream card tree
+# names itself as a ROOT argument, so wasmmod keeps no list of who depends on
+# it. The stamp is keyed on the root set, so a wasmmod-only build never
+# convinces a later downstream build that its faces are already there.
 #
 # Progress goes to stderr; the make fragment that calls this reads stdout.
 
