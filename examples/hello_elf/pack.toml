@@ -1,0 +1,39 @@
+# Pack manifest for ELF container demo (see ../../docs/PACK.md).
+# Same package name as examples/hello, so it mounts that pack's Python surface
+# (hello/mount, the dir hello's card declares as its mount) rather than a second
+# copy of it.
+
+type = "package"
+name = "pymergetic.wasmmod_examples.hello"
+version = "0.1.0"
+impl = ["c"]
+comment = "ELF64 ET_REL twin of hello.wasm — same register/connect, no WAMR."
+
+[lifecycle]
+load = ""
+unload = ""
+
+[[exports]]
+func = "hello"
+sig = "i32"
+
+[[exports]]
+func = "add"
+sig = "i32_i32_i32"
+
+[python]
+mount = "../hello/mount"
+keep_source = true
+freeze = true
+targets = [
+  "upy:mpy6:sib31",
+  "upy:mpy6:sib63",
+]
+
+# Embed C/Python tree into wasmmod.source (Inspect locations without DWARF tools).
+[source]
+embed = true
+compress = true
+
+[pack]
+compress = true

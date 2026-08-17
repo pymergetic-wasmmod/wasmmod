@@ -27,7 +27,13 @@
 # `hello` / `add` are native guest exports bound onto this module at pack load
 # (see src/.../hello/__impl__.c). Declared under TYPE_CHECKING for the IDE.
 
-from typing import TYPE_CHECKING
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    # This module runs inside the pack, on seats whose MicroPython has no
+    # typing module (firmware, emcc). A bare import here fails the pack's own
+    # load, so the IDE-only branch below must cost nothing at runtime.
+    TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     def hello() -> int: ...

@@ -1,0 +1,19 @@
+# Positive micropython.* catalog: ticks_ms is registered; bad_upy still fails unknowns.
+
+type = "package"
+name = "pymergetic.wasmmod_examples.ticks"
+version = "0.1.0"
+impl = ["c"]
+comment = "ELF pack importing micropython.runtime.ticks_ms (host catalog)"
+
+[[exports]]
+func = "elapsed"
+sig = "i32"
+
+[[imports]]
+module = "micropython.runtime"
+func = "ticks_ms"
+
+[source]
+embed = true
+compress = true

@@ -1,0 +1,28 @@
+# Sibling of test_b2 under test_a2/ (nested monorepo layout).
+type = "package"
+name = "pymergetic.wasmmod_examples.test_a2.test_d2"
+version = "0.1.0"
+impl = ["c", "rs"]
+comment = "Nested sibling dep of test_c2."
+description = "Package test_a2.test_d2 from nested source tree."
+license = "MIT"
+
+[python]
+keep_source = true
+freeze = false
+
+[lifecycle]
+load = "mp_pack_load"
+unload = "mp_pack_unload"
+
+[[exports]]
+func = "d2_value"
+
+[[exports]]
+func = "d2_rs_value"
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+

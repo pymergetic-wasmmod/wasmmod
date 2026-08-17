@@ -1,0 +1,34 @@
+# Nested leaf under test_a2/test_b2/ (test_b2 is namespace-only, no pack.toml).
+type = "package"
+name = "pymergetic.wasmmod_examples.test_a2.test_b2.test_c2"
+version = "0.1.0"
+impl = ["c", "rs"]
+comment = "Nested leaf; [deps] sibling test_a2.test_d2."
+description = "Package test_a2.test_b2.test_c2 from nested source tree."
+license = "MIT"
+
+[python]
+keep_source = true
+freeze = false
+
+[lifecycle]
+load = "mp_pack_load"
+unload = "mp_pack_unload"
+
+[deps]
+"pymergetic.wasmmod_examples.test_a2.test_d2" = "0.1.0"
+
+[[exports]]
+func = "c2_answer"
+
+[[exports]]
+func = "c2_rs_tag"
+
+# Imports (test_a2.test_d2.d2_value) are auto-discovered from the compiled
+# wasm's own import section — no manifest declaration needed.
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+

@@ -1,0 +1,31 @@
+# Depends on the hello pack at runtime (guest→guest via wasmmod.imports).
+# CDN/install closure uses [deps] → wasmmod.deps (MPWD), not [[imports]].
+type = "package"
+name = "pymergetic.wasmmod_examples.client"
+version = "0.1.0"
+impl = ["c"]
+comment = "Calls hello.hello through a Wasm import forwarder."
+description = "Example client that imports hello over Wasm forwarders."
+license = "MIT"
+
+# Defaults: native.dir = "src" (src/client.c).
+
+[deps]
+# Dotted names must be quoted — bare keys nest in TOML.
+"pymergetic.wasmmod_examples.hello" = "0.1.0"
+
+[lifecycle]
+load = "mp_pack_load"
+unload = "mp_pack_unload"
+
+[[exports]]
+func = "use_hello"
+
+# Imports (hello.hello) are auto-discovered from the compiled wasm's own
+# import section — no manifest declaration needed.
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+

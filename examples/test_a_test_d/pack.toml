@@ -1,0 +1,28 @@
+# Sibling dep of test_a.test_b.test_c (C + Rust + Python).
+type = "package"
+name = "pymergetic.wasmmod_examples.test_a.test_d"
+version = "0.1.0"
+impl = ["c", "rs"]
+comment = "Dotted-tree sibling dep under test_a."
+description = "Package test_a.test_d required by test_a.test_b.test_c."
+license = "MIT"
+
+[python]
+keep_source = true
+freeze = false
+
+[lifecycle]
+load = "mp_pack_load"
+unload = "mp_pack_unload"
+
+[[exports]]
+func = "d_value"
+
+[[exports]]
+func = "d_rs_value"
+
+# Embed pack sources into wasmmod.source (CDN Inspect / locations).
+[source]
+embed = true
+compress = true
+
