@@ -101,6 +101,20 @@ PyObject *pm_cpy_native_call(const char *fqn, const char *export_name, PyObject 
         return PyLong_FromLong(((int32_t (*)(int32_t, int32_t, int32_t))p)(
             (int32_t)a0, (int32_t)a1, (int32_t)a2));
     }
+    if (strcmp(sig, "int32_t(uint32_t, uint16_t)") == 0) {
+        /* Host listen/connect faces (net.ssh.listen, net.http.asgi.listen). */
+        if (n_args != 2) {
+            PyErr_SetString(PyExc_TypeError, "native call arity");
+            return NULL;
+        }
+        long a0 = PyLong_AsLong(PyTuple_GET_ITEM(args_tuple, 0));
+        long a1 = PyLong_AsLong(PyTuple_GET_ITEM(args_tuple, 1));
+        if ((a0 == -1 || a1 == -1) && PyErr_Occurred()) {
+            return NULL;
+        }
+        return PyLong_FromLong(((int32_t (*)(uint32_t, uint16_t))p)(
+            (uint32_t)a0, (uint16_t)a1));
+    }
     if (strcmp(sig, "int32_t(const uint8_t *, uint32_t)") == 0) {
         if (n_args != 1) {
             PyErr_SetString(PyExc_TypeError, "bufptr needs one bytes-like");

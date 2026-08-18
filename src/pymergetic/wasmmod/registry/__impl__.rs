@@ -199,9 +199,12 @@ struct ModEntry {
 }
 
 /// How many `PM_MOD_EXPORT_*` registrations can be held before the heap
-/// exists. Around 330 across wasmmod's own C/RS cards and a downstream card
-/// tree today; the spare is headroom.
-const STAGE_MAX: usize = 512;
+/// exists. Around 330 across wasmmod's own C/RS cards were the old floor; the
+/// inspect/microdot/utemplate/services URLs and the asgi multi-instance exports
+/// pushed the live count higher, so this is headroom above that, counted
+/// against the `[StagedExport; STAGE_MAX]` `.bss` and only meaningful when the
+/// real total ever exceeds it again (`ndropped` > 0 is the tripwire).
+const STAGE_MAX: usize = 1024;
 
 /// One `PM_MOD_EXPORT_*` registration captured before the allocator is
 /// usable. Every field the macros pass is already static storage — string

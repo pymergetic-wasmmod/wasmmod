@@ -117,6 +117,15 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_int(((int32_t (*)(int32_t, int32_t))p)(
             (int32_t)mp_obj_get_int(args[0]), (int32_t)mp_obj_get_int(args[1])));
     }
+    if (strcmp(sig, "int32_t(uint32_t, uint16_t)") == 0) {
+        /* Host listen/connect faces (net.ssh.listen, net.http.asgi.listen):
+         * addr + port. Both are passed as ints on the resident-C ABI. */
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        return mp_obj_new_int(((int32_t (*)(uint32_t, uint16_t))p)(
+            (uint32_t)mp_obj_get_int(args[0]), (uint16_t)mp_obj_get_int(args[1])));
+    }
     if (strcmp(sig, "int32_t(int32_t, int32_t, int32_t)") == 0 || (sig[0] == '\0' && n_args == 3)) {
         pm_wasmmod_registry_value_t a[3];
         if (n_args != 3) {
