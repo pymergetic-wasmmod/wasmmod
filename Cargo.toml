@@ -28,6 +28,10 @@ required-features = ["gen"]
 
 [dependencies]
 toml = { version = "0.8", optional = true }
+# JSON index parsing for the CDN pack list/search/filter card
+# (`pymergetic.wasmmod.net.search`, impl = rs). `no_std`-safe with only `alloc`;
+# navigation uses `serde_json::Value` — no `serde` derive, no proc-macro.
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [profile.release]
 panic = "abort"

@@ -551,10 +551,45 @@ static mp_obj_t pyexport_lookup_attr(mp_obj_t module, const char *fqn, const cha
     return attr;
 }
 
+static int pyexport_ptr_in_pool(void *p, void *const *ptrs, uint32_t n) {
+    uint32_t i;
+    if (p == NULL) {
+        return 0;
+    }
+    for (i = 0; i < n; i++) {
+        if (ptrs[i] == p) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* True only for trampolines this TU installed. C/RS constructor pointers
+ * stay the muscle — wrapping a packbind funobj would replace them with a
+ * call back into native_call (infinite recursion on display.up / console.up). */
+static int pyexport_ptr_is_ours(void *p) {
+    return pyexport_ptr_in_pool(p, g_pyexport_v_ptrs, PM_PYEXPORT_V_POOL)
+        || pyexport_ptr_in_pool(p, g_pyexport_1_ptrs, PM_PYEXPORT_1_POOL)
+        || pyexport_ptr_in_pool(p, g_pyexport_2_ptrs, PM_PYEXPORT_2_POOL)
+        || pyexport_ptr_in_pool(p, g_pyexport_3_ptrs, PM_PYEXPORT_3_POOL)
+        || pyexport_ptr_in_pool(p, g_pyexport_i64_ptrs, PM_PYEXPORT_I64_POOL)
+        || pyexport_ptr_in_pool(p, g_pyexport_f32_ptrs, PM_PYEXPORT_F32_POOL)
+        || pyexport_ptr_in_pool(p, g_pyexport_f64_ptrs, PM_PYEXPORT_F64_POOL)
+        || pyexport_ptr_in_pool(p, g_pyexport_bufptr_ptrs, PM_PYEXPORT_BUFPTR_POOL)
+        || pyexport_ptr_in_pool(p, g_pyexport_mem_ptrs, PM_PYEXPORT_MEM_POOL)
+        || pyexport_ptr_in_pool(p, g_pyexport_obj_ptrs, PM_PYEXPORT_OBJ_POOL);
+}
+
 static int pyexport_bind_named(const char *fqn, mp_obj_t module, const char *export_name,
     const char *sig) {
+    void *cur;
     mp_obj_t attr = pyexport_lookup_attr(module, fqn, export_name);
     if (attr == MP_OBJ_NULL || !mp_obj_is_callable(attr)) {
+        return -1;
+    }
+    cur = pm_wasmmod_registry_resolve_native((const uint8_t *)fqn, (uint32_t)strlen(fqn),
+        (const uint8_t *)export_name, (uint32_t)strlen(export_name));
+    if (cur != NULL && !pyexport_ptr_is_ours(cur)) {
         return -1;
     }
     return pyexport_bind_one_sig(fqn, export_name, sig, attr);

@@ -167,6 +167,17 @@ fn mbedtls_cflags(build: &mut cc::Build, root: &str) {
         build.include(format!("{root}/ports/common"));
     } else {
         build.include(format!("{mpy}/ports/unix"));
+        // Lock the mbedtls struct ABI to the µPy mbedtls we link against.
+        // µPy defines MICROPY_PY_SSL_DTLS (py/mpconfig.h) from
+        // MICROPY_SSL_MBEDTLS && MICROPY_CONFIG_ROM_LEVEL_AT_LEAST_EXTRA_FEATURES,
+        // and the port's mbedtls_config_port.h pulls extmod/mbedtls/..._common.h,
+        // whose `#if MICROPY_PY_SSL_DTLS` block adds MBEDTLS_SSL_PROTO_DTLS +
+        // friends to mbedtls_ssl_context. Here io builds against the _same_
+        // linked mbedtls but without py/mpconfig.h's chain, so it would compile a
+        // shorter mbedtls_ssl_context (hostname at 0x160 vs the library's 0x190)
+        // and every TLS fetch would read conf's bytes as ssl->hostname → strlen
+        // garbage → SIGSEGV. Mirror the DTLS toggle for the non-bundled case.
+        build.define("MICROPY_PY_SSL_DTLS", "1");
     }
 }
 

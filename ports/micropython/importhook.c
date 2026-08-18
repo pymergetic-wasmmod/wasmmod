@@ -184,6 +184,48 @@ static mp_obj_t mp_wasm_finish_pack_import(size_t n_args, const mp_obj_t *args, 
 }
 
 static mp_obj_t mp_wasm_registry_module(const char *name);
+static void mp_wasm_link_registry_parents(const char *name, mp_obj_t leaf);
+
+/* C/RS muscle is already in the image. impl=py starts with empty native
+ * slots and must run the .py via default import. Do not js.fetch / CDN a
+ * resident card — that OOBs the emcc asyncify path after inspect. */
+static int mp_wasm_resident_muscle(const char *name) {
+    size_t nlen;
+    uint32_t n;
+    uint32_t i;
+    if (name == NULL || !mp_wasm_is_host_face(name)) {
+        return 0;
+    }
+    nlen = strlen(name);
+    n = pm_wasmmod_registry_export_count((const uint8_t *)name, (uint32_t)nlen);
+    for (i = 0; i < n; i++) {
+        uint8_t ename[128];
+        uint32_t elen = sizeof(ename);
+        uint8_t sig[160];
+        uint32_t slen = sizeof(sig);
+        pm_wasmmod_registry_export_kind_t kind = PM_WASMMOD_REGISTRY_EXPORT_FN;
+        if (!pm_wasmmod_registry_export_at((const uint8_t *)name, (uint32_t)nlen, i,
+                ename, &elen, &kind, sig, &slen)) {
+            continue;
+        }
+        if (pm_wasmmod_registry_resolve_native((const uint8_t *)name, (uint32_t)nlen,
+                ename, elen) != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static mp_obj_t mp_wasm_import_resident(size_t n_args, const mp_obj_t *args, const char *name) {
+    mp_obj_t native = mp_wasm_registry_module(name);
+    if (native == MP_OBJ_NULL) {
+        return MP_OBJ_NULL;
+    }
+    mp_wasm_link_registry_parents(name, native);
+    mp_obj_t res = mp_wasm_finish_pack_import(n_args, args, native);
+    mp_wasm_after_import(name);
+    return res;
+}
 
 /* Direct children of `name` in the registry. `into` may be NULL to just test
  * for existence; the walk stops at the first hit in that case. */
@@ -238,7 +280,7 @@ static void mp_wasm_ns_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     if (dest[0] != MP_OBJ_NULL) {
         return;
     }
-    if (attr == MP_QSTR___name__ || attr == MP_QSTR___path__) {
+    if (attr == MP_QSTR___name__) {
         dest[0] = mp_obj_new_str(ns->name, ns->nlen);
         return;
     }
@@ -415,6 +457,12 @@ mp_obj_t mp_wasm_builtin_import(size_t n_args, const mp_obj_t *args) {
         mp_map_elem_t *el = mp_map_lookup(&MP_STATE_VM(mp_loaded_modules_dict).map,
             MP_OBJ_NEW_QSTR(qstr_from_str(name)), MP_MAP_LOOKUP);
         if (el == NULL || el->value == MP_OBJ_NULL) {
+            if (mp_wasm_resident_muscle(name)) {
+                mp_obj_t res = mp_wasm_import_resident(n_args, args, name);
+                if (res != MP_OBJ_NULL) {
+                    return res;
+                }
+            }
             vstr_t path;
             if (mp_wasm_find_pack(name, &path)) {
                 vstr_clear(&path);

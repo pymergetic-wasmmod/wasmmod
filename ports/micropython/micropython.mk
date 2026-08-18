@@ -53,6 +53,10 @@ CFLAGS_EXTMOD += -include $(WASMMOD_ABS)/ports/micropython/mpconfig_wasm.h \
 	-DMICROPY_WASM_AOT_VERSION=$(MICROPY_WASM_AOT_VERSION) \
 	-DMICROPY_WASM_CONTAINERS=\"$(MICROPY_WASM_CONTAINERS)\"
 
+# Emscripten default rewind stack is 4 KiB. inspect body + default import
+# plus js.fetch overflow that and trap as "memory access out of bounds".
+JSFLAGS += -s ASYNCIFY_STACK_SIZE=65536
+
 SRC_WASMMOD = \
 	$(WASMMOD_DIR)/src/pymergetic/util/mem/__impl__.c \
 	$(WASMMOD_DIR)/third_party/tlsf/tlsf.c \

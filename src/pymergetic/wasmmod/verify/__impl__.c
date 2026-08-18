@@ -57,6 +57,16 @@ static bool trust_builtin_loaded;
 // Default on; wasm.verify(False) disables for the session (all loads).
 static bool verify_runtime_enabled = true;
 
+// --- Trust policy (MPTB allow/deny by sub-CA fingerprint) -----------------
+// Fixed-size fingerprint arrays; a policy only takes effect after a bundle
+// has been accepted (mp_wasm_trust_apply_bundle). Empty allow = any trusted
+// sub-CA; a denied sub-CA always fails regardless of allow.
+static uint8_t *policy_allow;
+static uint32_t policy_allow_n;
+static uint8_t *policy_deny;
+static uint32_t policy_deny_n;
+static bool policy_applied;
+
 void mp_wasm_set_verify_enabled(bool enabled) {
     verify_runtime_enabled = enabled;
 }
@@ -106,6 +116,188 @@ void mp_wasm_trust_init_session(void) {
     trust_clear_list();
     trust_builtin_armed = true;
     trust_builtin_loaded = false;
+    mp_wasm_trust_policy_reset();
+}
+
+void mp_wasm_trust_policy_reset(void) {
+    if (policy_allow != NULL) {
+        MICROPY_WASM_FREE(policy_allow);
+        policy_allow = NULL;
+    }
+    if (policy_deny != NULL) {
+        MICROPY_WASM_FREE(policy_deny);
+        policy_deny = NULL;
+    }
+    policy_allow_n = 0;
+    policy_deny_n = 0;
+    policy_applied = false;
+}
+
+bool mp_wasm_trust_policy_applied(void) {
+    return policy_applied;
+}
+
+uint32_t mp_wasm_trust_policy_allow_count(void) {
+    return policy_allow_n;
+}
+
+uint32_t mp_wasm_trust_policy_deny_count(void) {
+    return policy_deny_n;
+}
+
+// Bundle wire format (big-endian), see sign.py `trust-bundle` for the twin:
+//   offset 0 : "MPTB"
+//   4        : u16 version = 1
+//   6        : u16 type = 1 (TRUST)
+//   8        : u64 issued (unix secs)
+//   16       : u64 expires (unix secs)
+//   24       : u16 n_allow
+//   26       : u16 n_deny
+//   28       : allow  fps, 32 bytes each
+//   ...      : deny   fps, 32 bytes each
+//   ...      : u16 sig_len,  sig (ECDSA-P256 raw r||s)
+//   ...      : u32 chain_len, chain (DER certs leaf-first: leaf + revocation
+//                                   sub-CA + optional root)
+// Signature covers all bytes from "MPTB" up to (excluding) the sig_len field.
+#define MP_WASM_TRUST_BUNDLE_MAGIC "MPTB"
+#define MP_WASM_TRUST_BUNDLE_VER 1u
+#define MP_WASM_TRUST_BUNDLE_TYPE_TRUST 1u
+
+bool mp_wasm_trust_bundle_parse(const uint8_t *payload, uint32_t len,
+                                mp_wasm_trust_bundle_t *out,
+                                const uint8_t **sig, uint32_t *sig_len,
+                                const uint8_t **signer_chain, uint32_t *signer_chain_len,
+                                uint32_t *out_covered_len,
+                                char *errbuf, size_t errbuf_len) {
+    if (out != NULL) {
+        memset(out, 0, sizeof(*out));
+    }
+    if (sig != NULL) {
+        *sig = NULL;
+    }
+    if (sig_len != NULL) {
+        *sig_len = 0;
+    }
+    if (signer_chain != NULL) {
+        *signer_chain = NULL;
+    }
+    if (signer_chain_len != NULL) {
+        *signer_chain_len = 0;
+    }
+    if (out_covered_len != NULL) {
+        *out_covered_len = 0;
+    }
+    if (payload == NULL || out == NULL || sig == NULL || sig_len == NULL
+        || signer_chain == NULL || signer_chain_len == NULL || len < 28
+        || memcmp(payload, MP_WASM_TRUST_BUNDLE_MAGIC, 4) != 0) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "trust: bad bundle header");
+        }
+        return false;
+    }
+    uint32_t off = 4;
+    uint16_t ver = ((uint16_t)payload[off] << 8) | payload[off + 1];
+    off += 2;
+    uint16_t type = ((uint16_t)payload[off] << 8) | payload[off + 1];
+    off += 2;
+    if (ver != MP_WASM_TRUST_BUNDLE_VER || type != MP_WASM_TRUST_BUNDLE_TYPE_TRUST) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "trust: unsupported bundle version/type");
+        }
+        return false;
+    }
+    if (len < 28) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "trust: truncated bundle");
+        }
+        return false;
+    }
+    uint64_t issued = 0, expires = 0;
+    for (int b = 0; b < 8; b++) {
+        issued = (issued << 8) | payload[off + b];
+    }
+    off += 8;
+    for (int b = 0; b < 8; b++) {
+        expires = (expires << 8) | payload[off + b];
+    }
+    off += 8;
+    uint32_t n_allow = ((uint32_t)payload[off] << 8) | payload[off + 1];
+    off += 2;
+    uint32_t n_deny = ((uint32_t)payload[off] << 8) | payload[off + 1];
+    off += 2;
+
+    // Allow + deny fingerprints.
+    if (n_allow > 0) {
+        size_t bytes = (size_t)n_allow * MP_WASM_TRUST_FP_LEN;
+        if (bytes > (size_t)(len - off)) {
+            if (errbuf && errbuf_len) {
+                snprintf(errbuf, errbuf_len, "trust: truncated allow list");
+            }
+            return false;
+        }
+        out->allow = payload + off;
+        out->n_allow = n_allow;
+        off += (uint32_t)bytes;
+    }
+    if (n_deny > 0) {
+        size_t bytes = (size_t)n_deny * MP_WASM_TRUST_FP_LEN;
+        if (bytes > (size_t)(len - off)) {
+            if (errbuf && errbuf_len) {
+                snprintf(errbuf, errbuf_len, "trust: truncated deny list");
+            }
+            return false;
+        }
+        out->deny = payload + off;
+        out->n_deny = n_deny;
+        off += (uint32_t)bytes;
+    }
+
+    // Signature.
+    if (off + 2 > len) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "trust: missing signature");
+        }
+        return false;
+    }
+    if (out_covered_len != NULL) {
+        *out_covered_len = off;
+    }
+    uint32_t sl = ((uint32_t)payload[off] << 8) | payload[off + 1];
+    off += 2;
+    if (sl == 0 || off + sl > len) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "trust: bad signature length");
+        }
+        return false;
+    }
+    *sig = payload + off;
+    *sig_len = sl;
+    off += sl;
+
+    // Signer chain (length-prefixed DER, leaf-first).
+    if (off + 4 > len) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "trust: missing signer chain");
+        }
+        return false;
+    }
+    uint32_t cl = 0;
+    for (int b = 0; b < 4; b++) {
+        cl = (cl << 8) | payload[off + b];
+    }
+    off += 4;
+    if (cl == 0 || off + cl > len) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "trust: bad signer chain length");
+        }
+        return false;
+    }
+    *signer_chain = payload + off;
+    *signer_chain_len = cl;
+
+    out->issued = issued;
+    out->expires = expires;
+    return true;
 }
 
 // Overridden by BUILD/wasm_trust_ca.c when MICROPY_WASM_TRUST_CA is set.
@@ -313,6 +505,57 @@ static bool load_trust_cas(mbedtls_x509_crt *trust) {
     return any;
 }
 
+// Fingerprint a cert (SHA-256 over its DER bytes), same convention as the
+// CDN TrustService sha256 field. Writes 32 bytes to fp.
+static bool cert_sha256_fp(mbedtls_x509_crt *cert, uint8_t fp[MP_WASM_TRUST_FP_LEN]) {
+    if (cert == NULL || cert->raw.p == NULL || cert->raw.len == 0) {
+        return false;
+    }
+    return mbedtls_sha256(cert->raw.p, cert->raw.len, fp, 0) == 0;
+}
+
+static bool fp_in_list(const uint8_t *fp, const uint8_t *list, uint32_t n) {
+    for (uint32_t i = 0; i < n; i++) {
+        if (memcmp(fp, list + (size_t)i * MP_WASM_TRUST_FP_LEN, MP_WASM_TRUST_FP_LEN) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Sub-CA policy gate (revocation). A successfully chain-verified pack is
+// accepted only if its *issuing sub-CA* is allowed and not denied.
+//
+//   - No policy applied: pass through (back-compat; verify is identity-only).
+//   - Policy applied:
+//       deny wins:  denied sub-CA => fail closed.
+//       allow list non-empty: sub-CA must be listed.
+//       no intermediate under the leaf: reject (not issued under a listed
+//         sub-CA; only reached when a policy is actually enforcing).
+static bool policy_ok_for_chain(mbedtls_x509_crt *leaf) {
+    if (!policy_applied) {
+        return true;
+    }
+    // The sub-CA is the cert that issued the leaf, i.e. the first
+    // intermediate. If the leaf chains straight to a root there is no
+    // recoverable sub-CA identity to scope on -> reject under policy.
+    mbedtls_x509_crt *subca = leaf->next;
+    if (subca == NULL) {
+        return false;
+    }
+    uint8_t fp[MP_WASM_TRUST_FP_LEN];
+    if (!cert_sha256_fp(subca, fp)) {
+        return false;
+    }
+    if (policy_deny_n > 0 && fp_in_list(fp, policy_deny, policy_deny_n)) {
+        return false;
+    }
+    if (policy_allow_n > 0 && !fp_in_list(fp, policy_allow, policy_allow_n)) {
+        return false;
+    }
+    return true;
+}
+
 static bool verify_pki_chain(const uint8_t *bytes, uint32_t len, const uint8_t *sig, uint32_t sig_len,
     const uint8_t *chain_der, uint32_t chain_len) {
     if (chain_der == NULL || chain_len == 0 || trust_n == 0) {
@@ -334,6 +577,10 @@ static bool verify_pki_chain(const uint8_t *bytes, uint32_t len, const uint8_t *
 
     uint32_t flags = 0;
     if (mbedtls_x509_crt_verify(&leaf, &trust, NULL, NULL, &flags, NULL, NULL) != 0) {
+        goto done;
+    }
+
+    if (!policy_ok_for_chain(&leaf)) {
         goto done;
     }
 
@@ -443,6 +690,84 @@ bool mp_wasm_verify_sig(const uint8_t *bytes, uint32_t len, char *errbuf, size_t
     return true;
 }
 
+bool mp_wasm_trust_apply_bundle(const uint8_t *payload, uint32_t len, char *errbuf, size_t errbuf_len) {
+    mp_wasm_trust_bundle_t b;
+    const uint8_t *sig;
+    uint32_t sig_len;
+    const uint8_t *chain;
+    uint32_t chain_len;
+    uint32_t covered;
+    if (!mp_wasm_trust_bundle_parse(payload, len, &b, &sig, &sig_len, &chain, &chain_len,
+            &covered, errbuf, errbuf_len)) {
+        return false;
+    }
+
+    // Expiry / not-yet-valid check (informational). Bare-metal metal has no
+    // trusted wall clock, so the device does not gate on timestamps; the CDN /
+    // boot policy enforces freshness by serving only the current bundle.
+    (void)b.issued;
+    (void)b.expires;
+
+    // Authenticate the bundle: its signature covers [0, covered), and the
+    // signer leaf + revocation sub-CA must chain to a baked root. This reuses
+    // the pack verify path (includes the sub-CA allow/deny gate, so a bundle
+    // signed by a revoked sub-CA is itself rejected).
+#if MICROPY_SSL_MBEDTLS
+    if (!verify_pki_chain(payload, covered, sig, sig_len, chain, chain_len)) {
+        if (errbuf && errbuf_len) {
+            snprintf(errbuf, errbuf_len, "trust: bundle signature failed");
+        }
+        return false;
+    }
+#else
+    (void)covered;
+    if (errbuf && errbuf_len) {
+        snprintf(errbuf, errbuf_len, "trust: bundle verify requires mbedtls");
+    }
+    return false;
+#endif
+
+    // Install the policy (copy fingerprints out of the alias'd payload).
+    uint8_t *new_allow = NULL;
+    uint8_t *new_deny = NULL;
+    if (b.n_allow > 0) {
+        size_t bytes = (size_t)b.n_allow * MP_WASM_TRUST_FP_LEN;
+        new_allow = MICROPY_WASM_MALLOC(bytes);
+        if (new_allow == NULL) {
+            if (errbuf && errbuf_len) {
+                snprintf(errbuf, errbuf_len, "trust: OOM allow");
+            }
+            return false;
+        }
+        memcpy(new_allow, b.allow, bytes);
+    }
+    if (b.n_deny > 0) {
+        size_t bytes = (size_t)b.n_deny * MP_WASM_TRUST_FP_LEN;
+        new_deny = MICROPY_WASM_MALLOC(bytes);
+        if (new_deny == NULL) {
+            MICROPY_WASM_FREE(new_allow);
+            if (errbuf && errbuf_len) {
+                snprintf(errbuf, errbuf_len, "trust: OOM deny");
+            }
+            return false;
+        }
+        memcpy(new_deny, b.deny, bytes);
+    }
+
+    if (policy_allow != NULL) {
+        MICROPY_WASM_FREE(policy_allow);
+    }
+    if (policy_deny != NULL) {
+        MICROPY_WASM_FREE(policy_deny);
+    }
+    policy_allow = new_allow;
+    policy_allow_n = b.n_allow;
+    policy_deny = new_deny;
+    policy_deny_n = b.n_deny;
+    policy_applied = true;
+    return true;
+}
+
 #else // !MICROPY_WASM_VERIFY
 
 bool mp_wasm_sig_find(const uint8_t *bytes, uint32_t len, const uint8_t **payload, uint32_t *payload_len) {
@@ -483,6 +808,15 @@ bool mp_wasm_verify_sig(const uint8_t *bytes, uint32_t len, char *errbuf, size_t
     (void)len;
     if (errbuf && errbuf_len) {
         snprintf(errbuf, errbuf_len, "verify: disabled");
+    }
+    return false;
+}
+
+bool mp_wasm_trust_apply_bundle(const uint8_t *payload, uint32_t len, char *errbuf, size_t errbuf_len) {
+    (void)payload;
+    (void)len;
+    if (errbuf && errbuf_len) {
+        snprintf(errbuf, errbuf_len, "trust: verify disabled at build");
     }
     return false;
 }

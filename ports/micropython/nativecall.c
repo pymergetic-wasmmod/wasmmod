@@ -71,7 +71,8 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
     char sig[160];
     (void)fetch_sig(fqn, export_name, sig, sizeof(sig));
 
-    if (sig[0] == '\0' || strcmp(sig, "int32_t(void)") == 0) {
+    if (sig[0] == '\0' || strcmp(sig, "int32_t(void)") == 0
+        || strcmp(sig, "uint32_t(void)") == 0) {
         if (n_args != 0 && sig[0] != '\0') {
             mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
         }
@@ -81,6 +82,13 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             }
             return mp_obj_new_int(((int32_t (*)(void))p)());
         }
+    }
+    if (strcmp(sig, "void(void)") == 0) {
+        if (n_args != 0) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        ((void (*)(void))p)();
+        return mp_const_none;
     }
     if (strcmp(sig, "int32_t(int32_t)") == 0 || (sig[0] == '\0' && n_args == 1)) {
         pm_wasmmod_registry_value_t a;

@@ -84,4 +84,60 @@ bool mp_wasm_verify_bytes(const uint8_t *bytes, uint32_t len, const char *path_h
 // Explicit check of embedded wasmmod.sig (ignores session gate). Same crypto as load-time verify.
 bool mp_wasm_verify_sig(const uint8_t *bytes, uint32_t len, char *errbuf, size_t errbuf_len);
 
+// ---------------------------------------------------------------------------
+// Trust policy (sub-CA allow/deny revocation bundle, MPTB)
+//
+// A revocation *bundle* is a small signed document fetched (e.g. from the CDN)
+// once per session. Its signature chains to a baked root via the same
+// verify_pki_chain path a pack uses, so no second trust root is needed. When
+// applied it installs:
+//   allow[]  sub-CA SHA-256 fingerprints that may sign packs (empty = any)
+//   deny[]   sub-CA SHA-256 fingerprints that must be rejected
+// After a bundle is applied, a pack's *issuing sub-CA* (the cert that signed
+// its leaf, i.e. the intermediate below the root) must be allowed and not
+// denied. This is the revocation mechanism for the Root -> sub-CA -> leaf
+// hierarchy (Decision 1b: signed by a dedicated revocation sub-CA under root).
+// ---------------------------------------------------------------------------
+
+// Fixed-size SHA-256 sub-CA fingerprint (DER cert digest, same convention as
+// the CDN TrustService sha256 field).
+#define MP_WASM_TRUST_FP_LEN 32u
+
+typedef struct mp_wasm_trust_bundle_t {
+    uint64_t issued;    // unix seconds (load order guard; informational)
+    uint64_t expires;   // unix seconds; bundle invalid after this
+    const uint8_t *allow;   // MP_WASM_TRUST_FP_LEN * n_allow bytes
+    uint32_t n_allow;
+    const uint8_t *deny;    // MP_WASM_TRUST_FP_LEN * n_deny bytes
+    uint32_t n_deny;
+} mp_wasm_trust_bundle_t;
+
+// Parse the MPTB payload (pointers alias the payload; do not free separately).
+// Returns true on a well-formed envelope. On success *out_covered_len is the
+// number of bytes the bundle signature covers (data before sig_len). Signature
+// and signer-chain authentication happen in apply.
+bool mp_wasm_trust_bundle_parse(const uint8_t *payload, uint32_t len,
+                                mp_wasm_trust_bundle_t *out,
+                                const uint8_t **sig, uint32_t *sig_len,
+                                const uint8_t **signer_chain, uint32_t *signer_chain_len,
+                                uint32_t *out_covered_len,
+                                char *errbuf, size_t errbuf_len);
+
+// Authenticate + install a bundle. Verifies the bundle signature chains to a
+// baked root (verify_pki_chain), checks it is not expired, then replaces the
+// current allow/deny policy. Fails closed: on any crypto/format failure the
+// existing policy is left untouched (or cleared if bootstrap).
+bool mp_wasm_trust_apply_bundle(const uint8_t *payload, uint32_t len,
+                                char *errbuf, size_t errbuf_len);
+
+// Clear the installed policy (allow = any, deny = none). Called on session init.
+void mp_wasm_trust_policy_reset(void);
+
+// 1 if a policy has been applied this session (bundle accepted). 0 = none.
+bool mp_wasm_trust_policy_applied(void);
+
+// Counters for diagnostics: number of allow / deny entries installed.
+uint32_t mp_wasm_trust_policy_allow_count(void);
+uint32_t mp_wasm_trust_policy_deny_count(void);
+
 #endif // PYMERGETIC_WASMMOD_VERIFY_H

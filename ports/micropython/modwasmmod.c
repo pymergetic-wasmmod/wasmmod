@@ -33,6 +33,7 @@ extern const mp_obj_module_t mp_module_pymergetic_wasmmod_net;
 #include "pymergetic/wasmmod/api/__exports__.h"
 #include "pymergetic/wasmmod/io.h"
 #include "pymergetic/wasmmod/net/cdn.h"
+#include "pymergetic/wasmmod/net/search.h"
 #include "pymergetic/wasmmod/pack/alloc.h"
 #include "pymergetic/wasmmod/pack/source.h"
 #include "pymergetic/wasmmod/pack/zlib_env.h"
@@ -154,7 +155,7 @@ static mp_obj_t mod_wasm_test_count(mp_obj_t fqn_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_test_count_obj, mod_wasm_test_count);
 
-/* wasm.bench(fqn, name=None, iters=...) -> ns/op report (int) for one bench,
+/* wasm.bench(fqn, name=None, iters=...) → ns/op report (int) for one bench,
  * or the full ns/op report string for every bench of `fqn`. Benches are
  * informational and never gate: without a clock the registry returns a
  * negative BENCH_RC_* instead of a fake number. */
@@ -186,14 +187,14 @@ static mp_obj_t mod_wasm_bench(size_t n_args, const mp_obj_t *args) {
     /* Return a dict {report: str, bad: int} so the REPL can both show the
      * pretty text and count the not-clean benches. */
     mp_obj_t d = mp_obj_new_dict(2);
-    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_report),
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(qstr_from_str("report")),
         mp_obj_new_str((const char *)buf, len));
-    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_bad), mp_obj_new_int(bad));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(qstr_from_str("bad")), mp_obj_new_int(bad));
     return d;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_bench_obj, 1, 3, mod_wasm_bench);
 
-/* wasm.bench_all(iters=...) -> full ns/op sweep across every module with
+/* wasm.bench_all(iters=...) → full ns/op sweep across every module with
  * benches. Returns the aggregate report string; prints as a bonus. */
 static mp_obj_t mod_wasm_bench_all(size_t n_args, const mp_obj_t *args) {
     mp_wasm_ensure_inited();
@@ -226,7 +227,7 @@ static mp_obj_t mod_wasm_bench_all(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_bench_all_obj, 0, 1, mod_wasm_bench_all);
 
-/* wasm.benches(fqn) -> list of bench names for a module (or [] if none). */
+/* wasm.benches(fqn) → list of bench names for a module (or [] if none). */
 static mp_obj_t mod_wasm_benches(mp_obj_t fqn_in) {
     mp_wasm_ensure_inited();
     const char *fqn = mp_obj_str_get_str(fqn_in);
@@ -253,6 +254,7 @@ static mp_obj_t mod_wasm_bench_count(mp_obj_t fqn_in) {
         (const uint8_t *)fqn, (uint32_t)strlen(fqn)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_bench_count_obj, mod_wasm_bench_count);
+
 static mp_obj_t mod_wasm_path(void) {
     mp_wasm_ensure_inited();
     return mp_wasm_path_obj();
@@ -337,6 +339,96 @@ static mp_obj_t mod_wasm_cdn_reset(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_cdn_reset_obj, mod_wasm_cdn_reset);
 
+/* Snapshot the `channel` kwarg: None → "lead" (the RS card treats NULL/empty
+ * as lead too). NUL-terminated for the C ABI. */
+static const char *channel_str(const mp_arg_val_t *args, size_t index) {
+    mp_obj_t v = args[index].u_obj;
+    if (v == mp_const_none) {
+        return "lead";
+    }
+    if (!mp_obj_is_str(v)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("channel must be str"));
+    }
+    return mp_obj_str_get_str(v);
+}
+
+/* Snapshot an optional str kwarg: None → NULL (no constraint), otherwise the
+ * NUL-terminated string. `label` is the TypeError message when not a str. */
+static const char *opt_str_arg(const mp_arg_val_t *args, size_t index, const char *label) {
+    mp_obj_t v = args[index].u_obj;
+    if (v == mp_const_none) {
+        return NULL;
+    }
+    if (!mp_obj_is_str(v)) {
+        mp_raise_msg_varg(&mp_type_TypeError, MP_ERROR_TEXT("%s must be str"), label);
+    }
+    return mp_obj_str_get_str(v);
+}
+
+/* The pack search/filter/catalog face is a single RS card
+ * (`pymergetic.wasmmod.net.search`, impl = rs) that parses the fetched CDN
+ * index with serde_json. Catalog/search/filter hand the matching logic to the
+ * card via a count + name_at/meta_at result set, so host C, Rust, and this µPy
+ * face all share the same semantics. Only the `full=True` convenience decodes
+ * a pack's raw JSON entry here (Python's job); the matching itself is Rust's.
+ *
+ * Run a query, returning the matched count after raising on the card's error.
+ */
+static uint32_t wasm_search_raise_on_error(int32_t count) {
+    if (count >= 0) {
+        return (uint32_t)count;
+    }
+    uint8_t err[192];
+    pm_wasmmod_net_search_last_error(err, sizeof(err) - 1);
+    err[sizeof(err) - 1] = '\0';
+    mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("search: %s"), err);
+}
+
+/* Build a Python list from the card's current result set. full=True returns
+ * (name, meta) tuples where meta is the pack's parsed JSON entry. Meta is
+ * fetched into a grown heap buffer (a pack entry can exceed the 512-byte
+ * fixed scratch, so retry on the "required" handshake). */
+static mp_obj_t wasm_search_results(uint32_t count, int full) {
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    uint8_t namebuf[256];
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t lname = sizeof(namebuf);
+        if (!pm_wasmmod_net_search_name_at(i, namebuf, &lname) || lname == 0) {
+            continue;
+        }
+        mp_obj_t name = mp_obj_new_str((const char *)namebuf, lname);
+        if (!full) {
+            mp_obj_list_append(out, name);
+            continue;
+        }
+        uint32_t cap = 512;
+        uint8_t *meta = m_new(uint8_t, cap);
+        uint32_t n = cap;
+        while (!pm_wasmmod_net_search_meta_at(i, meta, &n)) {
+            if (n == 0) {
+                break;
+            }
+            cap = n + 1;
+            meta = m_renew(uint8_t, meta, cap - 1, cap);
+            n = cap;
+        }
+        if (n == 0) {
+            m_del(uint8_t, meta, cap);
+            mp_obj_list_append(out, name);
+            continue;
+        }
+        mp_obj_t text = mp_obj_new_str((const char *)meta, n);
+        m_del(uint8_t, meta, cap);
+        mp_obj_t json_mod = mp_import_name(qstr_from_str("json"), mp_const_none,
+            MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_t loads = mp_load_attr(json_mod, qstr_from_str("loads"));
+        mp_obj_t entry = mp_call_function_1(loads, text);
+        mp_obj_t pair[2] = { name, entry };
+        mp_obj_list_append(out, mp_obj_new_tuple(2, pair));
+    }
+    return out;
+}
+
 /* wasm.catalog(channel="lead") → list of package name strings. */
 static mp_obj_t mod_wasm_catalog(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     mp_wasm_ensure_inited();
@@ -347,45 +439,63 @@ static mp_obj_t mod_wasm_catalog(size_t n_args, const mp_obj_t *pos_args, mp_map
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
-    const char *channel = "lead";
-    if (args[ARG_channel].u_obj != mp_const_none) {
-        if (!mp_obj_is_str(args[ARG_channel].u_obj)) {
-            mp_raise_TypeError(MP_ERROR_TEXT("catalog: channel must be str"));
-        }
-        channel = mp_obj_str_get_str(args[ARG_channel].u_obj);
-    }
-
-    mp_obj_t json_mod = mp_import_name(qstr_from_str("json"), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
-    mp_obj_t loads = mp_load_attr(json_mod, qstr_from_str("loads"));
-
-    char err[160];
-    uint8_t *buf = NULL;
-    uint32_t len = 0;
-    if (pm_wasmmod_net_cdn_fetch_index(channel, &buf, &len, err, sizeof(err)) != 0) {
-        mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("%s"), err);
-    }
-
-    mp_obj_t text = mp_obj_new_str((const char *)buf, len);
-    MICROPY_WASM_FREE(buf);
-    mp_obj_t doc = mp_call_function_1(loads, text);
-    if (!mp_obj_is_dict_or_ordereddict(doc)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("catalog: index JSON root must be object"));
-    }
-    mp_obj_t packages = mp_obj_dict_get(doc, MP_OBJ_NEW_QSTR(MP_QSTR_packages));
-    if (!mp_obj_is_dict_or_ordereddict(packages)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("catalog: missing packages object"));
-    }
-    mp_map_t *map = mp_obj_dict_get_map(packages);
-    mp_obj_t out = mp_obj_new_list(0, NULL);
-    for (size_t i = 0; i < map->alloc; ++i) {
-        if (!mp_map_slot_is_filled(map, i)) {
-            continue;
-        }
-        mp_obj_list_append(out, map->table[i].key);
-    }
-    return out;
+    mp_uint_t count = wasm_search_raise_on_error(
+        pm_wasmmod_net_search_catalog(channel_str(args, ARG_channel)));
+    return wasm_search_results((uint32_t)count, 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_catalog_obj, 0, mod_wasm_catalog);
+
+/* wasm.search(q, *, channel="lead", full=False)
+ * Every pack whose name contains q (case-insensitive), sorted. full=True
+ * returns (name, meta) pairs. Matching is done by the RS search card. */
+static mp_obj_t mod_wasm_search(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    mp_wasm_ensure_inited();
+    enum { ARG_q, ARG_channel, ARG_full };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_q, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_channel, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_full, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_FALSE } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    if (!mp_obj_is_str(args[ARG_q].u_obj)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("search: q must be str"));
+    }
+    const char *q = mp_obj_str_get_str(args[ARG_q].u_obj);
+    mp_uint_t count = wasm_search_raise_on_error(
+        pm_wasmmod_net_search_search(q, channel_str(args, ARG_channel)));
+    return wasm_search_results((uint32_t)count, mp_obj_is_true(args[ARG_full].u_obj));
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_search_obj, 0, mod_wasm_search);
+
+/* wasm.filter(*, prefix=None, name_contains=None, kind=None, arch=None,
+ *            channel="lead", full=False)
+ * Filter the index by name prefix/substring and artifact kind/arch (Rust card
+ * looks across each package's artifacts[]). Returns names or (name, meta). */
+static mp_obj_t mod_wasm_filter(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    mp_wasm_ensure_inited();
+    enum { ARG_prefix, ARG_name_contains, ARG_kind, ARG_arch, ARG_channel, ARG_full };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_prefix, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_name_contains, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_kind, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_arch, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_channel, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_full, MP_ARG_OBJ, { .u_rom_obj = MP_ROM_FALSE } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    const char *prefix = opt_str_arg(args, ARG_prefix, "filter: prefix");
+    const char *name_contains = opt_str_arg(args, ARG_name_contains, "filter: name_contains");
+    const char *kind = opt_str_arg(args, ARG_kind, "filter: kind");
+    const char *arch = opt_str_arg(args, ARG_arch, "filter: arch");
+    mp_uint_t count = wasm_search_raise_on_error(pm_wasmmod_net_search_filter(
+        prefix, name_contains, kind, arch, channel_str(args, ARG_channel)));
+    return wasm_search_results((uint32_t)count, mp_obj_is_true(args[ARG_full].u_obj));
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_filter_obj, 0, mod_wasm_filter);
 
 /* wasm.session_id() / wasm.session_id(id) */
 static mp_obj_t mod_wasm_session_id(size_t n_args, const mp_obj_t *args) {
@@ -586,6 +696,107 @@ static mp_obj_t mod_wasm_verify(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_verify_obj, 1, 1, mod_wasm_verify);
 
+/* wasm.trust_add(cert, *, zlib_len=None) — add a custom trust anchor.
+ *
+ * cert is either a bytes/bytearray holding a CA cert (DER or PEM) or a leaf
+ * SPKI (pinned public key), or a filesystem path to such a file. zlib_len only
+ * applies to bytes input and says the payload is zlib-compressed with that
+ * uncompressed size (the generated wasm_trust_ca.c framing). Returns the new
+ * trust-anchor count.
+ */
+static mp_obj_t mod_wasm_trust_add(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    mp_wasm_ensure_inited();
+    enum { ARG_cert, ARG_zlib_len };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_cert, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+        { MP_QSTR_zlib_len, MP_ARG_KW_ONLY | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    if (mp_obj_is_str(args[ARG_cert].u_obj)) {
+        const char *path = mp_obj_str_get_str(args[ARG_cert].u_obj);
+        uint8_t *bytes = NULL;
+        size_t blen = 0;
+        if (!mp_wasm_read_file(path, &bytes, &blen)) {
+            mp_raise_OSError_with_filename(MP_ENOENT, path);
+        }
+        bool ok = mp_wasm_trust_add(bytes, blen);
+        m_del(uint8_t, bytes, blen);
+        if (!ok) {
+            mp_raise_ValueError(MP_ERROR_TEXT("trust_add: anchor not accepted"));
+        }
+        return mp_obj_new_int_from_uint(mp_wasm_trust_count());
+    }
+
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(args[ARG_cert].u_obj, &bufinfo, MP_BUFFER_READ);
+
+    size_t uncompressed = 0;
+    if (args[ARG_zlib_len].u_obj != mp_const_none) {
+        uncompressed = mp_obj_get_int(args[ARG_zlib_len].u_obj);
+    }
+    bool ok;
+    if (uncompressed > 0 && uncompressed != bufinfo.len) {
+        ok = mp_wasm_trust_add_blob((const uint8_t *)bufinfo.buf, (uint32_t)bufinfo.len,
+            (uint32_t)uncompressed);
+    } else {
+        ok = mp_wasm_trust_add((const uint8_t *)bufinfo.buf, bufinfo.len);
+    }
+    if (!ok) {
+        mp_raise_ValueError(MP_ERROR_TEXT("trust_add: anchor not accepted"));
+    }
+    return mp_obj_new_int_from_uint(mp_wasm_trust_count());
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_trust_add_obj, 1, mod_wasm_trust_add);
+
+/* wasm.trust_apply(payload) — authenticate + install an MPTB revocation bundle.
+ *
+ * Returns True once the bundle has been applied for the session (see
+ * trust_policy()). Raises ValueError with the cryptographic reason otherwise;
+ * a failed apply leaves the current policy untouched (fails closed).
+ */
+static mp_obj_t mod_wasm_trust_apply(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_payload };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_payload, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_rom_obj = MP_ROM_NONE } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(args[ARG_payload].u_obj, &bufinfo, MP_BUFFER_READ);
+    char err[200];
+    if (!mp_wasm_trust_apply_bundle((const uint8_t *)bufinfo.buf, (uint32_t)bufinfo.len,
+            err, sizeof(err))) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("trust_apply: %s"), err);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(mod_wasm_trust_apply_obj, 1, mod_wasm_trust_apply);
+
+/* wasm.trust_reset() — clear the installed policy for the session. */
+static mp_obj_t mod_wasm_trust_reset(void) {
+    mp_wasm_ensure_inited();
+    mp_wasm_trust_policy_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_trust_reset_obj, mod_wasm_trust_reset);
+
+/* wasm.trust_policy() → {applied: bool, allow: int, deny: int}. */
+static mp_obj_t mod_wasm_trust_policy(void) {
+    mp_wasm_ensure_inited();
+    mp_obj_t d = mp_obj_new_dict(3);
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_applied),
+        mp_obj_new_bool(mp_wasm_trust_policy_applied()));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_allow),
+        mp_obj_new_int_from_uint(mp_wasm_trust_policy_allow_count()));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_deny),
+        mp_obj_new_int_from_uint(mp_wasm_trust_policy_deny_count()));
+    return d;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_trust_policy_obj, mod_wasm_trust_policy);
+
 static int source_list_cb(void *ctx, const char *path, size_t path_len) {
     mp_obj_t list = *(mp_obj_t *)ctx;
     mp_obj_list_append(list, mp_obj_new_str(path, path_len));
@@ -643,6 +854,10 @@ static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_call), MP_ROM_PTR(&mod_wasm_call_obj) },
     { MP_ROM_QSTR(MP_QSTR_connect), MP_ROM_PTR(&mod_wasm_connect_obj) },
     { MP_ROM_QSTR(MP_QSTR_verify), MP_ROM_PTR(&mod_wasm_verify_obj) },
+    { MP_ROM_QSTR(MP_QSTR_trust_add), MP_ROM_PTR(&mod_wasm_trust_add_obj) },
+    { MP_ROM_QSTR(MP_QSTR_trust_apply), MP_ROM_PTR(&mod_wasm_trust_apply_obj) },
+    { MP_ROM_QSTR(MP_QSTR_trust_reset), MP_ROM_PTR(&mod_wasm_trust_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_trust_policy), MP_ROM_PTR(&mod_wasm_trust_policy_obj) },
     { MP_ROM_QSTR(MP_QSTR_source_list), MP_ROM_PTR(&mod_wasm_source_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_path), MP_ROM_PTR(&mod_wasm_path_obj_fun) },
     { MP_ROM_QSTR(MP_QSTR_path_append), MP_ROM_PTR(&mod_wasm_path_append_obj) },
@@ -650,6 +865,8 @@ static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_cdn_prepend), MP_ROM_PTR(&mod_wasm_cdn_prepend_obj) },
     { MP_ROM_QSTR(MP_QSTR_cdn_reset), MP_ROM_PTR(&mod_wasm_cdn_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_catalog), MP_ROM_PTR(&mod_wasm_catalog_obj) },
+    { MP_ROM_QSTR(MP_QSTR_search), MP_ROM_PTR(&mod_wasm_search_obj) },
+    { MP_ROM_QSTR(MP_QSTR_filter), MP_ROM_PTR(&mod_wasm_filter_obj) },
     { MP_ROM_QSTR(MP_QSTR_session_id), MP_ROM_PTR(&mod_wasm_session_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_publish), MP_ROM_PTR(&mod_wasm_publish_obj) },
     { MP_ROM_QSTR(MP_QSTR_publish_file), MP_ROM_PTR(&mod_wasm_publish_file_obj) },

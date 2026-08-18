@@ -352,7 +352,10 @@ int32_t pm_wasmmod_net_cdn_fetch_pack_ex(const char *name, const char *version, 
             return 0;
         }
     }
-    err_set(errbuf, errbuf_len, "cdn: package not found");
+    /* Last io.fetch / artifact check already wrote why. Do not hide it. */
+    if (errbuf == NULL || errbuf_len == 0 || errbuf[0] == '\0') {
+        err_set(errbuf, errbuf_len, "cdn: package not found");
+    }
     return -1;
 }
 
