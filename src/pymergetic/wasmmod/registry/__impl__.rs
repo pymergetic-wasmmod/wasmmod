@@ -588,12 +588,21 @@ impl Table {
             .map(|b| &b.body)
     }
 
-    fn live_modules(&self) -> Vec<&str> {
+    fn live_module_count(&self) -> u32 {
+        self.entries.iter().filter(|e| e.live).count() as u32
+    }
+
+    /// Indexed access to the N-th live module FQN. Allocation-free: called from
+    /// C host-face walks (import-time) on seats where the backing allocator is
+    /// a one-shot bump shared with the WASM guest — a per-query snapshot Vec
+    /// here allocates on every module_at/count and can fail mid-import when the
+    /// slab is under WASM+CDN pressure (firmware prove OSError / hang).
+    fn live_module_at(&self, index: u32) -> Option<&str> {
         self.entries
             .iter()
             .filter(|e| e.live)
+            .nth(index as usize)
             .map(|e| e.fqn.as_str())
-            .collect()
     }
 
     fn exports_of(&self, fqn: &str) -> Option<&[Export]> {
@@ -883,7 +892,7 @@ fn copy_str_to_buf(src: &str, buf: *mut u8, buf_len_io: *mut u32) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pm_wasmmod_registry_module_count() -> u32 {
-    TABLE.lock().live_modules().len() as u32
+    TABLE.lock().live_module_count()
 }
 
 #[unsafe(no_mangle)]
@@ -893,8 +902,7 @@ pub unsafe extern "C" fn pm_wasmmod_registry_module_at(
     buf_len_io: *mut u32,
 ) -> i32 {
     let table = TABLE.lock();
-    let mods = table.live_modules();
-    let Some(fqn) = mods.get(index as usize) else {
+    let Some(fqn) = table.live_module_at(index) else {
         return 0;
     };
     copy_str_to_buf(fqn, buf, buf_len_io)

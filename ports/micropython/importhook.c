@@ -9,6 +9,7 @@
 #include "py/obj.h"
 #include "py/objlist.h"
 #include "py/objmodule.h"
+#include "py/objstr.h"
 #include "py/qstr.h"
 #include "py/runtime.h"
 
@@ -25,6 +26,7 @@
 #endif
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t mp_wasm_prev_import);
+MP_REGISTER_ROOT_POINTER(mp_obj_t mp_wasm_catalog_cache);
 
 static int mp_wasm_hook_depth;
 static int mp_wasm_inited;
@@ -451,6 +453,114 @@ void mp_wasm_pymergetic_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 }
 #endif
 
+/* µPy-native CDN catalog namespace check, mirroring the `packages()` fold in
+ * modmetal.c: every µPy seat has the `json` module and `wasmmod.net.cdn`.
+ * `fetch_index` returns the channel index bytes; `json.loads` parses it into
+ * the `packages` dict — no serde / Rust card is dragged in. The parsed dict is
+ * fetched once and cached for the seat lifetime (like `packages_catalog()`),
+ * so a failed import doesn't re-hit the network each time. A fetch/parse
+ * failure (offline seat, CDN without an index, transient) caches the failure
+ * sentinel and reports no namespaces: a namespace import must never couple to
+ * a reachable index, or a plain unknown name would raise OSError mid-import
+ * instead of a normal ImportError.
+ *
+ * The cdn + json modules are resolved from sys.modules / builtins, not via a
+ * re-entrant `mp_import_name`: this can run while the hook is mid-import, and
+ * importing the bare `pymergetic` umbrella would publish it as a RESIDENT
+ * host-face card, poisoning every guest pack in its subtree. */
+static mp_obj_t mp_wasm_sys_module(const char *name) {
+    mp_map_t *map = &MP_STATE_VM(mp_loaded_modules_dict).map;
+    mp_map_elem_t *el = mp_map_lookup(map, MP_OBJ_NEW_QSTR(qstr_from_str(name)),
+        MP_MAP_LOOKUP);
+    if (el == NULL || el->value == MP_OBJ_NULL) {
+        return MP_OBJ_NULL;
+    }
+    return el->value;
+}
+
+static mp_obj_t mp_wasm_catalog_packages(void) {
+    if (MP_STATE_VM(mp_wasm_catalog_cache) == MP_OBJ_NULL) {
+        nlr_buf_t nlr;
+        mp_obj_t packages = mp_const_none;
+        if (nlr_push(&nlr) == 0) {
+            mp_obj_t cdnmod = mp_wasm_sys_module("pymergetic.wasmmod.net.cdn");
+            mp_obj_t json_mod = mp_wasm_sys_module("json");
+            if (json_mod == MP_OBJ_NULL) {
+                json_mod = mp_module_get_builtin(qstr_from_str("json"), false);
+                if (json_mod == MP_OBJ_NULL) {
+                    json_mod = mp_module_get_builtin(qstr_from_str("json"), true);
+                }
+            }
+            if (cdnmod != MP_OBJ_NULL && json_mod != MP_OBJ_NULL) {
+                mp_obj_t fetch = mp_load_attr(cdnmod, qstr_from_str("fetch_index"));
+                mp_obj_t bytes = mp_call_function_1(fetch, mp_obj_new_str("lead", 4));
+                mp_obj_t loads = mp_load_attr(json_mod, qstr_from_str("loads"));
+                mp_obj_t doc = mp_call_function_1(loads, bytes);
+                packages = mp_obj_dict_get(doc, MP_OBJ_NEW_QSTR(qstr_from_str("packages")));
+            }
+            nlr_pop();
+        } else {
+            packages = mp_const_none;
+        }
+        MP_STATE_VM(mp_wasm_catalog_cache) = packages;
+    }
+    return MP_STATE_VM(mp_wasm_catalog_cache);
+}
+
+/* Does any catalog pack live at `name.X`? i.e. is `name` a namespace root.
+ * A missing/unreachable index reports no namespaces (see above). */
+static bool mp_wasm_catalog_ns_has(const char *name) {
+    size_t nlen = strlen(name);
+    mp_obj_t packages = mp_wasm_catalog_packages();
+    if (packages == mp_const_none) {
+        return false;
+    }
+    /* Dict keys from json.loads are str objects (not necessarily interned
+     * qstrs); iterate with a bytes extraction that accepts either. */
+    mp_map_t *map = mp_obj_dict_get_map(packages);
+    for (size_t i = 0; i < map->alloc; ++i) {
+        if (!mp_map_slot_is_filled(map, i)) {
+            continue;
+        }
+        mp_obj_t kobj = map->table[i].key;
+        if (mp_obj_is_qstr(kobj)) {
+            size_t klen;
+            const char *key = (const char *)qstr_data(MP_OBJ_QSTR_VALUE(kobj), &klen);
+            if (klen > nlen && key[nlen] == '.' && memcmp(key, name, nlen) == 0) {
+                return true;
+            }
+        } else if (mp_obj_is_str(kobj)) {
+            GET_STR_DATA_LEN(kobj, key, klen);
+            if (klen > nlen && key[nlen] == '.' && memcmp(key, name, nlen) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* PEP 420 namespace package. A dotted name that owns no code of its own but
+ * is a real container in the CDN catalog (some pack lives at `name.X`) imports
+ * as a writable namespace whose children resolve lazily on attribute access —
+ * `mp_wasm_pymergetic_attr` / the registry fall through to a CDN fetch for
+ * guest leaves. Deliberately catalog-backed: we never invent a namespace for a
+ * name the catalog does not know, so a typo or a `from X import Y` child stays
+ * a normal ImportError instead of binding the import name to an empty module. */
+static mp_obj_t mp_wasm_build_namespace(const char *name, size_t nlen) {
+    qstr q = qstr_from_strn(name, nlen);
+    mp_obj_t mod = mp_obj_new_module(q);
+    mp_obj_module_t *m = MP_OBJ_TO_PTR(mod);
+    mp_obj_t g = MP_OBJ_FROM_PTR(m->globals);
+    if (mp_map_lookup(&m->globals->map, MP_OBJ_NEW_QSTR(MP_QSTR___path__), MP_MAP_LOOKUP)
+        == NULL) {
+        mp_obj_dict_store(g, MP_OBJ_NEW_QSTR(MP_QSTR___path__),
+            mp_obj_new_str(name, nlen));
+    }
+    mp_obj_dict_store(MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_loaded_modules_dict)),
+        MP_OBJ_NEW_QSTR(q), mod);
+    return mod;
+}
+
 mp_obj_t mp_wasm_builtin_import(size_t n_args, const mp_obj_t *args) {
     if (mp_wasm_hook_depth == 0 && n_args >= 1 && mp_obj_is_str(args[0])) {
         const char *name = mp_obj_str_get_str(args[0]);
@@ -508,6 +618,21 @@ mp_obj_t mp_wasm_builtin_import(size_t n_args, const mp_obj_t *args) {
         mp_wasm_link_registry_parents(name, native);
         mp_obj_t res = mp_wasm_finish_pack_import(n_args, args, native);
         mp_wasm_after_import(name);
+        return res;
+    }
+    /* PEP 420 container: a dotted name with a real pack-bearing subtree in the
+     * CDN catalog, but no code and (on a cold seat) no loaded leaf. Import it
+     * as a namespace package; children resolve lazily. A plain unknown name, or
+     * a `from X import Y` child, fails the catalog check and stays a normal
+     * ImportError. The check is µPy-native over cdn.fetch_index + json (upy
+     * has json on board); no serde card is involved. */
+    if (strchr(name, '.') != NULL && mp_wasm_catalog_ns_has(name)) {
+        mp_obj_t ns = mp_wasm_build_namespace(name, strlen(name));
+        mp_obj_t res = mp_wasm_finish_pack_import(n_args, args, ns);
+        /* Deliberately no mp_wasm_after_import: publishing this container as a
+         * host presence/card would make every child pack a "host face" and
+         * block the leaf fetch (`import a.b.leaf`). A namespace owns no own
+         * exports and must not shadow its subtree. */
         return res;
     }
     mp_wasm_hook_depth++;
