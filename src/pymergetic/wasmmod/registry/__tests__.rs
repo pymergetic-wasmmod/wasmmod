@@ -7,6 +7,12 @@ fn publish(fqn: &str, kind: pm_wasmmod_registry_container_kind_t) -> pm_wasmmod_
     TABLE.lock().publish(fqn, kind)
 }
 
+/// Ensure a module is live, mirroring what the native registrar does via
+/// `ensure_resident` (the wasm registrar does not auto-ensure).
+fn pub_ensure(fqn: &str) {
+    TABLE.lock().ensure_resident(fqn);
+}
+
 fn version_set_and_query_roundtrip() {
     let _ = publish("test.ver", pm_wasmmod_registry_container_kind_t::Resident);
     assert!(TABLE.lock().set_version("test.ver", "1.2.3"));
@@ -298,4 +304,271 @@ crate::PM_MOD_TEST_RS!("pymergetic.wasmmod.registry", "gc_visit_only_sees_live_o
 fn test_gc_visit_only_sees_live_obj_exports() {
     assert_eq!(unsafe { case_gc_visit_only_sees_live_obj_exports() }, 0);
 }
+
+// --- bench registry ------------------------------------------------------
+//
+// A bench is `fn(iterations) -> i32`; the registry times `iterations` ops.
+// The clock is a per-seat fill set through `pm_wasmmod_registry_set_bench_clock`.
+// These cases use a deterministic fake clock so ns/op is exact: the clock
+// advances 1024 us per call, which is 1024*1000 ns for any non-zero op count.
+
+static mut FAKE_CLOCK: u64 = 0;
+
+unsafe extern "C" fn fake_clock_us() -> u64 {
+    unsafe {
+        FAKE_CLOCK += 1024;
+        FAKE_CLOCK
+    }
+}
+
+/// One op: must be called exactly `iterations` times across warmup + measure.
+unsafe extern "C" fn case_bench_add(iterations: u64) -> i32 {
+    for _ in 0..iterations {
+        core::hint::black_box(1u64.wrapping_add(1));
+    }
+    0
+}
+
+unsafe extern "C" fn case_bench_fail(iterations: u64) -> i32 {
+    let _ = iterations;
+    -1
+}
+
+fn bench_fqn() -> &'static str {
+    "pymergetic.wasmmod.registry.__bench_delegate"
+}
+
+/// Register `add`/`fail` under `bench_fqn`.
+fn bench_register_local() {
+    unsafe {
+        assert_eq!(
+            pm_wasmmod_registry_bench_register(
+                bench_fqn().as_ptr(),
+                bench_fqn().len() as u32,
+                b"add".as_ptr(),
+                3,
+                Some(case_bench_add),
+            ),
+            1
+        );
+        assert_eq!(
+            pm_wasmmod_registry_bench_register(
+                bench_fqn().as_ptr(),
+                bench_fqn().len() as u32,
+                b"fail".as_ptr(),
+                4,
+                Some(case_bench_fail),
+            ),
+            1
+        );
+    }
+}
+
+fn bench_roundtrip_register_and_count() {
+    unsafe {
+        assert_eq!(
+            pm_wasmmod_registry_bench_count(bench_fqn().as_ptr(), bench_fqn().len() as u32),
+            2
+        );
+    }
+}
+
+fn bench_clock_owned_by_registry() {
+    unsafe {
+        // No clock installed → bench reports "no clock" (-1), not a number.
+        let rc = pm_wasmmod_registry_bench_run(
+            bench_fqn().as_ptr(),
+            bench_fqn().len() as u32,
+            b"add".as_ptr(),
+            3,
+            10,
+        );
+        assert_eq!(rc, -1);
+
+        pm_wasmmod_registry_set_bench_clock(Some(fake_clock_us));
+        // fake_clock ticks +1024 us per call. Warmup does not touch the clock,
+        // so the measured lap is exactly the two `bench_now()` grabs in
+        // time_bench_ns → 1024 us of growth → 1024*1000/16 = 64000 ns/op.
+        let rc = pm_wasmmod_registry_bench_run(
+            bench_fqn().as_ptr(),
+            bench_fqn().len() as u32,
+            b"add".as_ptr(),
+            3,
+            16,
+        );
+        assert_eq!(rc, 64000);
+
+        // A failing bench surfaces as FAILED (-3), not a number.
+        let rc = pm_wasmmod_registry_bench_run(
+            bench_fqn().as_ptr(),
+            bench_fqn().len() as u32,
+            b"fail".as_ptr(),
+            4,
+            8,
+        );
+        assert_eq!(rc, -3);
+        pm_wasmmod_registry_set_bench_clock(None);
+    }
+}
+
+/// One serial case: register, count, then the no-clock / timed / FAILED paths.
+/// Kept as a single `#[test]` because the fake clock is a shared static and
+/// the registry table is global — batching would race both.
+unsafe extern "C" fn case_bench_register_times_and_clears() -> i32 {
+    unsafe { FAKE_CLOCK = 0 };
+    case(|| {
+        bench_register_local();
+        bench_roundtrip_register_and_count();
+        bench_clock_owned_by_registry();
+    })
+}
+crate::PM_MOD_TEST_RS!("pymergetic.wasmmod.registry", "bench_register_times_and_clears", case_bench_register_times_and_clears);
+#[test]
+fn test_bench_register_times_and_clears() {
+    assert_eq!(unsafe { case_bench_register_times_and_clears() }, 0);
+}
+
+// --- wasm-guest bench dispatcher -------------------------------------------
+// A `WasmExport` bench is timed through the loader's bench-runner hook, the
+// same way a guest pack test goes through `WASM_TEST_RUNNER`. This proves the
+// fill actually routes (and that a missing runner surfaces FAILED, not a
+// silent pass / fake number).
+
+/// Stub state: recorded export + iterations it was asked to drive, call count.
+/// Mutex-guarded (std is available in tests) so no `static mut` refs.
+static STUB: std::sync::Mutex<Stub> = std::sync::Mutex::new(Stub {
+    export: [0; 32],
+    export_len: 0,
+    iterations: 0,
+    calls: 0,
+});
+
+#[derive(Clone)]
+struct Stub {
+    export: [u8; 32],
+    export_len: usize,
+    iterations: u64,
+    calls: u32,
+}
+
+/// Mirrors what the loader trampoline does: drive the guest export.
+unsafe extern "C" fn stub_bench_runner(
+    _fqn: *const u8,
+    _fqn_len: u32,
+    export_name: *const u8,
+    export_len: u32,
+    iterations: u64,
+) -> i32 {
+    unsafe {
+        let mut s = STUB.lock().unwrap_or_else(|e| e.into_inner());
+        s.export_len = (export_len as usize).min(s.export.len());
+        core::ptr::copy_nonoverlapping(
+            export_name,
+            s.export.as_mut_ptr(),
+            s.export_len,
+        );
+        s.iterations = iterations;
+        s.calls += 1;
+        for _ in 0..iterations {
+            core::hint::black_box(2u64.wrapping_mul(2));
+        }
+    }
+    0
+}
+
+fn stub_snapshot() -> Stub {
+    STUB.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+fn stub_reset() {
+    *STUB.lock().unwrap_or_else(|e| e.into_inner()) = Stub {
+        export: [0; 32],
+        export_len: 0,
+        iterations: 0,
+        calls: 0,
+    };
+}
+
+fn wasm_bench_fqn() -> &'static str {
+    "pymergetic.wasmmod.registry.__bench_wasm_delegate"
+}
+
+unsafe extern "C" fn case_wasm_bench_dispatches_through_runner() -> i32 {
+    case(|| {
+        unsafe {
+            // A guest registers into a module the loader already published.
+            pub_ensure(wasm_bench_fqn());
+
+            // Register a guest bench (export name, not a native fn pointer).
+            assert_eq!(
+                pm_wasmmod_registry_bench_register_wasm(
+                    wasm_bench_fqn().as_ptr(),
+                    wasm_bench_fqn().len() as u32,
+                    b"guest_add".as_ptr(),
+                    9,
+                    b"guest_bench_add".as_ptr(),
+                    15,
+                ),
+                1
+            );
+
+            // No clock installed yet → "no clock", not a number.
+            let rc = pm_wasmmod_registry_bench_run(
+                wasm_bench_fqn().as_ptr(),
+                wasm_bench_fqn().len() as u32,
+                b"guest_add".as_ptr(),
+                9,
+                10,
+            );
+            assert_eq!(rc, -1);
+
+            pm_wasmmod_registry_set_bench_clock(Some(fake_clock_us));
+            // No bench-runner installed → guest bench FAILED (-3), not a fake
+            // number and not a silent pass.
+            stub_reset();
+            let rc = pm_wasmmod_registry_bench_run(
+                wasm_bench_fqn().as_ptr(),
+                wasm_bench_fqn().len() as u32,
+                b"guest_add".as_ptr(),
+                9,
+                16,
+            );
+            assert_eq!(rc, -3);
+            assert_eq!(stub_snapshot().calls, 0);
+
+            // Install the runner → the export is invoked (warmup=2 + measure=16
+            // calls), and we get the same ns/op a native bench would: the fake
+            // clock grows 1024 us across the two grabs → 64000 ns/op @ 16.
+            pm_wasmmod_registry_set_wasm_bench_runner(Some(stub_bench_runner));
+            stub_reset();
+            let rc = pm_wasmmod_registry_bench_run(
+                wasm_bench_fqn().as_ptr(),
+                wasm_bench_fqn().len() as u32,
+                b"guest_add".as_ptr(),
+                9,
+                16,
+            );
+            assert_eq!(rc, 64000);
+            let s = stub_snapshot();
+            assert_eq!(s.calls, 2, "warmup + measured lap each drive the export");
+            assert_eq!(&s.export[..s.export_len], b"guest_bench_add");
+            assert_eq!(s.iterations, 16, "the measured lap's iteration count");
+
+            // Tear down: drop the runner and clock so later cases are pristine.
+            pm_wasmmod_registry_set_wasm_bench_runner(None);
+            pm_wasmmod_registry_set_bench_clock(None);
+        }
+    })
+}
+crate::PM_MOD_TEST_RS!(
+    "pymergetic.wasmmod.registry",
+    "wasm_bench_dispatches_through_runner",
+    case_wasm_bench_dispatches_through_runner
+);
+#[test]
+fn test_wasm_bench_dispatches_through_runner() {
+    assert_eq!(unsafe { case_wasm_bench_dispatches_through_runner() }, 0);
+}
+
+
 

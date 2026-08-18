@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "py/mperrno.h"
+#include "py/mpprint.h"
 #include "py/obj.h"
 #include "py/objlist.h"
 #include "py/objmodule.h"
@@ -153,6 +154,105 @@ static mp_obj_t mod_wasm_test_count(mp_obj_t fqn_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_test_count_obj, mod_wasm_test_count);
 
+/* wasm.bench(fqn, name=None, iters=...) -> ns/op report (int) for one bench,
+ * or the full ns/op report string for every bench of `fqn`. Benches are
+ * informational and never gate: without a clock the registry returns a
+ * negative BENCH_RC_* instead of a fake number. */
+static mp_obj_t mod_wasm_bench(size_t n_args, const mp_obj_t *args) {
+    mp_wasm_ensure_inited();
+    const char *fqn = mp_obj_str_get_str(args[0]);
+    size_t flen = strlen(fqn);
+    uint64_t iters = 50000;
+    if (n_args >= 3) {
+        iters = (uint64_t)mp_obj_get_int(args[2]);
+    } else if (n_args >= 2 && !mp_obj_is_str(args[1])
+        && args[1] != mp_const_none) {
+        /* Positional iters without a name is a common enough REPL slip. */
+        iters = (uint64_t)mp_obj_get_int(args[1]);
+    }
+    if (n_args >= 2 && mp_obj_is_str(args[1])) {
+        const char *name = mp_obj_str_get_str(args[1]);
+        return mp_obj_new_int(pm_wasmmod_registry_bench_run(
+            (const uint8_t *)fqn, (uint32_t)flen,
+            (const uint8_t *)name, (uint32_t)strlen(name), iters));
+    }
+    uint8_t buf[2048];
+    uint32_t len = sizeof(buf);
+    int32_t bad = pm_wasmmod_registry_bench_run_all(
+        (const uint8_t *)fqn, (uint32_t)flen, iters, buf, &len);
+    if (len > sizeof(buf)) {
+        len = sizeof(buf);
+    }
+    /* Return a dict {report: str, bad: int} so the REPL can both show the
+     * pretty text and count the not-clean benches. */
+    mp_obj_t d = mp_obj_new_dict(2);
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_report),
+        mp_obj_new_str((const char *)buf, len));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_bad), mp_obj_new_int(bad));
+    return d;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_bench_obj, 1, 3, mod_wasm_bench);
+
+/* wasm.bench_all(iters=...) -> full ns/op sweep across every module with
+ * benches. Returns the aggregate report string; prints as a bonus. */
+static mp_obj_t mod_wasm_bench_all(size_t n_args, const mp_obj_t *args) {
+    mp_wasm_ensure_inited();
+    uint64_t iters = 50000;
+    if (n_args >= 1 && args[0] != mp_const_none) {
+        iters = (uint64_t)mp_obj_get_int(args[0]);
+    }
+    uint32_t n = pm_wasmmod_registry_module_count();
+    const mp_print_t *print = &mp_plat_print;
+    int32_t bad = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t m[256];
+        uint32_t mlen = sizeof(m);
+        if (!pm_wasmmod_registry_module_at(i, m, &mlen) || mlen == 0) {
+            continue;
+        }
+        if (pm_wasmmod_registry_bench_count(m, mlen) == 0) {
+            continue;
+        }
+        uint8_t buf[2048];
+        uint32_t blen = sizeof(buf);
+        bad += pm_wasmmod_registry_bench_run_all(m, mlen, iters, buf, &blen);
+        if (blen > sizeof(buf)) {
+            blen = sizeof(buf);
+        }
+        mp_print_str(print, (const char *)buf);
+    }
+    (void)bad;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wasm_bench_all_obj, 0, 1, mod_wasm_bench_all);
+
+/* wasm.benches(fqn) -> list of bench names for a module (or [] if none). */
+static mp_obj_t mod_wasm_benches(mp_obj_t fqn_in) {
+    mp_wasm_ensure_inited();
+    const char *fqn = mp_obj_str_get_str(fqn_in);
+    size_t flen = strlen(fqn);
+    uint32_t bc = pm_wasmmod_registry_bench_count((const uint8_t *)fqn, (uint32_t)flen);
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (uint32_t i = 0; i < bc; i++) {
+        uint8_t buf[128];
+        uint32_t len = sizeof(buf);
+        if (!pm_wasmmod_registry_bench_at((const uint8_t *)fqn, (uint32_t)flen, i, buf, &len)
+            || len == 0) {
+            continue;
+        }
+        mp_obj_list_append(list, mp_obj_new_str((const char *)buf, len));
+    }
+    return list;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_benches_obj, mod_wasm_benches);
+
+static mp_obj_t mod_wasm_bench_count(mp_obj_t fqn_in) {
+    mp_wasm_ensure_inited();
+    const char *fqn = mp_obj_str_get_str(fqn_in);
+    return mp_obj_new_int_from_uint(pm_wasmmod_registry_bench_count(
+        (const uint8_t *)fqn, (uint32_t)strlen(fqn)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_wasm_bench_count_obj, mod_wasm_bench_count);
 static mp_obj_t mod_wasm_path(void) {
     mp_wasm_ensure_inited();
     return mp_wasm_path_obj();
@@ -560,6 +660,10 @@ static const mp_rom_map_elem_t mp_module_pymergetic_wasmmod_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_test_all), MP_ROM_PTR(&mod_wasm_test_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_tests), MP_ROM_PTR(&mod_wasm_tests_obj) },
     { MP_ROM_QSTR(MP_QSTR_test_count), MP_ROM_PTR(&mod_wasm_test_count_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bench), MP_ROM_PTR(&mod_wasm_bench_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bench_all), MP_ROM_PTR(&mod_wasm_bench_all_obj) },
+    { MP_ROM_QSTR(MP_QSTR_benches), MP_ROM_PTR(&mod_wasm_benches_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bench_count), MP_ROM_PTR(&mod_wasm_bench_count_obj) },
     { MP_ROM_QSTR(MP_QSTR_bind_py), MP_ROM_PTR(&mod_wasm_bind_py_obj) },
 #if MICROPY_PY_WASM_GEN
     { MP_ROM_QSTR(MP_QSTR_gen), MP_ROM_PTR(&mod_wasm_gen_obj) },

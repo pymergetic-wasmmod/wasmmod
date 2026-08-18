@@ -83,9 +83,21 @@ typedef int32_t (*pm_wasmmod_registry_fn_t)(const pm_wasmmod_registry_value_t *a
 /* Module `__tests__.*` case — 0 = pass, nonzero = fail. Not an export face. */
 typedef int32_t (*pm_wasmmod_registry_test_fn_t)(void);
 
+/* Bench case — runs `iterations` ops, 0 = ok (same status convention). The
+ * clock hook returns a monotonic u64 tick; both mirror the registry's Rust
+ * face (registry/__impl__.rs), kept here so generated __exports__.h and any C
+ * consumer share one ABI. */
+typedef int32_t (*pm_wasmmod_registry_bench_fn_t)(uint64_t iterations);
+typedef uint64_t (*pm_wasmmod_registry_bench_clock_t)(void);
+
 /* Loader hook: run a guest pack test by wasm export name (fqn, export). */
 typedef int32_t (*pm_wasmmod_registry_wasm_test_runner_t)(const uint8_t *fqn, uint32_t fqn_len,
     const uint8_t *export_name, uint32_t export_len);
+/* Same loader hook for guest pack benches — carries the iterations word that
+ * a `pm_wasmmod_registry_bench_fn_t` takes, so a guest bench is timed like a
+ * native one once the loader can call its wasm export. */
+typedef int32_t (*pm_wasmmod_registry_wasm_bench_runner_t)(const uint8_t *fqn, uint32_t fqn_len,
+    const uint8_t *export_name, uint32_t export_len, uint64_t iterations);
 
 /* Portable address — see docs/CALLGRAPH.md.
  *   SPACE_NATIVE (0): off is a host VA (ELF / resident / unisolated).
@@ -143,6 +155,22 @@ int32_t pm_wasmmod_registry_connect_import(const uint8_t *fqn, uint32_t fqn_len,
     uint32_t name_len, void **out);
 int32_t pm_wasmmod_registry_test_register(const uint8_t *fqn, uint32_t fqn_len, const uint8_t *name,
     uint32_t name_len, pm_wasmmod_registry_test_fn_t fn);
+
+/* Bench face — same shapes as the Rust registry/__impl__.rs. The clock fill
+ * is installed once per seat via pm_wasmmod_registry_set_bench_clock; benches
+ * report ns/op and are informational (never a pass/fail gate). */
+void pm_wasmmod_registry_set_bench_clock(pm_wasmmod_registry_bench_clock_t clock_us);
+int32_t pm_wasmmod_registry_bench_register(const uint8_t *fqn, uint32_t fqn_len, const uint8_t *name,
+    uint32_t name_len, pm_wasmmod_registry_bench_fn_t fn);
+int32_t pm_wasmmod_registry_bench_register_wasm(const uint8_t *fqn, uint32_t fqn_len,
+    const uint8_t *name, uint32_t name_len, const uint8_t *export_name, uint32_t export_len);
+uint32_t pm_wasmmod_registry_bench_count(const uint8_t *fqn, uint32_t fqn_len);
+int32_t pm_wasmmod_registry_bench_at(const uint8_t *fqn, uint32_t fqn_len, uint32_t index, uint8_t *buf,
+    uint32_t *buf_len_io);
+int64_t pm_wasmmod_registry_bench_run(const uint8_t *fqn, uint32_t fqn_len, const uint8_t *name,
+    uint32_t name_len, uint64_t iterations);
+int32_t pm_wasmmod_registry_bench_run_all(const uint8_t *fqn, uint32_t fqn_len, uint64_t iterations,
+    uint8_t *buf, uint32_t *buf_len_io);
 
 #ifdef __cplusplus
 }

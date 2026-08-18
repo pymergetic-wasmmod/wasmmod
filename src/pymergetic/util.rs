@@ -26,6 +26,10 @@ pub mod version;
 #[path = "util/mod_test.rs"]
 pub mod mod_test;
 
+#[cfg(test)]
+#[path = "util/mod_bench.rs"]
+pub mod mod_bench;
+
 #[path = "util/pysample.rs"]
 pub mod pysample;
 

@@ -87,6 +87,49 @@ macro_rules! PM_MOD_TEST_RS {
     };
 }
 
+/// Host-side module benchmark registration (same job as `PM_MOD_BENCH_C`).
+///
+/// Bench fn: `unsafe extern "C" fn(iterations: u64) -> i32` — do `iterations`
+/// ops, `0` = ok. The registry owns timing (warmup + measured lap → ns/op);
+/// benches are informational and never gate the build. Lives in `__bench__.rs`
+/// under `cfg(bench)`, so it never becomes a product export face.
+///
+/// ```ignore
+/// PM_MOD_BENCH_RS!("pymergetic.metal.async", "ready_ring_task_switch", bench_task_switch);
+/// ```
+#[macro_export]
+macro_rules! PM_MOD_BENCH_RS {
+    ($fqn:expr, $name:expr, $fn:ident) => {
+        const _: () = {
+            #[used]
+            #[cfg_attr(
+                any(target_os = "linux", target_os = "android"),
+                unsafe(link_section = ".init_array")
+            )]
+            #[cfg_attr(
+                target_vendor = "apple",
+                unsafe(link_section = "__DATA,__mod_init_func")
+            )]
+            static __PM_MOD_BENCH: extern "C" fn() = {
+                extern "C" fn __pm_mod_bench_ctor() {
+                    let fqn: &str = $fqn;
+                    let name: &str = $name;
+                    unsafe {
+                        let _ = $crate::wasmmod::registry::pm_wasmmod_registry_bench_register(
+                            fqn.as_ptr(),
+                            fqn.len() as u32,
+                            name.as_ptr(),
+                            name.len() as u32,
+                            Some($fn),
+                        );
+                    }
+                }
+                __pm_mod_bench_ctor
+            };
+        };
+    };
+}
+
 #[repr(C, align(8))]
 pub struct pm_mod_boot_t {
     pub fqn: *const u8,

@@ -152,4 +152,26 @@
         __attribute__((unused)) = (impl_fn)
 #endif
 
+/*
+ * PM_MOD_BENCH_C — module benchmark (`__bench__.c`).
+ * Bench: int32_t (*)(uint64_t iterations) — do `iterations` ops, return 0 = ok.
+ * The registry owns timing (warmup + measured lap -> ns/op). Informational:
+ * a bench never gates the build; the clock fill decides whether it reports a
+ * number or "no clock".
+ */
+#if defined(PM_MOD_BENCHES) && !PM_WASMMOD_GUEST
+#define PM_MOD_BENCH_C(mod, bench_name, impl_fn) \
+    static void __attribute__((constructor)) pm_mod_bench_reg_##impl_fn(void) { \
+        (void)pm_wasmmod_registry_bench_register( \
+            (const uint8_t *)#mod, (uint32_t)(sizeof(#mod) - 1), \
+            (const uint8_t *)#bench_name, (uint32_t)(sizeof(#bench_name) - 1), \
+            (pm_wasmmod_registry_bench_fn_t)(impl_fn)); \
+    }
+#else
+/* Packer scans the call site. Keep the ref alive when disabled. */
+#define PM_MOD_BENCH_C(mod, bench_name, impl_fn) \
+    static int32_t (*const pm_mod_bench_keep_##impl_fn)(uint64_t) \
+        __attribute__((unused)) = (impl_fn)
+#endif
+
 #endif /* PM_GUEST_H_ */

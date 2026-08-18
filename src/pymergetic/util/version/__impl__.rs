@@ -200,3 +200,7 @@ crate::PM_MOD_EXPORT_RS!(
 #[cfg(test)]
 #[path = "__tests__.rs"]
 mod __tests__;
+
+#[cfg(test)]
+#[path = "__bench__.rs"]
+mod __bench__;

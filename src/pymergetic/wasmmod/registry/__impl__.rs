@@ -122,6 +122,12 @@ pub type pm_wasmmod_registry_test_fn_t = unsafe extern "C" fn() -> i32;
 pub type pm_wasmmod_registry_wasm_test_runner_t =
     unsafe extern "C" fn(*const u8, u32, *const u8, u32) -> i32;
 
+/// Loader hook: run a guest pack bench by wasm export name + the ops to do.
+/// Carries the `iterations` word that `pm_wasmmod_registry_bench_fn_t` takes,
+/// so the same missing-call triage (native vs guest) applies to benches.
+pub type pm_wasmmod_registry_wasm_bench_runner_t =
+    unsafe extern "C" fn(*const u8, u32, *const u8, u32, u64) -> i32;
+
 enum TestBody {
     /// Host / resident: real `fn() -> i32` from `PM_MOD_TEST_*`.
     Native(pm_wasmmod_registry_test_fn_t),
@@ -134,7 +140,50 @@ struct TestEntry {
     body: TestBody,
 }
 
+/// Module-local benchmark (`__bench__.*` / `PM_MOD_BENCH_*`). Not an export —
+/// never emitted by util.gen faces, and never a pass/fail gate.
+///
+/// A bench is a `fn(iterations) -> i32` that runs **one iteration** of the
+/// unit of work. The registry owns the timing: it warmups, measures
+/// `iterations` repeats, and reports ns/op (or us/op). `0` means "ran ok" —
+/// informational, not a failure count.
+pub type pm_wasmmod_registry_bench_fn_t = unsafe extern "C" fn(u64) -> i32;
+
+/// Per-seat monotonic clock fill for bench timing, in microseconds. `0` is
+/// meaningless as a delta, so a seat with no clock simply never registers
+/// one — `bench_run*` then report "no clock" instead of measuring garbage.
+/// Metal provides a strong fill reaching `pm_metal_async_mono_us`; each seat
+/// that can time provides its own (POSIX `clock_gettime` on unix, a
+/// `performance.now`-derived value on emcc, the firmware timer otherwise).
+pub type pm_wasmmod_registry_bench_clock_t = unsafe extern "C" fn() -> u64;
+
+enum BenchBody {
+    /// Host / resident: a real `fn(iterations) -> i32`.
+    Native(pm_wasmmod_registry_bench_fn_t),
+    /// Guest pack: wasm export symbol taking the iterations word.
+    WasmExport(String),
+}
+
+struct BenchEntry {
+    name: String,
+    body: BenchBody,
+}
+
+/// How many repeats to run before measuring — a cheap warmup that lets the
+/// runner park/schedule before we start counting, the same spirit as the
+/// DHCP/SSH "drive the wire" loops.
+const BENCH_MEASURE_WARMUP: u64 = 2;
+
 static WASM_TEST_RUNNER: Mutex<Option<pm_wasmmod_registry_wasm_test_runner_t>> = Mutex::new(None);
+
+/// Loader installs this so guest pack benches run without a host trampoline
+/// pool; a guest bench is `WasmExport` + `iterations`, driven by this hook.
+static WASM_BENCH_RUNNER: Mutex<Option<pm_wasmmod_registry_wasm_bench_runner_t>> =
+    Mutex::new(None);
+
+/// Installed by the seat that can time. Stays `None` on clockless seats so a
+/// bench reports "no clock" rather than a bogus number (see the clock doc).
+static BENCH_CLOCK: Mutex<Option<pm_wasmmod_registry_bench_clock_t>> = Mutex::new(None);
 
 struct ModEntry {
     fqn: String,
@@ -145,6 +194,7 @@ struct ModEntry {
     generation: u32,
     exports: Vec<Export>,
     tests: Vec<TestEntry>,
+    benches: Vec<BenchEntry>,
     live: bool,
 }
 
@@ -286,6 +336,7 @@ impl Table {
                 generation,
                 exports: Vec::new(),
                 tests: Vec::new(),
+                benches: Vec::new(),
                 live: true,
             };
             return pm_wasmmod_registry_handle_t {
@@ -301,6 +352,7 @@ impl Table {
             generation: 0,
             exports: Vec::new(),
             tests: Vec::new(),
+            benches: Vec::new(),
             live: true,
         });
         pm_wasmmod_registry_handle_t {
@@ -315,6 +367,7 @@ impl Table {
                 entry.live = false;
                 entry.exports.clear();
                 entry.tests.clear();
+                entry.benches.clear();
                 entry.fqn.clear();
                 entry.version.clear();
                 true
@@ -480,6 +533,59 @@ impl Table {
         self.find_by_fqn(fqn)
             .and_then(|e| e.tests.iter().find(|t| t.name == name))
             .map(|t| &t.body)
+    }
+
+    /// Register (or replace) a host/resident module benchmark. Ensures Resident.
+    fn bench_register(&mut self, fqn: &str, name: &str, f: pm_wasmmod_registry_bench_fn_t) -> bool {
+        let _ = self.ensure_resident(fqn);
+        let Some(entry) = self.entries.iter_mut().find(|e| e.live && e.fqn == fqn) else {
+            return false;
+        };
+        let body = BenchBody::Native(f);
+        if let Some(b) = entry.benches.iter_mut().find(|b| b.name == name) {
+            b.body = body;
+        } else {
+            entry.benches.push(BenchEntry {
+                name: String::from(name),
+                body,
+            });
+        }
+        true
+    }
+
+    /// Register (or replace) a guest pack benchmark: name → wasm export symbol.
+    fn bench_register_wasm(&mut self, fqn: &str, name: &str, export: &str) -> bool {
+        let Some(entry) = self.entries.iter_mut().find(|e| e.live && e.fqn == fqn) else {
+            return false;
+        };
+        let body = BenchBody::WasmExport(String::from(export));
+        if let Some(b) = entry.benches.iter_mut().find(|b| b.name == name) {
+            b.body = body;
+        } else {
+            entry.benches.push(BenchEntry {
+                name: String::from(name),
+                body,
+            });
+        }
+        true
+    }
+
+    fn bench_count(&self, fqn: &str) -> u32 {
+        self.find_by_fqn(fqn)
+            .map(|e| e.benches.len() as u32)
+            .unwrap_or(0)
+    }
+
+    fn bench_name_at(&self, fqn: &str, index: u32) -> Option<&str> {
+        self.find_by_fqn(fqn)
+            .and_then(|e| e.benches.get(index as usize))
+            .map(|b| b.name.as_str())
+    }
+
+    fn bench_body_named(&self, fqn: &str, name: &str) -> Option<&BenchBody> {
+        self.find_by_fqn(fqn)
+            .and_then(|e| e.benches.iter().find(|b| b.name == name))
+            .map(|b| &b.body)
     }
 
     fn live_modules(&self) -> Vec<&str> {
@@ -967,6 +1073,15 @@ pub unsafe extern "C" fn pm_wasmmod_registry_set_wasm_test_runner(
     *WASM_TEST_RUNNER.lock() = f;
 }
 
+/// Loader installs this so guest pack benches run without a host trampoline
+/// pool. Passing `None` clears the fill, mirroring `set_wasm_test_runner`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_set_wasm_bench_runner(
+    f: Option<pm_wasmmod_registry_wasm_bench_runner_t>,
+) {
+    *WASM_BENCH_RUNNER.lock() = f;
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pm_wasmmod_registry_test_count(fqn_ptr: *const u8, fqn_len: u32) -> u32 {
     let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
@@ -1070,6 +1185,240 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_run_all(fqn_ptr: *const u8, fq
     fails
 }
 
+/// Install the monotonic clock fill for bench timing (microseconds). A seat
+/// provides this once at boot; metal wires it to `pm_metal_async_mono_us`.
+/// Passing `None` clears the fill, which benches report as "no clock".
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_set_bench_clock(
+    f: Option<pm_wasmmod_registry_bench_clock_t>,
+) {
+    *BENCH_CLOCK.lock() = f;
+}
+
+/// Register a module benchmark (`__bench__.*` / `PM_MOD_BENCH_*`). Returns 1
+/// on ok. A bench is `fn(iterations) -> i32`; the registry times it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_bench_register(
+    fqn_ptr: *const u8,
+    fqn_len: u32,
+    name_ptr: *const u8,
+    name_len: u32,
+    f: Option<pm_wasmmod_registry_bench_fn_t>,
+) -> i32 {
+    let (Some(fqn), Some(name), Some(f)) = (
+        str_from_raw(fqn_ptr, fqn_len),
+        str_from_raw(name_ptr, name_len),
+        f,
+    ) else {
+        return 0;
+    };
+    TABLE.lock().bench_register(fqn, name, f) as i32
+}
+
+/// Register a guest pack benchmark (name → wasm export). No host trampoline.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_bench_register_wasm(
+    fqn_ptr: *const u8,
+    fqn_len: u32,
+    name_ptr: *const u8,
+    name_len: u32,
+    export_ptr: *const u8,
+    export_len: u32,
+) -> i32 {
+    let (Some(fqn), Some(name), Some(export)) = (
+        str_from_raw(fqn_ptr, fqn_len),
+        str_from_raw(name_ptr, name_len),
+        str_from_raw(export_ptr, export_len),
+    ) else {
+        return 0;
+    };
+    TABLE.lock().bench_register_wasm(fqn, name, export) as i32
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_bench_count(fqn_ptr: *const u8, fqn_len: u32) -> u32 {
+    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+        return 0;
+    };
+    TABLE.lock().bench_count(fqn)
+}
+
+/// Copy bench name at `index` into `buf`. Returns 1 if present.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_bench_at(
+    fqn_ptr: *const u8,
+    fqn_len: u32,
+    index: u32,
+    buf: *mut u8,
+    buf_len_io: *mut u32,
+) -> i32 {
+    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+        return 0;
+    };
+    let table = TABLE.lock();
+    let Some(name) = table.bench_name_at(fqn, index) else {
+        if !buf_len_io.is_null() {
+            unsafe { *buf_len_io = 0 };
+        }
+        return 0;
+    };
+    copy_str_to_buf(name, buf, buf_len_io)
+}
+
+fn run_bench_body(fqn: &str, body: &BenchBody, iterations: u64) -> i32 {
+    match body {
+        BenchBody::Native(f) => unsafe { f(iterations) },
+        BenchBody::WasmExport(export) => {
+            let Some(runner) = *WASM_BENCH_RUNNER.lock() else {
+                // No loader to call the wasm export: a real missing-fill, not a
+                // silent pass. Same triage as a clockless seat reporting
+                // "no clock" — the guest bench can't be timed without a path to
+                // its export, so it surfaces as FAILED rather than a fake number.
+                return -1;
+            };
+            unsafe {
+                runner(
+                    fqn.as_ptr(),
+                    fqn.len() as u32,
+                    export.as_ptr(),
+                    export.len() as u32,
+                    iterations,
+                )
+            }
+        }
+    }
+}
+
+fn bench_now() -> Option<u64> {
+    let clock = (*BENCH_CLOCK.lock())?;
+    Some(unsafe { clock() })
+}
+
+/// Result of timing one bench. Negative means it did not run:
+/// `-1` no clock, `-2` bench missing, `-3` bench failed its own run.
+const BENCH_RC_NO_CLOCK: i64 = -1;
+const BENCH_RC_MISSING: i64 = -2;
+const BENCH_RC_FAILED: i64 = -3;
+
+/// Time one bench over `iterations` ops and return **ns/op** (≥0), or a
+/// negative `BENCH_RC_*`. The bench contract is "do `iterations` ops inside
+/// this one call" (the Go `b.N` model), so a warmup call settles the runner
+/// before the measured lap, and the lap's elapsed time divides by iterations.
+fn time_bench_ns(fqn: &str, body: &BenchBody, iterations: u64) -> i64 {
+    if iterations == 0 {
+        return BENCH_RC_FAILED;
+    }
+    if bench_now().is_none() {
+        return BENCH_RC_NO_CLOCK;
+    }
+    // Warmup: a small batch lets the runner park/schedule/init before timing,
+    // so the measured lap starts warm. Failing warmup is not the bench's fault
+    // unless it is genuinely broken; still surface the failure via FAILED.
+    if run_bench_body(fqn, body, BENCH_MEASURE_WARMUP) != 0 {
+        return BENCH_RC_FAILED;
+    }
+    let t0 = match bench_now() {
+        Some(t) => t,
+        None => return BENCH_RC_NO_CLOCK,
+    };
+    if run_bench_body(fqn, body, iterations) != 0 {
+        return BENCH_RC_FAILED;
+    }
+    let t1 = match bench_now() {
+        Some(t) => t,
+        None => return BENCH_RC_NO_CLOCK,
+    };
+    let us = t1.saturating_sub(t0);
+    // ns/op from a uS clock: multiply, then divide by iterations. Use u128 so
+    // large iteration counts do not overflow before the division.
+    (us as u128 * 1000 / iterations as u128) as i64
+}
+
+/// Run one named bench over `iterations` ops. Returns **ns/op** (≥0) or a
+/// negative `BENCH_RC_*`. Informational — never a pass/fail gate.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_bench_run(
+    fqn_ptr: *const u8,
+    fqn_len: u32,
+    name_ptr: *const u8,
+    name_len: u32,
+    iterations: u64,
+) -> i64 {
+    let (Some(fqn), Some(name)) = (
+        str_from_raw(fqn_ptr, fqn_len),
+        str_from_raw(name_ptr, name_len),
+    ) else {
+        return BENCH_RC_MISSING;
+    };
+    let body = {
+        let table = TABLE.lock();
+        match table.bench_body_named(fqn, name) {
+            Some(BenchBody::Native(f)) => BenchBody::Native(*f),
+            Some(BenchBody::WasmExport(e)) => BenchBody::WasmExport(e.clone()),
+            None => return BENCH_RC_MISSING,
+        }
+    };
+    time_bench_ns(fqn, &body, iterations)
+}
+
+/// Run every bench for `fqn` over `iterations` ops, formatting a report line
+/// per bench into `buf`. Returns number of benches that did not run cleanly
+/// (0 = all ok). Informational — the caller decides what the numbers mean,
+/// and this never gates.
+///
+/// `buf_len_io` in: capacity, out: bytes written (or needed on overflow).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_bench_run_all(
+    fqn_ptr: *const u8,
+    fqn_len: u32,
+    iterations: u64,
+    buf: *mut u8,
+    buf_len_io: *mut u32,
+) -> i32 {
+    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+        return 0;
+    };
+    let bodies: Vec<(String, BenchBody)> = {
+        let table = TABLE.lock();
+        let Some(entry) = table.find_by_fqn(fqn) else {
+            return 0;
+        };
+        entry
+            .benches
+            .iter()
+            .map(|b| match &b.body {
+                BenchBody::Native(f) => (b.name.clone(), BenchBody::Native(*f)),
+                BenchBody::WasmExport(e) => (b.name.clone(), BenchBody::WasmExport(e.clone())),
+            })
+            .collect()
+    };
+    if bodies.is_empty() {
+        return 0;
+    }
+    let mut bad = 0i32;
+    let mut out = String::from(fqn);
+    out.push('\n');
+    for (name, body) in &bodies {
+        let ns = time_bench_ns(fqn, body, iterations);
+        if ns < 0 {
+            bad += 1;
+            out.push_str("* ");
+            out.push_str(name);
+            match ns {
+                BENCH_RC_NO_CLOCK => out.push_str(": no clock\n"),
+                BENCH_RC_MISSING => out.push_str(": missing\n"),
+                _ => out.push_str(": failed\n"),
+            }
+        } else {
+            out.push_str(&alloc::format!(
+                "* {name}: {ns} ns/op over {iterations} iters\n"
+            ));
+        }
+    }
+    copy_str_to_buf(&out, buf, buf_len_io);
+    bad
+}
+
 /* Same table as PM_MOD_EXPORT_C — not a second registration system. */
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_init, "void(void)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_publish, "pm_wasmmod_registry_handle_t(const uint8_t *, uint32_t, pm_wasmmod_registry_container_kind_t)");
@@ -1094,10 +1443,18 @@ crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_expo
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_test_register, "int32_t(const uint8_t *, uint32_t, const uint8_t *, uint32_t, pm_wasmmod_registry_test_fn_t)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_test_register_wasm, "int32_t(const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *, uint32_t)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_set_wasm_test_runner, "void(pm_wasmmod_registry_wasm_test_runner_t)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_set_wasm_bench_runner, "void(pm_wasmmod_registry_wasm_bench_runner_t)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_test_count, "uint32_t(const uint8_t *, uint32_t)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_test_at, "int32_t(const uint8_t *, uint32_t, uint32_t, uint8_t *, uint32_t *)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_test_run, "int32_t(const uint8_t *, uint32_t, const uint8_t *, uint32_t)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_test_run_all, "int32_t(const uint8_t *, uint32_t)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_set_bench_clock, "void(pm_wasmmod_registry_bench_clock_t)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_bench_register, "int32_t(const uint8_t *, uint32_t, const uint8_t *, uint32_t, pm_wasmmod_registry_bench_fn_t)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_bench_register_wasm, "int32_t(const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *, uint32_t)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_bench_count, "uint32_t(const uint8_t *, uint32_t)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_bench_at, "int32_t(const uint8_t *, uint32_t, uint32_t, uint8_t *, uint32_t *)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_bench_run, "int64_t(const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint64_t)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_bench_run_all, "int32_t(const uint8_t *, uint32_t, uint64_t, uint8_t *, uint32_t *)");
 
 #[cfg(test)]
 #[path = "__tests__.rs"]
