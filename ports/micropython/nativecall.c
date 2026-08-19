@@ -153,6 +153,19 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_int(((int32_t (*)(const uint8_t *, uint32_t))p)(
             (const uint8_t *)bufinfo.buf, (uint32_t)bufinfo.len));
     }
+    /* asgi defer_reply_ct: same bufptr reply, plus a per-response Content-Type
+     * override (a deferred route registers one type, but a raw source reply is
+     * per-path — C vs Rust vs TOML). The ctype rides the const char * tail. */
+    if (strcmp(sig, "int32_t(const uint8_t *, uint32_t, const char *)") == 0) {
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("bufptr+ctype needs two args"));
+        }
+        mp_buffer_info_t bufinfo;
+        mp_get_buffer_raise(args[0], &bufinfo, MP_BUFFER_READ);
+        return mp_obj_new_int(((int32_t (*)(const uint8_t *, uint32_t, const char *))p)(
+            (const uint8_t *)bufinfo.buf, (uint32_t)bufinfo.len,
+            mp_obj_str_get_str(args[1])));
+    }
     if (strcmp(sig, "int32_t(pm_wasmmod_mem_cookie_t)") == 0) {
         if (n_args != 1) {
             mp_raise_TypeError(MP_ERROR_TEXT("mem needs one bytes-like"));
@@ -217,6 +230,32 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
         }
         s = ((const char *(*)(void))p)();
+        if (s == NULL) {
+            return mp_const_none;
+        }
+        return mp_obj_new_str(s, strlen(s));
+    }
+    /* Card source tree (pymergetic.metal.inspect): a NUL-terminated embedded
+     * source string given a fqn, or a fqn+path. Both NULL-safe (None on miss),
+     * so a missing card never aborts the inspector. */
+    if (strcmp(sig, "const char *(const char *)") == 0) {
+        const char *s;
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        s = ((const char *(*)(const char *))p)(mp_obj_str_get_str(args[0]));
+        if (s == NULL) {
+            return mp_const_none;
+        }
+        return mp_obj_new_str(s, strlen(s));
+    }
+    if (strcmp(sig, "const char *(const char *, const char *)") == 0) {
+        const char *s;
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        s = ((const char *(*)(const char *, const char *))p)(
+            mp_obj_str_get_str(args[0]), mp_obj_str_get_str(args[1]));
         if (s == NULL) {
             return mp_const_none;
         }
