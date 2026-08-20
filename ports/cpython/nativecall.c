@@ -115,6 +115,106 @@ PyObject *pm_cpy_native_call(const char *fqn, const char *export_name, PyObject 
         return PyLong_FromLong(((int32_t (*)(uint32_t, uint16_t))p)(
             (uint32_t)a0, (uint16_t)a1));
     }
+    if (strcmp(sig, "int32_t(uint32_t, uint16_t, uint32_t)") == 0) {
+        /* net.zenoh.peer: peer locator (addr_be, port, mode). */
+        if (n_args != 3) {
+            PyErr_SetString(PyExc_TypeError, "peer needs three ints");
+            return NULL;
+        }
+        long a0 = PyLong_AsLong(PyTuple_GET_ITEM(args_tuple, 0));
+        long a1 = PyLong_AsLong(PyTuple_GET_ITEM(args_tuple, 1));
+        long a2 = PyLong_AsLong(PyTuple_GET_ITEM(args_tuple, 2));
+        if ((a0 == -1 || a1 == -1 || a2 == -1) && PyErr_Occurred()) {
+            return NULL;
+        }
+        return PyLong_FromLong(((int32_t (*)(uint32_t, uint16_t, uint32_t))p)(
+            (uint32_t)a0, (uint16_t)a1, (uint32_t)a2));
+    }
+    if (strcmp(sig, "int32_t(uint8_t *)") == 0) {
+        /* net.zenoh.zid: sole uint8_t * out-param export; writes the 16-byte
+         * Zenoh ZID and returns 1 on readiness. Presented as bytes. */
+        if (n_args != 0) {
+            PyErr_SetString(PyExc_TypeError, "zid takes no args");
+            return NULL;
+        }
+        uint8_t z[16];
+        int32_t ok = ((int32_t (*)(uint8_t *))p)(z);
+        if (ok) {
+            return PyBytes_FromStringAndSize((const char *)z, 16);
+        }
+        Py_RETURN_NONE;
+    }
+    if (strcmp(sig, "int32_t(const char *)") == 0) {
+        if (n_args != 1) {
+            PyErr_SetString(PyExc_TypeError, "native call arity");
+            return NULL;
+        }
+        const char *s = PyUnicode_AsUTF8(PyTuple_GET_ITEM(args_tuple, 0));
+        if (s == NULL) {
+            return NULL;
+        }
+        return PyLong_FromLong(((int32_t (*)(const char *))p)(s));
+    }
+    if (strcmp(sig, "int32_t(char[PM_METAL_NET_SWARM_MEMBER_ID_LEN])") == 0) {
+        if (n_args != 0) {
+            PyErr_SetString(PyExc_TypeError, "node_id takes no args");
+            return NULL;
+        }
+        char out[40];
+        int32_t n = ((int32_t (*)(char[40]))p)(out);
+        if (n > 0) {
+            return PyBytes_FromStringAndSize(out, n);
+        }
+        Py_RETURN_NONE;
+    }
+    if (strcmp(sig, "int32_t(uint8_t[PM_METAL_NET_SWARM_PEER_ID_LEN], uint8_t *)") == 0) {
+        if (n_args != 0) {
+            PyErr_SetString(PyExc_TypeError, "scout takes no args");
+            return NULL;
+        }
+        uint8_t zid[16];
+        uint8_t fwhat;
+        int32_t rc = ((int32_t (*)(uint8_t *, uint8_t *))p)(zid, &fwhat);
+        if (rc == 1) {
+            return Py_BuildValue("(iO)", rc,
+                PyBytes_FromStringAndSize((const char *)zid, 16));
+        }
+        return Py_BuildValue("(iO)", rc, Py_None);
+    }
+    if (strcmp(sig, "int32_t(uint8_t, uint8_t *, uint8_t *)") == 0) {
+        if (n_args != 1) {
+            PyErr_SetString(PyExc_TypeError, "scout takes one arg");
+            return NULL;
+        }
+        long what = PyLong_AsLong(PyTuple_GET_ITEM(args_tuple, 0));
+        uint8_t zid[16];
+        uint8_t fwhat;
+        int32_t rc = ((int32_t (*)(uint8_t, uint8_t *, uint8_t *))p)(
+            (uint8_t)what, zid, &fwhat);
+        if (rc == 1) {
+            return Py_BuildValue("(iO)", rc,
+                PyBytes_FromStringAndSize((const char *)zid, 16));
+        }
+        return Py_BuildValue("(iO)", rc, Py_None);
+    }
+    if (strcmp(sig, "int32_t(const char *, const uint8_t *, uint32_t)") == 0) {
+        if (n_args != 2) {
+            PyErr_SetString(PyExc_TypeError, "dispatch needs verb+payload");
+            return NULL;
+        }
+        const char *verb = PyUnicode_AsUTF8(PyTuple_GET_ITEM(args_tuple, 0));
+        if (verb == NULL) {
+            return NULL;
+        }
+        Py_buffer view;
+        if (PyObject_GetBuffer(PyTuple_GET_ITEM(args_tuple, 1), &view, PyBUF_SIMPLE) < 0) {
+            return NULL;
+        }
+        int32_t rc = ((int32_t (*)(const char *, const uint8_t *, uint32_t))p)(
+            verb, (const uint8_t *)view.buf, (uint32_t)view.len);
+        PyBuffer_Release(&view);
+        return PyLong_FromLong(rc);
+    }
     if (strcmp(sig, "int32_t(const uint8_t *, uint32_t)") == 0) {
         if (n_args != 1) {
             PyErr_SetString(PyExc_TypeError, "bufptr needs one bytes-like");

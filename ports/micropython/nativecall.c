@@ -262,5 +262,88 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_str(s, strlen(s));
     }
 
+    if (strcmp(sig, "int32_t(uint32_t, uint16_t, uint32_t)") == 0) {
+        /* net.zenoh.peer: peer locator (addr_be, port, mode). */
+        if (n_args != 3) {
+            mp_raise_TypeError(MP_ERROR_TEXT("peer needs three ints"));
+        }
+        return mp_obj_new_int(((int32_t (*)(uint32_t, uint16_t, uint32_t))p)(
+            (uint32_t)mp_obj_get_int(args[0]), (uint16_t)mp_obj_get_int(args[1]),
+            (uint32_t)mp_obj_get_int(args[2])));
+    }
+    if (strcmp(sig, "int32_t(uint8_t *)") == 0) {
+        /* net.zenoh.zid: sole export with an uint8_t * out-param; it writes the
+         * 16-byte Zenoh ZID and returns 1 on readiness. Present as bytes. */
+        if (n_args != 0) {
+            mp_raise_TypeError(MP_ERROR_TEXT("zid takes no args"));
+        }
+        uint8_t z[16];
+        int32_t ok = ((int32_t (*)(uint8_t *))p)(z);
+        return ok ? mp_obj_new_bytes(z, 16) : mp_const_none;
+    }
+    if (strcmp(sig, "int32_t(const char *)") == 0) {
+        /* net.swarm.membership.start: a single C string argument (the group).
+         * Deferred (0) when no session is open, armed (1), misuse (-1). */
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        const char *s = mp_obj_str_get_str(args[0]);
+        return mp_obj_new_int(((int32_t (*)(const char *))p)(s));
+    }
+    if (strcmp(sig, "int32_t(char[PM_METAL_NET_SWARM_MEMBER_ID_LEN])") == 0) {
+        /* net.swarm.membership.node_id: an out-buffer of the node's base-16
+         * identity (40 chars). Present as bytes, mirroring zenoh zid. */
+        if (n_args != 0) {
+            mp_raise_TypeError(MP_ERROR_TEXT("node_id takes no args"));
+        }
+        char out[40];
+        int32_t n = ((int32_t (*)(char[40]))p)(out);
+        return n > 0 ? mp_obj_new_bytes((const uint8_t *)out, (size_t)n) : mp_const_none;
+    }
+    if (strcmp(sig, "int32_t(uint8_t[PM_METAL_NET_SWARM_PEER_ID_LEN], uint8_t *)") == 0) {
+        /* net.swarm.discovery.scout: both params are outs (peer_id*, whatami*),
+         * whatami-target is fixed to Peer by the card. Returns (rc,
+         * peer_id_bytes) so the µPy guest can read the peer identity. */
+        if (n_args != 0) {
+            mp_raise_TypeError(MP_ERROR_TEXT("scout takes no args"));
+        }
+        uint8_t zid[16];
+        uint8_t fwhat;
+        int32_t rc = ((int32_t (*)(uint8_t *, uint8_t *))p)(zid, &fwhat);
+        (void)fwhat;
+        mp_obj_t items[2];
+        items[0] = mp_obj_new_int(rc);
+        items[1] = (rc == 1) ? mp_obj_new_bytes(zid, 16) : mp_const_none;
+        return mp_obj_new_tuple(2, items);
+    }
+    if (strcmp(sig, "int32_t(uint8_t, uint8_t *, uint8_t *)") == 0) {
+        /* net.zenoh.scout: raw scout with a whatami-target arg + two outs.
+         * Returns (rc, peer_id_bytes) too; the target rides the one arg. */
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("scout takes one arg"));
+        }
+        uint8_t what = (uint8_t)mp_obj_get_int(args[0]);
+        uint8_t zid[16];
+        uint8_t fwhat;
+        int32_t rc = ((int32_t (*)(uint8_t, uint8_t *, uint8_t *))p)(what, zid, &fwhat);
+        (void)fwhat;
+        mp_obj_t items[2];
+        items[0] = mp_obj_new_int(rc);
+        items[1] = (rc == 1) ? mp_obj_new_bytes(zid, 16) : mp_const_none;
+        return mp_obj_new_tuple(2, items);
+    }
+    if (strcmp(sig, "int32_t(const char *, const uint8_t *, uint32_t)") == 0) {
+        /* net.swarm.task.dispatch: (verb, payload-bytes) -> int32 status. A byte
+         * payload rides a bytes-like; verb rides a C string. */
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("dispatch needs verb+payload"));
+        }
+        const char *verb = mp_obj_str_get_str(args[0]);
+        mp_buffer_info_t bufinfo;
+        mp_get_buffer_raise(args[1], &bufinfo, MP_BUFFER_READ);
+        return mp_obj_new_int(((int32_t (*)(const char *, const uint8_t *, uint32_t))p)(
+            verb, (const uint8_t *)bufinfo.buf, (uint32_t)bufinfo.len));
+    }
+
     mp_raise_ValueError(MP_ERROR_TEXT("unsupported native sig (use CONNECT from C/RS)"));
 }
