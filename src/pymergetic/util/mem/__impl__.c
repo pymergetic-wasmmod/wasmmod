@@ -9,6 +9,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 #include <string.h>
 
@@ -25,11 +26,12 @@ enum {
 struct pm_util_mem_arena {
     unsigned char *base;
     unsigned char *end;
-    unsigned char *map_brk;  /* low side, bump-up, LIFO unmap */
-    unsigned char *heap_brk; /* high side, bump-down; TLSF pools live above this */
-    size_t spare;            /* extra TLSF pools outside [base, end) */
-    tlsf_t tlsf;             /* NULL until the first pool is seeded */
-    pm_util_lock_t lock;
+    atomic_uintptr_t map_brk;  /* low side, bump-up, LIFO unmap; atomic CAS */
+    atomic_uintptr_t heap_brk; /* high side, bump-down; atomic store on grow */
+    _Atomic size_t spare;      /* extra TLSF pools outside [base, end); atomic */
+    tlsf_t tlsf;               /* NULL until the first pool is seeded */
+    pm_util_lock_t map_lock;   /* protects map_brk bump/unmap */
+    pm_util_lock_t heap_lock;  /* protects tlsf ops + heap_brk grow + spare */
 };
 
 static size_t align_up(size_t x, size_t a) {
@@ -115,14 +117,15 @@ pm_util_mem_arena_t *pm_util_mem_arena_create(void *base, size_t size) {
 
     arena->base = usable;
     arena->end = usable + usable_span;
-    arena->map_brk = usable;
-    arena->heap_brk = arena->end - want;
-    arena->spare = 0;
-    arena->tlsf = tlsf_create_with_pool(arena->heap_brk, want);
+    atomic_init(&arena->map_brk, (uintptr_t)usable);
+    atomic_init(&arena->heap_brk, (uintptr_t)(arena->end - want));
+    atomic_init(&arena->spare, (size_t)0);
+    arena->tlsf = tlsf_create_with_pool(arena->end - want, want);
     if (arena->tlsf == NULL) {
         return NULL;
     }
-    pm_util_lock_init(&arena->lock);
+    pm_util_lock_init(&arena->map_lock);
+    pm_util_lock_init(&arena->heap_lock);
     return arena;
 }
 
@@ -135,10 +138,12 @@ void pm_util_mem_arena_destroy(pm_util_mem_arena_t *arena) {
     }
 }
 
-/* Carve one more pool out of the hole; caller already holds arena->lock.
+/* Carve one more pool out of the hole; caller already holds arena->heap_lock.
  * Returns 0 on success. */
 static int heap_grow_pool(pm_util_mem_arena_t *arena, size_t need) {
-    size_t hole = (size_t)(arena->heap_brk - arena->map_brk);
+    uintptr_t map_b = atomic_load_explicit(&arena->map_brk, memory_order_relaxed);
+    uintptr_t heap_b = atomic_load_explicit(&arena->heap_brk, memory_order_relaxed);
+    size_t hole = (size_t)(heap_b - map_b);
     /* TLSF is segmented-fit: it rounds a request up to a size class before
      * searching, so a pool sized at exactly need+overhead can still miss
      * for large requests (class granularity grows with size). need/16
@@ -155,11 +160,11 @@ static int heap_grow_pool(pm_util_mem_arena_t *arena, size_t need) {
     if (grow < tlsf_pool_overhead() + 64u) {
         return -1;
     }
-    unsigned char *pool = arena->heap_brk - grow;
+    unsigned char *pool = (unsigned char *)(heap_b - grow);
     if (tlsf_add_pool(arena->tlsf, pool, grow) == NULL) {
         return -1;
     }
-    arena->heap_brk = pool;
+    atomic_store_explicit(&arena->heap_brk, (uintptr_t)pool, memory_order_relaxed);
     return 0;
 }
 
@@ -167,12 +172,12 @@ void *pm_util_mem_alloc(pm_util_mem_arena_t *arena, size_t size) {
     if (arena == NULL || size == 0) {
         return NULL;
     }
-    pm_util_lock_acquire(&arena->lock);
+    pm_util_lock_acquire(&arena->heap_lock);
     void *p = tlsf_malloc(arena->tlsf, size);
     if (p == NULL && heap_grow_pool(arena, size) == 0) {
         p = tlsf_malloc(arena->tlsf, size);
     }
-    pm_util_lock_release(&arena->lock);
+    pm_util_lock_release(&arena->heap_lock);
     return p;
 }
 
@@ -180,12 +185,12 @@ void *pm_util_mem_realloc(pm_util_mem_arena_t *arena, void *ptr, size_t size) {
     if (arena == NULL) {
         return NULL;
     }
-    pm_util_lock_acquire(&arena->lock);
+    pm_util_lock_acquire(&arena->heap_lock);
     void *p = tlsf_realloc(arena->tlsf, ptr, size);
     if (p == NULL && size > 0 && heap_grow_pool(arena, size) == 0) {
         p = tlsf_realloc(arena->tlsf, ptr, size);
     }
-    pm_util_lock_release(&arena->lock);
+    pm_util_lock_release(&arena->heap_lock);
     return p;
 }
 
@@ -196,12 +201,12 @@ void *pm_util_mem_memalign(pm_util_mem_arena_t *arena, size_t align, size_t size
     if (align < sizeof(void *)) {
         align = sizeof(void *);
     }
-    pm_util_lock_acquire(&arena->lock);
+    pm_util_lock_acquire(&arena->heap_lock);
     void *p = tlsf_memalign(arena->tlsf, align, size);
     if (p == NULL && heap_grow_pool(arena, size + align) == 0) {
         p = tlsf_memalign(arena->tlsf, align, size);
     }
-    pm_util_lock_release(&arena->lock);
+    pm_util_lock_release(&arena->heap_lock);
     return p;
 }
 
@@ -209,9 +214,9 @@ void pm_util_mem_free(pm_util_mem_arena_t *arena, void *ptr) {
     if (arena == NULL || ptr == NULL) {
         return;
     }
-    pm_util_lock_acquire(&arena->lock);
+    pm_util_lock_acquire(&arena->heap_lock);
     tlsf_free(arena->tlsf, ptr);
-    pm_util_lock_release(&arena->lock);
+    pm_util_lock_release(&arena->heap_lock);
 }
 
 void *pm_util_mem_map(pm_util_mem_arena_t *arena, size_t size) {
@@ -219,14 +224,16 @@ void *pm_util_mem_map(pm_util_mem_arena_t *arena, size_t size) {
         return NULL;
     }
     size_t need = align_up(size, PM_UTIL_MEM_PAGE_SIZE);
-    pm_util_lock_acquire(&arena->lock);
-    if (need > (size_t)(arena->heap_brk - arena->map_brk)) {
-        pm_util_lock_release(&arena->lock);
+    pm_util_lock_acquire(&arena->map_lock);
+    uintptr_t map_b = atomic_load_explicit(&arena->map_brk, memory_order_relaxed);
+    uintptr_t heap_b = atomic_load_explicit(&arena->heap_brk, memory_order_relaxed);
+    if (need > (size_t)(heap_b - map_b)) {
+        pm_util_lock_release(&arena->map_lock);
         return NULL;
     }
-    unsigned char *p = arena->map_brk;
-    arena->map_brk += need;
-    pm_util_lock_release(&arena->lock);
+    unsigned char *p = (unsigned char *)map_b;
+    atomic_store_explicit(&arena->map_brk, map_b + need, memory_order_relaxed);
+    pm_util_lock_release(&arena->map_lock);
     return p;
 }
 
@@ -235,13 +242,14 @@ int32_t pm_util_mem_unmap(pm_util_mem_arena_t *arena, void *ptr, size_t size) {
         return -1;
     }
     size_t need = align_up(size, PM_UTIL_MEM_PAGE_SIZE);
-    pm_util_lock_acquire(&arena->lock);
-    int ok = (size_t)(arena->map_brk - arena->base) >= need
-        && (unsigned char *)ptr == arena->map_brk - need;
+    pm_util_lock_acquire(&arena->map_lock);
+    uintptr_t map_b = atomic_load_explicit(&arena->map_brk, memory_order_relaxed);
+    int ok = (size_t)(map_b - (uintptr_t)arena->base) >= need
+        && (unsigned char *)ptr == (unsigned char *)(map_b - need);
     if (ok) {
-        arena->map_brk -= need;
+        atomic_store_explicit(&arena->map_brk, map_b - need, memory_order_relaxed);
     }
-    pm_util_lock_release(&arena->lock);
+    pm_util_lock_release(&arena->map_lock);
     return ok ? 0 : -1;
 }
 
@@ -256,27 +264,28 @@ size_t pm_util_mem_arena_map_used(const pm_util_mem_arena_t *arena) {
     if (arena == NULL) {
         return 0;
     }
-    return (size_t)(arena->map_brk - arena->base);
+    return (size_t)(atomic_load_explicit(&arena->map_brk, memory_order_relaxed) - (uintptr_t)arena->base);
 }
 
 size_t pm_util_mem_arena_heap_used(const pm_util_mem_arena_t *arena) {
     if (arena == NULL) {
         return 0;
     }
-    return (size_t)(arena->end - arena->heap_brk);
+    return (size_t)((uintptr_t)arena->end - atomic_load_explicit(&arena->heap_brk, memory_order_relaxed));
 }
 
 size_t pm_util_mem_arena_spare(const pm_util_mem_arena_t *arena) {
     if (arena == NULL) {
         return 0;
     }
-    return arena->spare;
+    return atomic_load_explicit(&arena->spare, memory_order_relaxed);
 }
 
 int32_t pm_util_mem_arena_add_pool(pm_util_mem_arena_t *arena, void *base, size_t size) {
     uintptr_t lo;
     uintptr_t hi;
     size_t n;
+    size_t sp;
     if (arena == NULL || arena->tlsf == NULL || base == NULL || size == 0) {
         return -1;
     }
@@ -289,13 +298,14 @@ int32_t pm_util_mem_arena_add_pool(pm_util_mem_arena_t *arena, void *base, size_
     if (n < (size_t)PM_UTIL_MEM_TLSF_INIT_MIN) {
         return -1;
     }
-    pm_util_lock_acquire(&arena->lock);
+    pm_util_lock_acquire(&arena->heap_lock);
     if (tlsf_add_pool(arena->tlsf, (void *)lo, n) == NULL) {
-        pm_util_lock_release(&arena->lock);
+        pm_util_lock_release(&arena->heap_lock);
         return -1;
     }
-    arena->spare += n;
-    pm_util_lock_release(&arena->lock);
+    sp = atomic_load_explicit(&arena->spare, memory_order_relaxed) + n;
+    atomic_store_explicit(&arena->spare, sp, memory_order_relaxed);
+    pm_util_lock_release(&arena->heap_lock);
     return 0;
 }
 
@@ -303,7 +313,9 @@ size_t pm_util_mem_arena_hole(const pm_util_mem_arena_t *arena) {
     if (arena == NULL) {
         return 0;
     }
-    return (size_t)(arena->heap_brk - arena->map_brk);
+    uintptr_t heap_b = atomic_load_explicit(&arena->heap_brk, memory_order_relaxed);
+    uintptr_t map_b = atomic_load_explicit(&arena->map_brk, memory_order_relaxed);
+    return (size_t)(heap_b - map_b);
 }
 
 size_t pm_util_mem_arena_overhead(void) {
