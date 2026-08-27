@@ -43,6 +43,16 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     mp_wasm_elf_image_t **out, char *errbuf, size_t errbuf_len);
 void mp_wasm_elf_image_free(mp_wasm_elf_image_t *img);
 
+// Link N ET_REL objects into ONE executable image, resolving symbols across
+// objects: a name binds to the FIRST definition in objs order (pass objects
+// in depends order), then the resolve callback for true externals. Sections
+// of every object are appended into one mapping; relocations are applied
+// with the shared elf_apply_rela machinery.
+bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *lens,
+    uint32_t n_objs,
+    mp_wasm_elf_sym_resolve_t resolve, void *resolve_ctx,
+    mp_wasm_elf_image_t **out, char *errbuf, size_t errbuf_len);
+
 // Global STT_FUNC / STT_NOTYPE with defined value.
 void *mp_wasm_elf_lookup(const mp_wasm_elf_image_t *img, const char *name);
 

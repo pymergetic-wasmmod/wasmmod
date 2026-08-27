@@ -208,6 +208,115 @@ static bool aarch64_patch_branch26(uint32_t *ins, int64_t byte_off, char *errbuf
     return true;
 }
 
+/* One relocation, shared by the single- and multi-object loaders.
+ * P: patch site (already base-adjusted). S: resolved symbol address.
+ * got_base: image offset of the GOT. got_slot: this symbol's global GOT
+ * slot index (only read for GOTPCREL-family and GOT32 relocs). Returns
+ * false with errbuf set on overflow / unsupported / out-of-range. */
+static bool elf_apply_rela(uint8_t *P, uintptr_t S, int64_t A, uint32_t typ,
+    uint8_t *img_base, size_t got_base, uint32_t got_slot,
+    char *errbuf, size_t errbuf_len) {
+    switch (typ) {
+        case R_X86_64_NONE: // also R_AARCH64_NONE
+            break;
+        case R_X86_64_64:
+        case R_AARCH64_ABS64:
+            *(uint64_t *)P = (uint64_t)(S + (uintptr_t)A);
+            break;
+        case R_X86_64_PC32:
+        case R_X86_64_PLT32: {
+            int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
+            *(int32_t *)P = (int32_t)v;
+            break;
+        }
+        case R_X86_64_GOTPCREL:
+        case R_X86_64_GOTPCRELX:
+        case R_X86_64_REX_GOTPCRELX: {
+            uintptr_t G = (uintptr_t)(img_base + got_base + (size_t)got_slot * 8);
+            int64_t v = (int64_t)G + A - (int64_t)(uintptr_t)P;
+            *(int32_t *)P = (int32_t)v;
+            break;
+        }
+        case R_X86_64_GOT32: {
+            *(int32_t *)P = (int32_t)((int64_t)got_slot * 8 + A);
+            break;
+        }
+        case R_X86_64_32:
+        case R_X86_64_32S:
+        case R_AARCH64_ABS32: {
+            uint64_t v = (uint64_t)(S + (uintptr_t)A);
+            if (v > 0xffffffffu) {
+                set_err(errbuf, errbuf_len,
+                    "R_*_32 overflow (build with -fPIC or map below 4GiB)");
+                return false;
+            }
+            *(uint32_t *)P = (uint32_t)v;
+            break;
+        }
+        case R_X86_64_PC64:
+        case R_AARCH64_PREL64: {
+            int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
+            *(int64_t *)P = v;
+            break;
+        }
+        case R_AARCH64_PREL32: {
+            int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
+            *(int32_t *)P = (int32_t)v;
+            break;
+        }
+        case R_AARCH64_ADR_PREL_PG_HI21:
+        case R_AARCH64_ADR_PREL_PG_HI21_NC: {
+            uint64_t dest = (uint64_t)(S + (uintptr_t)A);
+            int64_t page_imm = (int64_t)((MP_WASM_ELF_PAGE(dest) - MP_WASM_ELF_PAGE((uint64_t)(uintptr_t)P)) >> 12);
+            aarch64_patch_adrp((uint32_t *)P, page_imm);
+            break;
+        }
+        case R_AARCH64_ADD_ABS_LO12_NC:
+        case R_AARCH64_LDST8_ABS_LO12_NC:
+            aarch64_patch_imm12((uint32_t *)P, (uint32_t)((S + (uintptr_t)A) & 0xfff));
+            break;
+        case R_AARCH64_LDST16_ABS_LO12_NC:
+            aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 1));
+            break;
+        case R_AARCH64_LDST32_ABS_LO12_NC:
+            aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 2));
+            break;
+        case R_AARCH64_LDST64_ABS_LO12_NC:
+            aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 3));
+            break;
+        case R_AARCH64_LDST128_ABS_LO12_NC:
+            aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 4));
+            break;
+        case R_AARCH64_JUMP26:
+        case R_AARCH64_CALL26: {
+            int64_t off = (int64_t)S + A - (int64_t)(uintptr_t)P;
+            if (!aarch64_patch_branch26((uint32_t *)P, off, errbuf, errbuf_len)) {
+                return false;
+            }
+            break;
+        }
+        case R_AARCH64_ADR_GOT_PAGE: {
+            uintptr_t G = (uintptr_t)(img_base + got_base + (size_t)got_slot * 8);
+            int64_t page_imm = (int64_t)((MP_WASM_ELF_PAGE(G) - MP_WASM_ELF_PAGE((uint64_t)(uintptr_t)P)) >> 12);
+            aarch64_patch_adrp((uint32_t *)P, page_imm);
+            break;
+        }
+        case R_AARCH64_LD64_GOT_LO12_NC: {
+            uintptr_t G = (uintptr_t)(img_base + got_base + (size_t)got_slot * 8);
+            aarch64_patch_imm12((uint32_t *)P, (uint32_t)((G & 0xfff) >> 3));
+            break;
+        }
+        default: {
+            char msg[80];
+            snprintf(msg, sizeof(msg), "unsupported reloc %u", (unsigned)typ);
+            set_err(errbuf, errbuf_len, msg);
+            return false;
+        }
+    }
+    return true;
+}
+
+
 static bool parse_ehdr(const uint8_t *buf, uint32_t len, Elf64_Ehdr *eh, char *errbuf, size_t errbuf_len) {
     if (buf == NULL || len < sizeof(Elf64_Ehdr)) {
         set_err(errbuf, errbuf_len, "elf truncated");
@@ -578,116 +687,13 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             }
             uint8_t *P = target_base + rela->r_offset;
             int64_t A = rela->r_addend;
-            switch (typ) {
-                case R_X86_64_NONE: // also R_AARCH64_NONE
-                    break;
-                case R_X86_64_64:
-                case R_AARCH64_ABS64:
-                    *(uint64_t *)P = (uint64_t)(S + (uintptr_t)A);
-                    break;
-                case R_X86_64_PC32:
-                case R_X86_64_PLT32: {
-                    int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
-                    *(int32_t *)P = (int32_t)v;
-                    break;
-                }
-                case R_X86_64_GOTPCREL:
-                case R_X86_64_GOTPCRELX:
-                case R_X86_64_REX_GOTPCRELX: {
-                    uintptr_t G = (uintptr_t)(base + got_base + (size_t)got_off[sym_i] * 8);
-                    int64_t v = (int64_t)G + A - (int64_t)(uintptr_t)P;
-                    *(int32_t *)P = (int32_t)v;
-                    break;
-                }
-                case R_X86_64_GOT32: {
-                    *(int32_t *)P = (int32_t)((int64_t)got_off[sym_i] * 8 + A);
-                    break;
-                }
-                case R_X86_64_32:
-                case R_X86_64_32S:
-                case R_AARCH64_ABS32: {
-                    uint64_t v = (uint64_t)(S + (uintptr_t)A);
-                    if (v > 0xffffffffu) {
-                        char msg[96];
-                        snprintf(msg, sizeof(msg),
-                            "R_*_32 overflow (build with -fPIC or map below 4GiB)");
-                        munmap(map, map_size);
-                        MICROPY_WASM_FREE(sec_addr);
-                        MICROPY_WASM_FREE(got_off);
-                        MICROPY_WASM_FREE(sym_addr);
-                        set_err(errbuf, errbuf_len, msg);
-                        return false;
-                    }
-                    *(uint32_t *)P = (uint32_t)v;
-                    break;
-                }
-                case R_X86_64_PC64:
-                case R_AARCH64_PREL64: {
-                    int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
-                    *(int64_t *)P = v;
-                    break;
-                }
-                case R_AARCH64_PREL32: {
-                    int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
-                    *(int32_t *)P = (int32_t)v;
-                    break;
-                }
-                case R_AARCH64_ADR_PREL_PG_HI21:
-                case R_AARCH64_ADR_PREL_PG_HI21_NC: {
-                    uint64_t dest = (uint64_t)(S + (uintptr_t)A);
-                    int64_t page_imm = (int64_t)((MP_WASM_ELF_PAGE(dest) - MP_WASM_ELF_PAGE((uint64_t)(uintptr_t)P)) >> 12);
-                    aarch64_patch_adrp((uint32_t *)P, page_imm);
-                    break;
-                }
-                case R_AARCH64_ADD_ABS_LO12_NC:
-                case R_AARCH64_LDST8_ABS_LO12_NC:
-                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)((S + (uintptr_t)A) & 0xfff));
-                    break;
-                case R_AARCH64_LDST16_ABS_LO12_NC:
-                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 1));
-                    break;
-                case R_AARCH64_LDST32_ABS_LO12_NC:
-                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 2));
-                    break;
-                case R_AARCH64_LDST64_ABS_LO12_NC:
-                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 3));
-                    break;
-                case R_AARCH64_LDST128_ABS_LO12_NC:
-                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) & 0xfff) >> 4));
-                    break;
-                case R_AARCH64_JUMP26:
-                case R_AARCH64_CALL26: {
-                    int64_t off = (int64_t)S + A - (int64_t)(uintptr_t)P;
-                    if (!aarch64_patch_branch26((uint32_t *)P, off, errbuf, errbuf_len)) {
-                        munmap(map, map_size);
-                        MICROPY_WASM_FREE(sec_addr);
-                        MICROPY_WASM_FREE(got_off);
-                        MICROPY_WASM_FREE(sym_addr);
-                        return false;
-                    }
-                    break;
-                }
-                case R_AARCH64_ADR_GOT_PAGE: {
-                    uintptr_t G = (uintptr_t)(base + got_base + (size_t)got_off[sym_i] * 8);
-                    int64_t page_imm = (int64_t)((MP_WASM_ELF_PAGE(G) - MP_WASM_ELF_PAGE((uint64_t)(uintptr_t)P)) >> 12);
-                    aarch64_patch_adrp((uint32_t *)P, page_imm);
-                    break;
-                }
-                case R_AARCH64_LD64_GOT_LO12_NC: {
-                    uintptr_t G = (uintptr_t)(base + got_base + (size_t)got_off[sym_i] * 8);
-                    aarch64_patch_imm12((uint32_t *)P, (uint32_t)((G & 0xfff) >> 3));
-                    break;
-                }
-                default: {
-                    char msg[80];
-                    snprintf(msg, sizeof(msg), "unsupported reloc %u", (unsigned)typ);
-                    munmap(map, map_size);
-                    MICROPY_WASM_FREE(sec_addr);
-                    MICROPY_WASM_FREE(got_off);
-                    MICROPY_WASM_FREE(sym_addr);
-                    set_err(errbuf, errbuf_len, msg);
-                    return false;
-                }
+            if (!elf_apply_rela(P, S, A, typ, base, got_base, got_off[sym_i],
+                errbuf, errbuf_len)) {
+                munmap(map, map_size);
+                MICROPY_WASM_FREE(sec_addr);
+                MICROPY_WASM_FREE(got_off);
+                MICROPY_WASM_FREE(sym_addr);
+                return false;
             }
         }
     }
@@ -778,6 +784,501 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     MICROPY_WASM_FREE(sym_addr);
     *out = img;
     return true;
+}
+
+/*
+ * Multi-object load: N ET_REL objects into ONE executable image.
+ *
+ * Layout = every object's ALLOC sections appended (each object keeps its own
+ * section offsets, rebased by that object's image_base), then one shared GOT.
+ * Symbol resolution = defined globals collected across objects first (a name
+ * resolves to the FIRST definition in objs order — pass objects in depends
+ * order), then the resolve callback for true externals. Relocations reuse
+ * elf_apply_rela; section bases are offset by image_base.
+ */
+typedef struct {
+    const uint8_t *elf;
+    uint32_t len;
+    Elf64_Ehdr eh;
+    uintptr_t *sec_addr;   /* section offsets, image-relative (before image_base) */
+    size_t image_base;     /* where this object's sections start in the image */
+    int symtab_i;
+    Elf64_Shdr symsh;
+    Elf64_Shdr strsh;
+    uint32_t nsym;
+    uintptr_t *sym_addr;   /* resolved absolute addresses */
+    uint32_t *got_off;     /* per-symbol GLOBAL GOT slot (uint32)-1 = none */
+    uint32_t n_got;
+    uint32_t first_got;    /* this object's slots start here in the shared GOT */
+} elf_multi_obj_t;
+
+typedef struct {
+    const char *name;
+    uintptr_t addr;
+} elf_multi_def_t;
+
+static void multi_free_objs(elf_multi_obj_t *objs_st, uint32_t n_parsed) {
+    for (uint32_t i = 0; i < n_parsed; ++i) {
+        if (objs_st[i].sec_addr) {
+            MICROPY_WASM_FREE(objs_st[i].sec_addr);
+        }
+        if (objs_st[i].sym_addr) {
+            MICROPY_WASM_FREE(objs_st[i].sym_addr);
+        }
+        if (objs_st[i].got_off) {
+            MICROPY_WASM_FREE(objs_st[i].got_off);
+        }
+    }
+    MICROPY_WASM_FREE(objs_st);
+}
+
+static bool multi_lookup_def(const elf_multi_def_t *defs, uint32_t n_def,
+    const char *nm, uintptr_t *out) {
+    for (uint32_t d = 0; d < n_def; ++d) {
+        if (defs[d].name != NULL && strcmp(defs[d].name, nm) == 0) {
+            *out = defs[d].addr;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *lens,
+    uint32_t n_objs,
+    mp_wasm_elf_sym_resolve_t resolve, void *resolve_ctx,
+    mp_wasm_elf_image_t **out, char *errbuf, size_t errbuf_len) {
+    mp_wasm_elf_resolve_clear_err();
+    if (out == NULL || n_objs == 0 || objs == NULL || lens == NULL) {
+        set_err(errbuf, errbuf_len, "multi: no objects");
+        return false;
+    }
+    *out = NULL;
+
+    elf_multi_obj_t *o = MICROPY_WASM_MALLOC((size_t)n_objs * sizeof(*o));
+    if (o == NULL) {
+        set_err(errbuf, errbuf_len, "oom");
+        return false;
+    }
+    memset(o, 0, (size_t)n_objs * sizeof(*o));
+
+    uint32_t i;
+    void *map = NULL;
+    size_t map_size = 0;
+    elf_multi_def_t *defs = NULL;
+    uint32_t n_def = 0;
+    mp_wasm_elf_image_t *img = NULL;
+
+    /* Parse every object, locate symtabs. */
+    for (i = 0; i < n_objs; ++i) {
+        o[i].elf = objs[i];
+        o[i].len = lens[i];
+        if (!parse_ehdr(o[i].elf, o[i].len, &o[i].eh, errbuf, errbuf_len)) {
+            goto fail;
+        }
+        o[i].sec_addr = MICROPY_WASM_MALLOC((size_t)o[i].eh.e_shnum * sizeof(uintptr_t));
+        if (o[i].sec_addr == NULL) {
+            set_err(errbuf, errbuf_len, "oom");
+            goto fail;
+        }
+        memset(o[i].sec_addr, 0, (size_t)o[i].eh.e_shnum * sizeof(uintptr_t));
+        o[i].symtab_i = -1;
+        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
+            Elf64_Shdr sh;
+            if (get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)
+                && sh.sh_type == SHT_SYMTAB) {
+                o[i].symtab_i = (int)s;
+                break;
+            }
+        }
+        if (o[i].symtab_i < 0) {
+            set_err(errbuf, errbuf_len, "no symtab");
+            goto fail;
+        }
+        if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, (uint16_t)o[i].symtab_i, &o[i].symsh)
+            || !get_shdr(o[i].elf, o[i].len, &o[i].eh, (uint16_t)o[i].symsh.sh_link, &o[i].strsh)
+            || o[i].strsh.sh_type != SHT_STRTAB
+            || o[i].symsh.sh_offset + o[i].symsh.sh_size > o[i].len
+            || o[i].strsh.sh_offset + o[i].strsh.sh_size > o[i].len
+            || o[i].symsh.sh_entsize < sizeof(Elf64_Sym)) {
+            set_err(errbuf, errbuf_len, "bad symtab");
+            goto fail;
+        }
+        o[i].nsym = (uint32_t)(o[i].symsh.sh_size / o[i].symsh.sh_entsize);
+    }
+
+    /* Layout sections + count GOT slots per object (global slot indices). */
+    size_t image_size = 0;
+    uint32_t total_got = 0;
+    for (i = 0; i < n_objs; ++i) {
+        o[i].image_base = image_size;
+        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
+            Elf64_Shdr sh;
+            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)) {
+                set_err(errbuf, errbuf_len, "bad shdr");
+                goto fail;
+            }
+            if (!(sh.sh_flags & SHF_ALLOC) || sh.sh_size == 0) {
+                continue;
+            }
+            uintptr_t align = sh.sh_addralign ? (uintptr_t)sh.sh_addralign : 1;
+            image_size = align_up(image_size, align);
+            o[i].sec_addr[s] = image_size;
+            image_size += (size_t)sh.sh_size;
+        }
+        o[i].got_off = MICROPY_WASM_MALLOC((size_t)o[i].nsym * sizeof(uint32_t));
+        if (o[i].got_off == NULL) {
+            set_err(errbuf, errbuf_len, "oom");
+            goto fail;
+        }
+        memset(o[i].got_off, 0xff, (size_t)o[i].nsym * sizeof(uint32_t));
+        o[i].n_got = 0;
+        o[i].first_got = total_got;
+        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
+            Elf64_Shdr sh;
+            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)) {
+                continue;
+            }
+            if (sh.sh_type != SHT_RELA || sh.sh_entsize < sizeof(Elf64_Rela)
+                || sh.sh_offset + sh.sh_size > o[i].len
+                || sh.sh_info >= o[i].eh.e_shnum) {
+                continue;
+            }
+            Elf64_Shdr tgt;
+            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, sh.sh_info, &tgt)
+                || !(tgt.sh_flags & SHF_ALLOC)) {
+                continue;
+            }
+            uint32_t nrel = (uint32_t)(sh.sh_size / sh.sh_entsize);
+            for (uint32_t r = 0; r < nrel; ++r) {
+                const Elf64_Rela *rela = (const Elf64_Rela *)(o[i].elf + sh.sh_offset + (size_t)r * sh.sh_entsize);
+                uint32_t typ = (uint32_t)ELF64_R_TYPE(rela->r_info);
+                uint32_t sym_i = (uint32_t)ELF64_R_SYM(rela->r_info);
+                if (sym_i >= o[i].nsym) {
+                    continue;
+                }
+                if (reloc_needs_got(o[i].eh.e_machine, typ)
+                    && o[i].got_off[sym_i] == 0xffffffffu) {
+                    o[i].got_off[sym_i] = total_got++;
+                    o[i].n_got++;
+                }
+            }
+        }
+    }
+    if (image_size == 0) {
+        image_size = 4096;
+    }
+
+    size_t got_base = align_up(image_size, 8);
+    image_size = got_base + (size_t)total_got * 8;
+
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    map_size = align_up(image_size, page);
+    map = mmap(NULL, map_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+#if defined(__x86_64__) && defined(MAP_32BIT)
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT,
+#else
+        MAP_PRIVATE | MAP_ANONYMOUS,
+#endif
+        -1, 0);
+    if (map == MAP_FAILED) {
+#if defined(__x86_64__) && defined(MAP_32BIT)
+        map = mmap(NULL, map_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
+    }
+    if (map == MAP_FAILED) {
+        map = NULL;
+        set_err(errbuf, errbuf_len, "mmap failed");
+        goto fail;
+    }
+    memset(map, 0, map_size);
+    uint8_t *base = (uint8_t *)map;
+
+    /* Copy ALLOC section data, rebased per object. */
+    for (i = 0; i < n_objs; ++i) {
+        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
+            Elf64_Shdr sh;
+            get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh);
+            if (!(sh.sh_flags & SHF_ALLOC) || sh.sh_size == 0) {
+                continue;
+            }
+            if (sh.sh_type == SHT_NOBITS) {
+                continue;
+            }
+            if (sh.sh_offset + sh.sh_size > o[i].len) {
+                set_err(errbuf, errbuf_len, "section data OOB");
+                goto fail;
+            }
+            memcpy(base + o[i].image_base + o[i].sec_addr[s],
+                o[i].elf + sh.sh_offset, (size_t)sh.sh_size);
+        }
+    }
+
+    /* Collect defined globals across objects (first in objs order wins). */
+    uint32_t defs_cap = 0;
+    for (i = 0; i < n_objs; ++i) {
+        defs_cap += o[i].nsym;
+    }
+    defs = MICROPY_WASM_MALLOC((size_t)defs_cap * sizeof(*defs));
+    if (defs == NULL) {
+        set_err(errbuf, errbuf_len, "oom");
+        goto fail;
+    }
+    for (i = 0; i < n_objs; ++i) {
+        const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
+        const char *strtab = (const char *)(o[i].elf + o[i].strsh.sh_offset);
+        for (uint32_t k = 0; k < o[i].nsym; ++k) {
+            const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)k * o[i].symsh.sh_entsize);
+            uint8_t bind = ELF64_ST_BIND(s->st_info);
+            if (s->st_name == 0 || s->st_name >= o[i].strsh.sh_size) {
+                continue;
+            }
+            if (bind != STB_GLOBAL && bind != STB_WEAK) {
+                continue;
+            }
+            if (s->st_shndx == SHN_UNDEF || s->st_shndx == SHN_ABS
+                || s->st_shndx == SHN_COMMON || s->st_shndx >= o[i].eh.e_shnum) {
+                continue;
+            }
+            defs[n_def].name = strtab + s->st_name;
+            defs[n_def].addr = (uintptr_t)(base + o[i].image_base
+                + o[i].sec_addr[s->st_shndx] + s->st_value);
+            n_def++;
+        }
+    }
+
+    /* Resolve symbols per object: defined → image; undef → other objects,
+     * then the resolve callback. Fill GOT entries. */
+    for (i = 0; i < n_objs; ++i) {
+        const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
+        const char *strtab = (const char *)(o[i].elf + o[i].strsh.sh_offset);
+        o[i].sym_addr = MICROPY_WASM_MALLOC((size_t)o[i].nsym * sizeof(uintptr_t));
+        if (o[i].sym_addr == NULL) {
+            set_err(errbuf, errbuf_len, "oom");
+            goto fail;
+        }
+        memset(o[i].sym_addr, 0, (size_t)o[i].nsym * sizeof(uintptr_t));
+        for (uint32_t k = 0; k < o[i].nsym; ++k) {
+            const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)k * o[i].symsh.sh_entsize);
+            if (s->st_shndx == SHN_UNDEF) {
+                if (s->st_name == 0 || s->st_name >= o[i].strsh.sh_size) {
+                    continue;
+                }
+                const char *nm = strtab + s->st_name;
+                if (strcmp(nm, "_GLOBAL_OFFSET_TABLE_") == 0) {
+                    o[i].sym_addr[k] = (uintptr_t)(base + got_base);
+                    continue;
+                }
+                uintptr_t a = 0;
+                if (multi_lookup_def(defs, n_def, nm, &a)) {
+                    o[i].sym_addr[k] = a;
+                } else if (resolve != NULL && nm[0] != '\0') {
+                    void *p = resolve(nm, resolve_ctx);
+                    if (p != NULL) {
+                        o[i].sym_addr[k] = (uintptr_t)p;
+                    }
+                }
+                continue;
+            }
+            if (s->st_shndx == SHN_ABS) {
+                o[i].sym_addr[k] = (uintptr_t)s->st_value;
+                continue;
+            }
+            if (s->st_shndx == SHN_COMMON || s->st_shndx >= o[i].eh.e_shnum) {
+                continue;
+            }
+            o[i].sym_addr[k] = (uintptr_t)(base + o[i].image_base
+                + o[i].sec_addr[s->st_shndx] + s->st_value);
+        }
+        for (uint32_t k = 0; k < o[i].nsym; ++k) {
+            if (o[i].got_off[k] == 0xffffffffu) {
+                continue;
+            }
+            *(uint64_t *)(base + got_base + (size_t)o[i].got_off[k] * 8)
+                = (uint64_t)o[i].sym_addr[k];
+        }
+    }
+
+    /* Apply relocations per object (shared elf_apply_rela). */
+    for (i = 0; i < n_objs; ++i) {
+        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
+            Elf64_Shdr sh;
+            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)) {
+                continue;
+            }
+            if (sh.sh_type != SHT_RELA) {
+                continue;
+            }
+            if (sh.sh_info >= o[i].eh.e_shnum || sh.sh_entsize < sizeof(Elf64_Rela)
+                || sh.sh_offset + sh.sh_size > o[i].len) {
+                set_err(errbuf, errbuf_len, "bad rela");
+                goto fail;
+            }
+            Elf64_Shdr tgt;
+            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, sh.sh_info, &tgt)
+                || !(tgt.sh_flags & SHF_ALLOC)) {
+                continue;
+            }
+            uint32_t nrel = (uint32_t)(sh.sh_size / sh.sh_entsize);
+            uint8_t *target_base = base + o[i].image_base + o[i].sec_addr[sh.sh_info];
+            for (uint32_t r = 0; r < nrel; ++r) {
+                const Elf64_Rela *rela = (const Elf64_Rela *)(o[i].elf + sh.sh_offset + (size_t)r * sh.sh_entsize);
+                uint32_t sym_i = (uint32_t)ELF64_R_SYM(rela->r_info);
+                uint32_t typ = (uint32_t)ELF64_R_TYPE(rela->r_info);
+                if (sym_i >= o[i].nsym) {
+                    set_err(errbuf, errbuf_len, "rela sym OOB");
+                    goto fail;
+                }
+                uintptr_t S = o[i].sym_addr[sym_i];
+                if (S == 0 && typ != R_X86_64_NONE) {
+                    const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
+                    const char *strtab = (const char *)(o[i].elf + o[i].strsh.sh_offset);
+                    const Elf64_Sym *sm = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)sym_i * o[i].symsh.sh_entsize);
+                    const char *nm = (sm->st_name < o[i].strsh.sh_size) ? (strtab + sm->st_name) : "?";
+                    char msg[160];
+                    if (elf_resolve_err[0] != '\0') {
+                        snprintf(msg, sizeof(msg), "%s", elf_resolve_err);
+                        mp_wasm_elf_resolve_clear_err();
+                    } else {
+                        snprintf(msg, sizeof(msg), "multi: unresolved symbol: %s", nm);
+                    }
+                    set_err(errbuf, errbuf_len, msg);
+                    goto fail;
+                }
+                {
+                    size_t need = 4;
+                    if (typ == R_X86_64_NONE) {
+                        need = 0;
+                    } else if (typ == R_X86_64_64 || typ == R_AARCH64_ABS64
+                        || typ == R_X86_64_PC64 || typ == R_AARCH64_PREL64) {
+                        need = 8;
+                    }
+                    if (need != 0
+                        && (rela->r_offset > tgt.sh_size
+                            || tgt.sh_size - rela->r_offset < need)) {
+                        set_err(errbuf, errbuf_len, "rela offset OOB");
+                        goto fail;
+                    }
+                }
+                uint8_t *P = target_base + rela->r_offset;
+                if (!elf_apply_rela(P, S, rela->r_addend, typ, base, got_base,
+                    o[i].got_off[sym_i], errbuf, errbuf_len)) {
+                    goto fail;
+                }
+            }
+        }
+    }
+
+    /* Publish global function symbols (same shape as the single-object
+     * loader; names copied from the LAST object's defs — but names must
+     * outlive the ELF buffers, so copy all objects' bytes into file_copy). */
+    {
+        size_t total_file = 0;
+        for (i = 0; i < n_objs; ++i) {
+            total_file += o[i].len;
+        }
+        img = MICROPY_WASM_MALLOC(sizeof(*img));
+        if (img == NULL) {
+            set_err(errbuf, errbuf_len, "oom");
+            goto fail;
+        }
+        memset(img, 0, sizeof(*img));
+        img->base = base;
+        img->size = map_size;
+        img->file_copy = MICROPY_WASM_MALLOC(total_file);
+        if (img->file_copy == NULL) {
+            set_err(errbuf, errbuf_len, "oom");
+            goto fail;
+        }
+        img->file_len = (uint32_t)total_file;
+
+        /* Rebuild defs against the file_copy buffer so published names point
+         * at owned memory. Walk each object's copy at its cumulative offset. */
+        size_t off = 0;
+        uint32_t n_pub = 0;
+        for (i = 0; i < n_objs; ++i) {
+            memcpy(img->file_copy + off, o[i].elf, o[i].len);
+            off += o[i].len;
+        }
+        /* Count publishable symbols. */
+        for (i = 0; i < n_objs; ++i) {
+            const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
+            for (uint32_t k = 0; k < o[i].nsym; ++k) {
+                const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)k * o[i].symsh.sh_entsize);
+                uint8_t bind = ELF64_ST_BIND(s->st_info);
+                uint8_t typ = ELF64_ST_TYPE(s->st_info);
+                if (s->st_shndx == SHN_UNDEF || s->st_name == 0) {
+                    continue;
+                }
+                if (bind != STB_GLOBAL && bind != STB_WEAK) {
+                    continue;
+                }
+                if (typ != STT_FUNC && typ != STT_NOTYPE) {
+                    continue;
+                }
+                if (o[i].sym_addr[k] == 0) {
+                    continue;
+                }
+                n_pub++;
+            }
+        }
+        img->n_syms = n_pub;
+        if (n_pub > 0) {
+            img->syms = MICROPY_WASM_MALLOC((size_t)n_pub * sizeof(mp_wasm_elf_sym_t));
+            if (img->syms == NULL) {
+                set_err(errbuf, errbuf_len, "oom");
+                goto fail;
+            }
+            uint32_t w = 0;
+            /* Object file copies are at cumulative offsets; each object's
+             * strtab lives at its own sh_offset within its slice. */
+            size_t curoff = 0;
+            for (i = 0; i < n_objs; ++i) {
+                const uint8_t *cpy = img->file_copy + curoff;
+                const char *str2 = (const char *)(cpy + o[i].strsh.sh_offset);
+                const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
+                for (uint32_t k = 0; k < o[i].nsym; ++k) {
+                    const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)k * o[i].symsh.sh_entsize);
+                    uint8_t bind = ELF64_ST_BIND(s->st_info);
+                    uint8_t typ = ELF64_ST_TYPE(s->st_info);
+                    if (s->st_shndx == SHN_UNDEF || s->st_name == 0) {
+                        continue;
+                    }
+                    if (bind != STB_GLOBAL && bind != STB_WEAK) {
+                        continue;
+                    }
+                    if (typ != STT_FUNC && typ != STT_NOTYPE) {
+                        continue;
+                    }
+                    if (o[i].sym_addr[k] == 0) {
+                        continue;
+                    }
+                    img->syms[w].name = str2 + s->st_name;
+                    img->syms[w].addr = (void *)o[i].sym_addr[k];
+                    img->syms[w].st_info = s->st_info;
+                    w++;
+                }
+                curoff += o[i].len;
+            }
+        }
+    }
+
+    MICROPY_WASM_FREE(defs);
+    multi_free_objs(o, n_objs);
+    *out = img;
+    return true;
+
+fail:
+    if (img != NULL) {
+        mp_wasm_elf_image_free(img);
+    } else if (map != NULL) {
+        munmap(map, map_size);
+    }
+    if (defs != NULL) {
+        MICROPY_WASM_FREE(defs);
+    }
+    multi_free_objs(o, n_objs);
+    return false;
 }
 
 void *mp_wasm_elf_lookup(const mp_wasm_elf_image_t *img, const char *name) {
