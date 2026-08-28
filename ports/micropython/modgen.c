@@ -12,6 +12,7 @@
 #if MICROPY_PY_WASM_GEN
 
 #include <string.h>
+#include <stdio.h>
 
 #include "extmod/vfs.h"
 #include "py/obj.h"
@@ -22,9 +23,142 @@
 #include "ports/micropython/importhook.h"
 #include "ports/micropython/modgen.h"
 #include "pymergetic/util/gen/__exports__.h"
+#include "pymergetic/wasmmod/registry.h"
 
 static vstr_t gen_pyi_buf;
 static int gen_pyi_buf_inited;
+
+/* py attr of a C export name, same rule as gen's py_attr_from_export:
+ * strip the fqn-derived prefix ("pm_" + dots-as-underscores + "_"), else the
+ * last underscore segment. Returns 1 with attr filled. */
+static int gen_py_attr_of(const char *fqn, const char *cname, char *attr, size_t attr_max) {
+    char prefix[128];
+    size_t n = 0;
+    const char *p;
+    const char *leaf;
+    if (fqn == NULL || cname == NULL || attr == NULL || attr_max == 0) {
+        return 0;
+    }
+    /* gen's rule: "pm_" + fqn-after-"pymergetic." with dots as underscores */
+    p = fqn;
+    if (strncmp(p, "pymergetic.", 11) == 0) {
+        p += 11;
+    }
+    prefix[n++] = 'p';
+    prefix[n++] = 'm';
+    prefix[n++] = '_';
+    while (*p != 0 && n + 1u < sizeof(prefix)) {
+        prefix[n++] = *p == '.' ? '_' : *p;
+        p++;
+    }
+    prefix[n] = 0;
+    {
+        char full[192];
+        size_t flen;
+        snprintf(full, sizeof(full), "%s_", prefix);
+        flen = strlen(full);
+        if (strncmp(cname, full, flen) == 0 && cname[flen] != 0) {
+            snprintf(attr, attr_max, "%s", cname + flen);
+            return 1;
+        }
+    }
+    leaf = strrchr(cname, '_');
+    leaf = leaf != NULL ? leaf + 1 : cname;
+    if (*leaf == 0) {
+        return 0;
+    }
+    snprintf(attr, attr_max, "%s", leaf);
+    return 1;
+}
+
+/* The C export name whose py attr is `attr` (reverse of gen's
+ * py_attr_from_export): enumerate the module's registry exports and keep the
+ * one whose py attr matches. Returns 1 with cname filled, 0 when none. */
+static int gen_cname_for(const uint8_t *fqn, uint32_t fqn_len, const char *attr,
+    char *cname, size_t cname_max) {
+    uint32_t n = pm_wasmmod_registry_export_count(fqn, fqn_len);
+    char ename[128];
+    char eattr[128];
+    uint32_t i;
+    if (attr == NULL || cname == NULL || cname_max == 0) {
+        return 0;
+    }
+    for (i = 0; i < n; i++) {
+        pm_wasmmod_registry_export_kind_t kind;
+        uint32_t ename_len = (uint32_t)sizeof(ename) - 1u;
+        uint32_t esig_len = 0;
+        if (pm_wasmmod_registry_export_at(fqn, fqn_len, i,
+                (uint8_t *)ename, &ename_len, &kind, NULL, &esig_len) != 0) {
+            continue;
+        }
+        ename[ename_len] = 0;
+        if (!gen_py_attr_of((const char *)fqn, ename, eattr, sizeof(eattr))) {
+            continue;
+        }
+        if (strcmp(eattr, attr) == 0) {
+            snprintf(cname, cname_max, "%s", ename);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Pull the prose doc for one export from the metal inspect card's extractor
+ * (Phase 9). Returns NULL when the seat has no doc extractor or the export
+ * has no doc block — the stub stays a bare def, never a wrong docstring. */
+static const char *gen_doc_for(const uint8_t *fqn, uint32_t fqn_len, const char *cname) {
+    const char *(*doc_fn)(const char *, const char *);
+    char fqnbuf[192];
+    /* Resolve through the registry, not a direct link: seats without the
+     * metal inspect card (pure wasmmod builds) still compile this port and
+     * get NULL here — the stub stays a bare def, never a wrong docstring. */
+    doc_fn = (const char *(*)(const char *, const char *))
+        pm_wasmmod_registry_resolve_native(
+            (const uint8_t *)"pymergetic.metal.inspect",
+            (uint32_t)strlen("pymergetic.metal.inspect"),
+            (const uint8_t *)"pm_metal_inspect_doc",
+            (uint32_t)strlen("pm_metal_inspect_doc"));
+    if (doc_fn == NULL || fqn_len >= sizeof(fqnbuf)) {
+        return NULL;
+    }
+    /* the provider's fqn bytes are length-delimited, not NUL-terminated */
+    memcpy(fqnbuf, fqn, fqn_len);
+    fqnbuf[fqn_len] = 0;
+    return doc_fn(fqnbuf, cname);
+}
+
+/* First prose sentence of a JSON doc body (up to the first '.'), or NULL.
+ * The full JSON belongs to /docs; a stub docstring wants plain prose. */
+static const char *gen_doc_prose(const char *doc, char *buf, size_t buf_max) {
+    const char *k;
+    const char *v;
+    size_t n = 0;
+    if (doc == NULL || buf == NULL || buf_max < 2) {
+        return NULL;
+    }
+    k = strstr(doc, "\"prose\":\"");
+    if (k == NULL) {
+        return NULL;
+    }
+    v = k + 9;
+    while (v[n] != 0 && v[n] != '"' && n + 1u < buf_max) {
+        if (v[n] == '\\' && v[n + 1] != 0 && n + 2u < buf_max) {
+            buf[n] = v[n + 1];
+            n += 2;
+            continue;
+        }
+        if (v[n] == '\\' && v[n + 1] != 0) {
+            break;   /* escape would overflow the buffer — stop here */
+        }
+        buf[n] = v[n];
+        n++;
+    }
+    buf[n] = 0;
+    if (n == 0) {
+        return NULL;
+    }
+    return buf;
+}
 
 static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_len,
     uint8_t *buf, uint32_t *inout_len) {
@@ -67,7 +201,27 @@ static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_
             }
             vstr_add_str(&gen_pyi_buf, "def ");
             vstr_add_str(&gen_pyi_buf, name);
-            vstr_add_str(&gen_pyi_buf, "(*args: Any, **kwargs: Any) -> Any: ...\n\n");
+            vstr_add_str(&gen_pyi_buf, "(*args: Any, **kwargs: Any) -> Any");
+            /* Docstring from the card's authored comment block (Phase 9):
+             * resolve the callable's C export through the registry, ask the
+             * inspect extractor for its doc, and land the prose in the stub
+             * so REPL help and type checkers read the same text. */
+            {
+                char cname[128];
+                char prose[256];
+                const char *doc = NULL;
+                if (gen_cname_for(fqn, fqn_len, name, cname, sizeof(cname))) {
+                    doc = gen_doc_prose(gen_doc_for(fqn, fqn_len, cname),
+                        prose, sizeof(prose));
+                }
+                if (doc != NULL) {
+                    vstr_add_str(&gen_pyi_buf, ":\n    \"\"\"");
+                    vstr_add_str(&gen_pyi_buf, doc);
+                    vstr_add_str(&gen_pyi_buf, "\"\"\"\n    ...\n\n");
+                } else {
+                    vstr_add_str(&gen_pyi_buf, ": ...\n\n");
+                }
+            }
             any = 1;
         }
         nlr_pop();
