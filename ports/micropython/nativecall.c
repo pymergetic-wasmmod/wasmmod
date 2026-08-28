@@ -10,6 +10,8 @@
 #include "pymergetic/wasmmod/registry/__exports__.h"
 #include "pymergetic/wasmmod/registry/__types__.h"
 #include "pymergetic/metal/build/__types__.h"
+#include "pymergetic/metal/edit/__types__.h"
+#include "pymergetic/util/mem.h"
 
 /* Wasm/AOT exports are registry_fn_t trampolines (args/results), not a
  * C ABI symbol. Casting them to int32_t(void) returns the trampoline
@@ -19,6 +21,11 @@ static int wasm_container(const char *fqn) {
     return k == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_WASM
         || k == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_AOT;
 }
+
+/* metal.edit C editor (Phase 12): the upy editor flow is sequential (parse,
+ * locate, edit, write), so one static tree slot serves every bridge — the
+ * parse_c handle is the slot's validity, exactly like the accessor spine. */
+static pm_metal_edit_tree_t s_edit_tree;
 
 static int32_t call_registry_i32(const char *fqn, const char *export_name,
     const pm_wasmmod_registry_value_t *args, uint32_t nargs) {
@@ -343,6 +350,135 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             mp_obj_t pair[2];
             pair[0] = mp_obj_new_int(rc);
             pair[1] = mp_obj_new_str(lang, strlen(lang));
+            return mp_obj_new_tuple(2, pair);
+        }
+    }
+    /* metal.edit C editor (Phase 12): parse_c(src) -> handle (int, 0 = parse
+     * error), locate(handle, kind, name) -> (kind, name, line, span) or None,
+     * set_define/set_fn_body(handle, name, text) -> edited source or None,
+     * typecheck_c(src) -> (rc, err), write_back(target, path, src) -> (rc, err).
+     * The tree lives in a static slot — the upy editor flow is sequential by
+     * contract, same posture as the build accessor spine's info slot. */
+    if (strcmp(sig, "int32_t(pm_metal_edit_tree_t *, const char *, size_t)") == 0) {
+        int32_t rc;
+        const char *src;
+        size_t src_len;
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("parse_c needs source"));
+        }
+        src = mp_obj_str_get_str(args[0]);
+        src_len = strlen(src);
+        memset(&s_edit_tree, 0, sizeof(s_edit_tree));
+        rc = ((int32_t (*)(pm_metal_edit_tree_t *, const char *, size_t))p)(
+            &s_edit_tree, src, src_len);
+        if (rc != 0) {
+            return mp_const_none;
+        }
+        return mp_obj_new_int_from_uint(1u);    /* the one live tree */
+    }
+    if (strcmp(sig, "const pm_metal_edit_node_t *(const pm_metal_edit_tree_t *, pm_metal_edit_kind_t, const char *)") == 0) {
+        const pm_metal_edit_node_t *n;
+        mp_int_t kind_i;
+        const char *kind_s;
+        const char *name;
+        if (n_args != 3) {
+            mp_raise_TypeError(MP_ERROR_TEXT("locate needs handle, kind, name"));
+        }
+        if (mp_obj_get_int_maybe(args[1], &kind_i) && kind_i >= 0
+            && kind_i <= (mp_int_t)PM_METAL_EDIT_DEFINE) {
+            /* numeric kind passthrough */
+        } else {
+            kind_s = mp_obj_str_get_str(args[1]);
+            if (strcmp(kind_s, "fn") == 0) {
+                kind_i = PM_METAL_EDIT_FN;
+            } else if (strcmp(kind_s, "define") == 0) {
+                kind_i = PM_METAL_EDIT_DEFINE;
+            } else {
+                return mp_const_none;
+            }
+        }
+        name = mp_obj_str_get_str(args[2]);
+        n = ((const pm_metal_edit_node_t *(*)(const pm_metal_edit_tree_t *,
+            pm_metal_edit_kind_t, const char *))p)(&s_edit_tree,
+            (pm_metal_edit_kind_t)kind_i, name);
+        if (n == NULL) {
+            return mp_const_none;
+        }
+        {
+            mp_obj_t items[4];
+            mp_obj_t span[2];
+            items[0] = mp_obj_new_int(n->kind);
+            items[1] = mp_obj_new_str(n->name, strlen(n->name));
+            items[2] = mp_obj_new_int(n->line);
+            span[0] = mp_obj_new_int(n->span_start);
+            span[1] = mp_obj_new_int(n->span_end);
+            items[3] = mp_obj_new_tuple(2, span);
+            return mp_obj_new_tuple(4, items);
+        }
+    }
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const pm_metal_edit_tree_t *, const char *, const char *, char **, size_t *)") == 0) {
+        static char backing[PM_METAL_EDIT_SRC_MAX + 4096u];
+        pm_util_mem_arena_t *arena;
+        char *out = NULL;
+        size_t out_len = 0;
+        int32_t rc;
+        const char *name;
+        const char *text;
+        if (n_args != 3) {
+            mp_raise_TypeError(MP_ERROR_TEXT("edit needs handle, name, text"));
+        }
+        name = mp_obj_str_get_str(args[1]);
+        text = mp_obj_str_get_str(args[2]);
+        arena = pm_util_mem_arena_create(backing, sizeof(backing));
+        if (arena == NULL) {
+            return mp_const_none;
+        }
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const pm_metal_edit_tree_t *,
+            const char *, const char *, char **, size_t *))p)(
+            arena, &s_edit_tree, name, text, &out, &out_len);
+        pm_util_mem_arena_destroy(arena);
+        if (rc != 0 || out == NULL) {
+            return mp_const_none;
+        }
+        return mp_obj_new_str(out, out_len);
+    }
+    if (strcmp(sig, "int32_t(const char *, size_t, char *, size_t)") == 0) {
+        char err[PM_METAL_EDIT_ERR_MAX];
+        const char *src;
+        int32_t rc;
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("typecheck_c needs source"));
+        }
+        src = mp_obj_str_get_str(args[0]);
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(const char *, size_t, char *, size_t))p)(
+            src, strlen(src), err, sizeof(err));
+        {
+            mp_obj_t pair[2];
+            pair[0] = mp_obj_new_int(rc);
+            pair[1] = mp_obj_new_str(err, strlen(err));
+            return mp_obj_new_tuple(2, pair);
+        }
+    }
+    if (strcmp(sig, "int32_t(const char *, const char *, const char *, size_t, char *, size_t)") == 0) {
+        char err[PM_METAL_EDIT_ERR_MAX];
+        const char *target;
+        const char *path;
+        const char *src;
+        int32_t rc;
+        if (n_args != 3) {
+            mp_raise_TypeError(MP_ERROR_TEXT("write_back needs target, path, source"));
+        }
+        target = mp_obj_str_get_str(args[0]);
+        path = mp_obj_str_get_str(args[1]);
+        src = mp_obj_str_get_str(args[2]);
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(const char *, const char *, const char *, size_t,
+            char *, size_t))p)(target, path, src, strlen(src), err, sizeof(err));
+        {
+            mp_obj_t pair[2];
+            pair[0] = mp_obj_new_int(rc);
+            pair[1] = mp_obj_new_str(err, strlen(err));
             return mp_obj_new_tuple(2, pair);
         }
     }
