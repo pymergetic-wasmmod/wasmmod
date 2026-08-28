@@ -1,5 +1,6 @@
 #include "ports/micropython/nativecall.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "py/mperrno.h"
@@ -11,6 +12,8 @@
 #include "pymergetic/wasmmod/registry/__types__.h"
 #include "pymergetic/metal/build/__types__.h"
 #include "pymergetic/metal/edit/__types__.h"
+#include "pymergetic/metal/jit/c/__types__.h"
+#include "pymergetic/metal/workspace/__types__.h"
 #include "pymergetic/util/mem.h"
 
 /* Wasm/AOT exports are registry_fn_t trampolines (args/results), not a
@@ -26,6 +29,11 @@ static int wasm_container(const char *fqn) {
  * locate, edit, write), so one static tree slot serves every bridge — the
  * parse_c handle is the slot's validity, exactly like the accessor spine. */
 static pm_metal_edit_tree_t s_edit_tree;
+
+/* metal.build wasm-seat link (Phase 13): same posture — the upy build flow is
+ * compile -> link -> lookup -> destroy, so one static artifact slot serves the
+ * bridges; the link face repopulates it under the rebuild contract. */
+static pm_metal_build_artifact_t s_build_artifact;
 
 static int32_t call_registry_i32(const char *fqn, const char *export_name,
     const pm_wasmmod_registry_value_t *args, uint32_t nargs) {
@@ -279,6 +287,99 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             return mp_const_none;
         }
         return mp_obj_new_str(buf, strlen(buf));
+    }
+    /* metal.build wasm-seat link (Phase 13): compile(fqn, src) -> wasm module
+     * bytes, link(fqn, bytes) -> load through the loader (registry publishes
+     * the named exports), lookup(name) -> export existence, destroy() ->
+     * unload. One static artifact slot: the upy build flow is sequential,
+     * same posture as the editor's tree slot. */
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const pm_metal_build_unit_t *, const char *, const char *, uint8_t **, size_t *, char *, size_t)") == 0) {
+        static char cbacking[512u * 1024u];
+        pm_util_mem_arena_t *arena;
+        pm_metal_build_unit_t unit;
+        uint8_t *obj = NULL;
+        size_t obj_len = 0;
+        int32_t rc;
+        char err[PM_METAL_BUILD_ERR_MAX];
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("compile_source needs fqn, source"));
+        }
+        memset(&unit, 0, sizeof(unit));
+        snprintf(unit.fqn, sizeof(unit.fqn), "%s", mp_obj_str_get_str(args[0]));
+        arena = pm_util_mem_arena_create(cbacking, sizeof(cbacking));
+        if (arena == NULL) {
+            return mp_const_none;
+        }
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const pm_metal_build_unit_t *,
+            const char *, const char *, uint8_t **, size_t *, char *, size_t))p)(
+            arena, &unit, NULL, mp_obj_str_get_str(args[1]),
+            &obj, &obj_len, err, sizeof(err));
+        pm_util_mem_arena_destroy(arena);
+        if (rc != PM_METAL_BUILD_OK || obj == NULL) {
+            return mp_const_none;
+        }
+        return mp_obj_new_bytes(obj, obj_len);
+    }
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const pm_metal_build_unit_t *, uint8_t **, const size_t *, uint32_t, pm_metal_build_artifact_t *, char *, size_t)") == 0) {
+        /* PM_UTIL_MEM_MIN_SPAN is 8 pages and the base must be page-aligned:
+         * over-allocate and hand the arena the aligned interior. */
+        static char lbacking[64u * 1024u] __attribute__((aligned(4096)));
+        pm_util_mem_arena_t *arena;
+        pm_metal_build_unit_t unit;
+        uint8_t *obj;
+        size_t obj_len;
+        int32_t rc;
+        char err[PM_METAL_BUILD_ERR_MAX];
+        mp_buffer_info_t bi;
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("link needs fqn, bytes"));
+        }
+        mp_get_buffer_raise(args[1], &bi, MP_BUFFER_READ);
+        obj = (uint8_t *)bi.buf;
+        obj_len = bi.len;
+        memset(&unit, 0, sizeof(unit));
+        snprintf(unit.fqn, sizeof(unit.fqn), "%s", mp_obj_str_get_str(args[0]));
+        memset(err, 0, sizeof(err));
+        arena = pm_util_mem_arena_create(lbacking, sizeof(lbacking));
+        if (arena == NULL) {
+            return mp_const_none;
+        }
+        /* destroy the previous artifact first: the rebuild contract (the
+         * loader publishes under the unit fqn; a live previous module
+         * would shadow the new one). */
+        pm_metal_build_artifact_destroy(&s_build_artifact);
+        memset(&s_build_artifact, 0, sizeof(s_build_artifact));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const pm_metal_build_unit_t *,
+            uint8_t **, const size_t *, uint32_t, pm_metal_build_artifact_t *,
+            char *, size_t))p)(arena, &unit, &obj, &obj_len, 1,
+            &s_build_artifact, err, sizeof(err));
+        pm_util_mem_arena_destroy(arena);
+        {
+            mp_obj_t pair[2];
+            pair[0] = mp_obj_new_int(rc);
+            pair[1] = mp_obj_new_str(err, strlen(err));
+            return mp_obj_new_tuple(2, pair);
+        }
+    }
+    if (strcmp(sig, "void *(const pm_metal_build_artifact_t *, const char *)") == 0) {
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("lookup needs name"));
+        }
+        if (s_build_artifact.n_loader_handles == 0
+            && s_build_artifact.bytes == NULL) {
+            return mp_const_none;
+        }
+        if (pm_metal_build_artifact_lookup(&s_build_artifact,
+                mp_obj_str_get_str(args[0])) == NULL) {
+            return mp_const_none;
+        }
+        return mp_obj_new_int_from_uint(1u);
+    }
+    if (strcmp(sig, "void(pm_metal_build_artifact_t *)") == 0) {
+        pm_metal_build_artifact_destroy(&s_build_artifact);
+        memset(&s_build_artifact, 0, sizeof(s_build_artifact));
+        return mp_const_none;
     }
     /* metal.build accessor spine (Phase 11): at(fqn, name) -> handle (an
      * int; 0 = unresolvable), at_info(handle) -> dict of the joined answer,
@@ -603,5 +704,114 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             verb, (const uint8_t *)bufinfo.buf, (uint32_t)bufinfo.len));
     }
 
+    /* metal.fs read/stat (Phase 14 proves): read(path, max_len) -> bytes or
+     * None, stat(path) -> (rc, len). The workspace materialize prove reads a
+     * file back through fs and compares it to the embedded bytes; the bridge
+     * grows the fs card to a first-class upy citizen instead of a C-only
+     * face. max_len caps the read (the C face copies min(len, file)). */
+    if (strcmp(sig, "int32_t(const char *, uint8_t *, uint32_t *)") == 0) {
+        const char *path;
+        mp_int_t max_len;
+        uint8_t *buf;
+        uint32_t n;
+        int32_t rc;
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("read needs path+max_len"));
+        }
+        path = mp_obj_str_get_str(args[0]);
+        max_len = mp_obj_get_int(args[1]);
+        if (max_len < 0 || max_len > (256u * 1024u)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("read max_len out of range"));
+        }
+        buf = m_new(uint8_t, max_len == 0 ? 1u : (size_t)max_len);
+        n = (uint32_t)max_len;
+        rc = ((int32_t (*)(const char *, uint8_t *, uint32_t *))p)(path, buf, &n);
+        if (rc != 0 || n == 0) {
+            m_del(uint8_t, buf, max_len == 0 ? 1u : (size_t)max_len);
+            return mp_const_none;
+        }
+        return mp_obj_new_bytes(buf, n);
+    }
+    if (strcmp(sig, "int32_t(const char *, uint32_t *)") == 0) {
+        const char *path;
+        uint32_t len = 0;
+        int32_t rc;
+        mp_obj_t pair[2];
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("stat needs path"));
+        }
+        path = mp_obj_str_get_str(args[0]);
+        rc = ((int32_t (*)(const char *, uint32_t *))p)(path, &len);
+        pair[0] = mp_obj_new_int(rc);
+        pair[1] = mp_obj_new_int_from_uint(len);
+        return mp_obj_new_tuple(2, pair);
+    }
+
+    /* metal.workspace (Phase 14): materialize() -> (rc, n_files), mirror_set
+     * (root) -> rc, file_count() -> int, extract_external(name, gz-bytes) ->
+     * (rc, n_files). The materialize/extract arena is per-call scratch
+     * (path building + the inflated tar stream); the tree itself lands in
+     * the fs card's own arena. */
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, uint32_t *, char *, size_t)") == 0) {
+        static char backing[64u * 1024u];
+        pm_util_mem_arena_t *arena;
+        uint32_t n_files = 0;
+        char err[PM_METAL_WORKSPACE_ERR_MAX];
+        int32_t rc;
+        if (n_args != 0) {
+            mp_raise_TypeError(MP_ERROR_TEXT("materialize takes no args"));
+        }
+        arena = pm_util_mem_arena_create(backing, sizeof(backing));
+        if (arena == NULL) {
+            return mp_const_none;
+        }
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, uint32_t *, char *, size_t))p)(
+            arena, &n_files, err, sizeof(err));
+        pm_util_mem_arena_destroy(arena);
+        if (rc != 0) {
+            mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT(
+                "materialize failed: %s"), err);
+        }
+        mp_obj_t pair[2];
+        pair[0] = mp_obj_new_int(rc);
+        pair[1] = mp_obj_new_int_from_uint(n_files);
+        return mp_obj_new_tuple(2, pair);
+    }
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const char *, const uint8_t *, size_t, uint32_t *, char *, size_t)") == 0) {
+        /* the inflated tar stream is sized by the gzip trailer, so the arena
+         * must fit the archive's uncompressed length: this bridge is for the
+         * prove's small fixtures; a real 575 MB rustc tarball goes through
+         * the C build card's host-loaded path. */
+        static char backing[512u * 1024u];
+        pm_util_mem_arena_t *arena;
+        const char *name;
+        mp_buffer_info_t bufinfo;
+        uint32_t n_files = 0;
+        char err[PM_METAL_WORKSPACE_ERR_MAX];
+        int32_t rc;
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("extract_external needs name+bytes"));
+        }
+        name = mp_obj_str_get_str(args[0]);
+        mp_get_buffer_raise(args[1], &bufinfo, MP_BUFFER_READ);
+        arena = pm_util_mem_arena_create(backing, sizeof(backing));
+        if (arena == NULL) {
+            return mp_const_none;
+        }
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const char *, const uint8_t *,
+            size_t, uint32_t *, char *, size_t))p)(
+            arena, name, (const uint8_t *)bufinfo.buf, bufinfo.len,
+            &n_files, err, sizeof(err));
+        pm_util_mem_arena_destroy(arena);
+        if (rc != 0) {
+            return mp_const_none;
+        }
+        mp_obj_t pair[2];
+        pair[0] = mp_obj_new_int(rc);
+        pair[1] = mp_obj_new_int_from_uint(n_files);
+        return mp_obj_new_tuple(2, pair);
+    }
     mp_raise_ValueError(MP_ERROR_TEXT("unsupported native sig (use CONNECT from C/RS)"));
 }

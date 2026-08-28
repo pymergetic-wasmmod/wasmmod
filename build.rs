@@ -130,12 +130,20 @@ fn build_util_zlib() {
     println!("cargo:rerun-if-changed={uzlib}/tinflate.c");
     println!("cargo:rerun-if-changed={uzlib}/lz77.c"); // includes defl_static.c
     println!("cargo:rerun-if-changed={uzlib}/defl_static.c");
+    println!("cargo:rerun-if-changed={uzlib}/adler32.c");
+    println!("cargo:rerun-if-changed={uzlib}/crc32.c");
 
     let mut build = cc::Build::new();
     build
         .file("src/pymergetic/util/zlib/__impl__.c")
         .file(format!("{uzlib}/tinflate.c"))
         .file(format!("{uzlib}/lz77.c"))
+        // tinflate's uzlib_uncompress_chksum calls adler32/crc32; the
+        // archive is linked +whole-archive, so every object it contains
+        // must be self-contained or the first C-side consumer of the
+        // staticlib hits undefined references.
+        .file(format!("{uzlib}/adler32.c"))
+        .file(format!("{uzlib}/crc32.c"))
         .include(&root)
         .include(format!("{root}/src"))
         .include(&mpy_top)

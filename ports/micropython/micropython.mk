@@ -60,6 +60,8 @@ JSFLAGS += -s ASYNCIFY_STACK_SIZE=65536
 SRC_WASMMOD = \
 	$(WASMMOD_DIR)/src/pymergetic/util/mem/__impl__.c \
 	$(WASMMOD_DIR)/third_party/tlsf/tlsf.c \
+	$(WASMMOD_DIR)/src/pymergetic/util/zlib/__impl__.c \
+	$(WASMMOD_DIR)/../../lib/uzlib/lz77.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/boot/__impl__.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/io/__impl__.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/net/cdn/__impl__.c \
@@ -175,6 +177,8 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/ports/common/boot.c \
 	$(WASMMOD_DIR)/ports/common/load.c \
 	$(WASMMOD_DIR)/ports/common/memcookie.c \
+	$(WASMMOD_DIR)/src/pymergetic/util/zlib/__impl__.c \
+	$(WASMMOD_DIR)/../../lib/uzlib/lz77.c \
 	$(WASMMOD_DIR)/ports/micropython/modpymergetic.c \
 	$(WASMMOD_DIR)/ports/micropython/modwasmmod.c \
 	$(WASMMOD_DIR)/ports/micropython/modcdn.c \
