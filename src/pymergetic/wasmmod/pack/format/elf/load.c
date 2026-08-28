@@ -922,7 +922,7 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
             }
             uintptr_t align = sh.sh_addralign ? (uintptr_t)sh.sh_addralign : 1;
             image_size = align_up(image_size, align);
-            o[i].sec_addr[s] = image_size;
+            o[i].sec_addr[s] = image_size - o[i].image_base;
             image_size += (size_t)sh.sh_size;
         }
         o[i].got_off = MICROPY_WASM_MALLOC((size_t)o[i].nsym * sizeof(uint32_t));
