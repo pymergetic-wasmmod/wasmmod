@@ -9,6 +9,7 @@
 #include "ports/micropython/objhandle.h"
 #include "pymergetic/wasmmod/registry/__exports__.h"
 #include "pymergetic/wasmmod/registry/__types__.h"
+#include "pymergetic/metal/build/__types__.h"
 
 /* Wasm/AOT exports are registry_fn_t trampolines (args/results), not a
  * C ABI symbol. Casting them to int32_t(void) returns the trampoline
@@ -223,6 +224,127 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         return mp_obj_new_int(((int32_t (*)(const char *, const char *))p)(
             mp_obj_str_get_str(args[0]), mp_obj_str_get_str(args[1])));
+    }
+    /* metal.build change ledger: note_add appends (target, kind, reason, refs)
+     * and returns the status; the refs tuple rides a const char * array. */
+    if (strcmp(sig, "int32_t(const char *, pm_metal_build_note_kind_t, const char *, const char *const *, uint32_t)") == 0) {
+        const char *refs[8];
+        mp_obj_t *items = NULL;
+        size_t n_items = 0;
+        if (n_args != 3 && n_args != 4) {
+            mp_raise_TypeError(MP_ERROR_TEXT("note_add needs target, kind, reason[, refs]"));
+        }
+        if (n_args == 4) {
+            mp_obj_get_array(args[3], &n_items, &items);
+            if (n_items > 8) {
+                n_items = 8;
+            }
+        }
+        for (size_t i = 0; i < n_items; ++i) {
+            refs[i] = mp_obj_str_get_str(items[i]);
+        }
+        return mp_obj_new_int(((int32_t (*)(const char *, int32_t, const char *,
+            const char *const *, uint32_t))p)(
+            mp_obj_str_get_str(args[0]), (int32_t)mp_obj_get_int(args[1]),
+            mp_obj_str_get_str(args[2]), refs, (uint32_t)n_items));
+    }
+    /* metal.build note_has: (target, kind) -> gate. */
+    if (strcmp(sig, "int32_t(const char *, pm_metal_build_note_kind_t)") == 0) {
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("note_has needs target, kind"));
+        }
+        return mp_obj_new_int(((int32_t (*)(const char *, int32_t))p)(
+            mp_obj_str_get_str(args[0]), (int32_t)mp_obj_get_int(args[1])));
+    }
+    /* metal.build notes_query: (target, kind) -> the matching JSON lines as
+     * one str. The out-buffer + count are marshalled here. */
+    if (strcmp(sig, "int32_t(const char *, int32_t, char *, size_t, uint32_t *)") == 0) {
+        static char buf[8192];
+        uint32_t n_lines = 0;
+        int32_t rc;
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("notes_query needs target, kind"));
+        }
+        rc = ((int32_t (*)(const char *, int32_t, char *, size_t, uint32_t *))p)(
+            mp_obj_str_get_str(args[0]), (int32_t)mp_obj_get_int(args[1]),
+            buf, sizeof(buf), &n_lines);
+        if (rc < 0) {
+            return mp_const_none;
+        }
+        return mp_obj_new_str(buf, strlen(buf));
+    }
+    /* metal.build accessor spine (Phase 11): at(fqn, name) -> handle (an
+     * int; 0 = unresolvable), at_info(handle) -> dict of the joined answer,
+     * at_ast(handle) -> (has_editor, lang). The struct out-param of
+     * at_info is marshalled field-by-field here. */
+    if (strcmp(sig, "pm_metal_build_at_handle_t(const char *, const char *)") == 0) {
+        const char *name = NULL;
+        if (n_args != 1 && n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("at needs fqn[, name]"));
+        }
+        if (n_args == 2 && args[1] != mp_const_none) {
+            name = mp_obj_str_get_str(args[1]);
+        }
+        return mp_obj_new_int_from_uint(((uint32_t (*)(const char *, const char *))p)(
+            mp_obj_str_get_str(args[0]), name));
+    }
+    if (strcmp(sig, "int32_t(pm_metal_build_at_handle_t, pm_metal_build_at_info_t *)") == 0) {
+        static pm_metal_build_at_info_t info;
+        int32_t rc;
+        mp_obj_t items[16];
+        size_t n_items = 0;
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("at_info needs handle"));
+        }
+        memset(&info, 0, sizeof(info));
+        rc = ((int32_t (*)(uint32_t, pm_metal_build_at_info_t *))p)(
+            (uint32_t)mp_obj_get_int(args[0]), &info);
+        if (rc != 0) {
+            return mp_const_none;
+        }
+        /* fqn, name, kind, lang, sig, has_record, n_sources, n_syms, doc,
+         * file, line, notes, n_notes, deps (tuple), n_deps */
+        items[n_items++] = mp_obj_new_str(info.fqn, strlen(info.fqn));
+        items[n_items++] = mp_obj_new_str(info.name, strlen(info.name));
+        items[n_items++] = mp_obj_new_str(info.kind, strlen(info.kind));
+        items[n_items++] = mp_obj_new_str(info.lang, strlen(info.lang));
+        items[n_items++] = mp_obj_new_str(info.sig, strlen(info.sig));
+        items[n_items++] = mp_obj_new_int(info.has_record);
+        items[n_items++] = mp_obj_new_int(info.n_sources);
+        items[n_items++] = mp_obj_new_int(info.n_syms);
+        items[n_items++] = mp_obj_new_str(info.doc, strlen(info.doc));
+        items[n_items++] = mp_obj_new_str(info.file, strlen(info.file));
+        items[n_items++] = mp_obj_new_int(info.line);
+        items[n_items++] = mp_obj_new_str(info.notes, strlen(info.notes));
+        {
+            mp_obj_t deps[PM_METAL_BUILD_AT_REFS_MAX];
+            uint32_t i;
+            for (i = 0; i < info.n_deps && i < PM_METAL_BUILD_AT_REFS_MAX; i++) {
+                deps[i] = mp_obj_new_str(info.deps[i], strlen(info.deps[i]));
+            }
+            items[n_items++] = mp_obj_new_tuple(info.n_deps, deps);
+        }
+        items[n_items++] = mp_obj_new_int(info.n_deps);
+        return mp_obj_new_tuple(n_items, items);
+    }
+    if (strcmp(sig, "int32_t(pm_metal_build_at_handle_t, char *, size_t)") == 0) {
+        char lang[8];
+        int32_t rc;
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("at_ast needs handle"));
+        }
+        memset(lang, 0, sizeof(lang));
+        rc = ((int32_t (*)(uint32_t, char *, size_t))p)(
+            (uint32_t)mp_obj_get_int(args[0]), lang, sizeof(lang));
+        if (rc < 0) {
+            return mp_const_none;
+        }
+        {
+            mp_obj_t pair[2];
+            pair[0] = mp_obj_new_int(rc);
+            pair[1] = mp_obj_new_str(lang, strlen(lang));
+            return mp_obj_new_tuple(2, pair);
+        }
     }
     if (strcmp(sig, "const char *(void)") == 0) {
         const char *s;
