@@ -28,6 +28,23 @@
 static vstr_t gen_pyi_buf;
 static int gen_pyi_buf_inited;
 
+/* Reserved words that cannot be a def name in valid Python. Mirrors
+ * is_python_keyword in util/gen/__impl__.rs — keep both in sync. */
+static int pyi_name_is_keyword(const char *s) {
+    static const char *const kws[] = {
+        "False", "None", "True", "and", "as", "assert", "async", "await",
+        "break", "class", "continue", "def", "del", "elif", "else", "except",
+        "finally", "for", "from", "global", "if", "import", "in", "is",
+        "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
+        "while", "with", "yield", NULL
+    };
+    const char *const *k;
+    for (k = kws; *k != NULL; k++) {
+        if (strcmp(*k, s) == 0) return 1;
+    }
+    return 0;
+}
+
 /* py attr of a C export name, same rule as gen's py_attr_from_export:
  * strip the fqn-derived prefix ("pm_" + dots-as-underscores + "_"), else the
  * last underscore segment. Returns 1 with attr filled. */
@@ -187,6 +204,7 @@ static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_
         vstr_add_strn(&gen_pyi_buf, (const char *)fqn, fqn_len);
         vstr_add_str(&gen_pyi_buf, "\n\nfrom typing import Any\n\n");
         int any = 0;
+        int any_kw = 0;
         mp_map_t *map = &globals->map;
         for (size_t i = 0; i < map->alloc; ++i) {
             if (!mp_map_slot_is_filled(map, i) || !mp_obj_is_qstr(map->table[i].key)) {
@@ -197,6 +215,14 @@ static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_
                 continue;
             }
             if (!mp_obj_is_callable(map->table[i].value)) {
+                continue;
+            }
+            /* A keyword can never be a def name or an annotation target in
+             * valid Python; the runtime attribute is real (loader setattr),
+             * so it is exposed via module __getattr__ below instead. */
+            if (pyi_name_is_keyword(name)) {
+                any = 1;
+                any_kw = 1;
                 continue;
             }
             vstr_add_str(&gen_pyi_buf, "def ");
@@ -227,6 +253,28 @@ static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_
         nlr_pop();
         if (!any) {
             return 0;
+        }
+        /* Keyword-named attributes (await, yield, ...) get a module-level
+         * __getattr__ stub each — the only PEP 484 way to type an attribute
+         * whose name is a reserved word. */
+        if (any_kw) {
+            vstr_add_str(&gen_pyi_buf, "from typing import Callable, Literal\n\n");
+            for (size_t i = 0; i < map->alloc; ++i) {
+                if (!mp_map_slot_is_filled(map, i) || !mp_obj_is_qstr(map->table[i].key)) {
+                    continue;
+                }
+                const char *name = qstr_str(MP_OBJ_QSTR_VALUE(map->table[i].key));
+                if (name[0] == '_' || !pyi_name_is_keyword(name)) {
+                    continue;
+                }
+                if (!mp_obj_is_callable(map->table[i].value)) {
+                    continue;
+                }
+                vstr_add_str(&gen_pyi_buf,
+                    "def __getattr__(name: Literal[\"");
+                vstr_add_str(&gen_pyi_buf, name);
+                vstr_add_str(&gen_pyi_buf, "\"]) -> Callable[..., Any]: ...\n\n");
+            }
         }
         *inout_len = (uint32_t)gen_pyi_buf.len;
         return 1;

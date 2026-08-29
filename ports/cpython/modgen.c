@@ -20,6 +20,23 @@
 static uint8_t *g_pyi;
 static uint32_t g_pyi_len;
 
+/* Reserved words that cannot be a def name in valid Python. Mirrors
+ * is_python_keyword in util/gen/__impl__.rs — keep both in sync. */
+static int pyi_name_is_keyword(const char *s) {
+    static const char *const kws[] = {
+        "False", "None", "True", "and", "as", "assert", "async", "await",
+        "break", "class", "continue", "def", "del", "elif", "else", "except",
+        "finally", "for", "from", "global", "if", "import", "in", "is",
+        "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
+        "while", "with", "yield", NULL
+    };
+    const char *const *k;
+    for (k = kws; *k != NULL; k++) {
+        if (strcmp(*k, s) == 0) return 1;
+    }
+    return 0;
+}
+
 static void gen_install_py_face(void);
 
 static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_len, uint8_t *buf,
@@ -64,6 +81,13 @@ static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_
         int any = 0;
         PyObject *key, *value;
         Py_ssize_t pos = 0;
+        PyObject *kw_names = PyList_New(0);
+        if (kw_names == NULL) {
+            Py_DECREF(parts);
+            Py_DECREF(mod);
+            PyErr_Clear();
+            return 0;
+        }
         while (PyDict_Next(dict, &pos, &key, &value)) {
             if (!PyUnicode_Check(key)) {
                 continue;
@@ -75,9 +99,27 @@ static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_
             if (!PyCallable_Check(value)) {
                 continue;
             }
-            PyObject *line = PyBytes_FromFormat("def %s(*args: Any, **kwargs: Any) -> Any: ...\n\n",
+            /* A keyword can never be a def name or an annotation target;
+             * collect it and expose it via module __getattr__ below. */
+            PyObject *line;
+            if (pyi_name_is_keyword(attr)) {
+                PyObject *kwname = PyUnicode_FromString(attr);
+                if (kwname == NULL || PyList_Append(kw_names, kwname) != 0) {
+                    Py_XDECREF(kwname);
+                    Py_DECREF(kw_names);
+                    Py_DECREF(parts);
+                    Py_DECREF(mod);
+                    PyErr_Clear();
+                    return 0;
+                }
+                Py_DECREF(kwname);
+                any = 1;
+                continue;
+            }
+            line = PyBytes_FromFormat("def %s(*args: Any, **kwargs: Any) -> Any: ...\n\n",
                 attr);
             if (line == NULL) {
+                Py_DECREF(kw_names);
                 Py_DECREF(parts);
                 Py_DECREF(mod);
                 PyErr_Clear();
@@ -85,6 +127,7 @@ static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_
             }
             PyBytes_ConcatAndDel(&parts, line);
             if (parts == NULL) {
+                Py_DECREF(kw_names);
                 Py_DECREF(mod);
                 PyErr_Clear();
                 return 0;
@@ -93,9 +136,39 @@ static int32_t gen_py_face_provider(void *ctx, const uint8_t *fqn, uint32_t fqn_
         }
         Py_DECREF(mod);
         if (!any) {
+            Py_DECREF(kw_names);
             Py_DECREF(parts);
             return 0;
         }
+        if (PyList_Size(kw_names) > 0) {
+            PyObject *line = PyBytes_FromString(
+                "from typing import Callable, Literal\n\n");
+            if (line != NULL) {
+                PyBytes_ConcatAndDel(&parts, line);
+            }
+            Py_ssize_t nkw = PyList_Size(kw_names);
+            for (Py_ssize_t i = 0; i < nkw; i++) {
+                const char *kw = PyUnicode_AsUTF8(PyList_GetItem(kw_names, i));
+                if (kw == NULL) {
+                    PyErr_Clear();
+                    continue;
+                }
+                PyObject *kline = PyBytes_FromFormat(
+                    "def __getattr__(name: Literal[\"%s\"]) -> Callable[..., Any]: ...\n\n",
+                    kw);
+                if (kline == NULL) {
+                    PyErr_Clear();
+                    continue;
+                }
+                PyBytes_ConcatAndDel(&parts, kline);
+                if (parts == NULL) {
+                    Py_DECREF(kw_names);
+                    PyErr_Clear();
+                    return 0;
+                }
+            }
+        }
+        Py_DECREF(kw_names);
         char *raw = NULL;
         Py_ssize_t n = 0;
         if (PyBytes_AsStringAndSize(parts, &raw, &n) != 0 || n <= 0) {

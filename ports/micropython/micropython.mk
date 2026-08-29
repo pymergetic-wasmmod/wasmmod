@@ -22,6 +22,12 @@ PM_WASMMOD_BROWSER := 1
 endif
 
 INC += -I$(WASMMOD_ABS) -I$(WASMMOD_ABS)/src
+# nativecall.c's metal bridges (build/edit/jit.c/workspace __types__.h) resolve
+# on every µPy seat — including upywm, whose tree is wasmmod-only and so has
+# no other metal include path. Header-only includes: no metal object is
+# linked into a wasmmod-only build (the bridges resolve at runtime through
+# the registry and refuse politely when the cards are absent).
+INC += -I$(TOP)/extmod/metal/src
 
 include $(WASMMOD_ABS)/gen.mk
 

@@ -235,6 +235,24 @@ fn pyi_fallback_uses_python_attr_names() {
     assert!(!pyi.contains("No live Python callables"), "{pyi}");
 }
 
+fn pyi_keyword_names_are_not_def() {
+    // await/yield are real exports (metal.async, wasmmod.io) but keywords can
+    // never be a def name or an annotation target — the stub must expose them
+    // through module __getattr__ with a Literal name instead.
+    let text = emit_init_pyi_names("test.gen_kw", &["run", "await", "yield"]);
+    assert!(text.contains("def run("), "{text}");
+    assert!(
+        text.contains(r#"def __getattr__(name: Literal["await"]) -> Callable[..., Any]"#),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#"def __getattr__(name: Literal["yield"]) -> Callable[..., Any]"#),
+        "{text}"
+    );
+    assert!(!text.contains("def await("), "{text}");
+    assert!(!text.contains("def yield("), "{text}");
+}
+
 fn register_fn_survives_owned_strings() {
     let fqn = String::from("test.gen_owned");
     let name = String::from("pm_gen_owned_socket");
@@ -316,6 +334,15 @@ crate::PM_MOD_TEST_RS!("pymergetic.util.gen", "pyi_fallback_uses_python_attr_nam
 #[test]
 fn test_pyi_fallback_uses_python_attr_names() {
     assert_eq!(unsafe { case_pyi_fallback_uses_python_attr_names() }, 0);
+}
+
+unsafe extern "C" fn case_pyi_keyword_names_are_not_def() -> i32 {
+    case(|| pyi_keyword_names_are_not_def())
+}
+crate::PM_MOD_TEST_RS!("pymergetic.util.gen", "pyi_keyword_names_are_not_def", case_pyi_keyword_names_are_not_def);
+#[test]
+fn test_pyi_keyword_names_are_not_def() {
+    assert_eq!(unsafe { case_pyi_keyword_names_are_not_def() }, 0);
 }
 
 unsafe extern "C" fn case_register_fn_survives_owned_strings() -> i32 {

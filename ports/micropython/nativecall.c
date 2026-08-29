@@ -35,6 +35,87 @@ static pm_metal_edit_tree_t s_edit_tree;
  * bridges; the link face repopulates it under the rebuild contract. */
 static pm_metal_build_artifact_t s_build_artifact;
 
+/* The build card's artifact faces are resolved through the registry, not
+ * linked: upywm's tree is wasmmod-only (no metal objects), so a direct call
+ * would be an undefined symbol there. Registry-resident on every seat that
+ * boots metal.build; resolve_native + a direct C call is the same posture
+ * as compile_arena_cap above (resident C faces do not speak the trampoline
+ * ABI). An unregistered card = polite None, not a link error. */
+static void build_artifact_destroy(pm_metal_build_artifact_t *art) {
+    void (*fn)(pm_metal_build_artifact_t *);
+    fn = (void (*)(pm_metal_build_artifact_t *))pm_wasmmod_registry_resolve_native(
+        (const uint8_t *)"pymergetic.metal.build", 22u,
+        (const uint8_t *)"pm_metal_build_artifact_destroy", 31u);
+    if (fn != NULL) {
+        fn(art);
+    }
+}
+
+static void *build_artifact_lookup(const pm_metal_build_artifact_t *art,
+    const char *name) {
+    void *(*fn)(const pm_metal_build_artifact_t *, const char *);
+    fn = (void *(*)(const pm_metal_build_artifact_t *, const char *))
+        pm_wasmmod_registry_resolve_native(
+            (const uint8_t *)"pymergetic.metal.build", 22u,
+            (const uint8_t *)"pm_metal_build_artifact_lookup", 30u);
+    if (fn == NULL) {
+        return NULL;
+    }
+    return fn(art, name);
+}
+
+/* One-shot compile scratch shared by the build and jit.py compile bridges:
+ * the upy flows are sequential (the card contract, same posture as the
+ * artifact slot above), and per-bridge statics would bloat firmware bss —
+ * one buffer serves both. Sized for the in-arena TCC compile: the tccpp
+ * token and symbol pools are 2 x 256KB and every table rides the arena
+ * (jit.c's arena reallocator); firmware never compiles C in-process (the
+ * jit cards' compile faces refuse or are unused there), so it carries a
+ * small buffer only to keep the layout honest. */
+#if defined(PM_METAL_FIRMWARE)
+#define PM_NATIVECALL_COMPILE_BACKING (2u * 1024u * 1024u)
+#else
+#define PM_NATIVECALL_COMPILE_BACKING (32u * 1024u * 1024u)
+#endif
+static char s_compile_backing[PM_NATIVECALL_COMPILE_BACKING];
+
+/* Compile-scratch budget: when the current process carries a memory budget
+ * (metal.process), the one-shot compile arena is capped to it — a compile in a
+ * budgeted process gets NULLs past its cap (refusal, not abort) instead of
+ * enjoying the whole static backing. Unbudgeted processes keep the full
+ * backing. Resolved with resolve_native + a direct C call, the same posture
+ * as the signature spine below (registry_call would go through the
+ * trampoline ABI, which resident C faces do not speak). */
+static size_t compile_arena_cap(void) {
+    int32_t (*cur_fn)(void);
+    int32_t (*budget_fn)(int32_t);
+    int32_t pid;
+    int32_t pid_budget;
+    cur_fn = (int32_t (*)(void))pm_wasmmod_registry_resolve_native(
+        (const uint8_t *)"pymergetic.metal.process", 24u,
+        (const uint8_t *)"pm_metal_process_current", 24u);
+    if (cur_fn == NULL) {
+        return sizeof(s_compile_backing);
+    }
+    budget_fn = (int32_t (*)(int32_t))pm_wasmmod_registry_resolve_native(
+        (const uint8_t *)"pymergetic.metal.process", 24u,
+        (const uint8_t *)"pm_metal_process_budget", 23u);
+    if (budget_fn == NULL) {
+        return sizeof(s_compile_backing);
+    }
+    pid = cur_fn();
+    if (pid < 0) {
+        return sizeof(s_compile_backing);
+    }
+    pid_budget = budget_fn(pid);
+    if (pid_budget <= 0) {
+        return sizeof(s_compile_backing);
+    }
+    return ((size_t)pid_budget < sizeof(s_compile_backing))
+        ? (size_t)pid_budget
+        : sizeof(s_compile_backing);
+}
+
 static int32_t call_registry_i32(const char *fqn, const char *export_name,
     const pm_wasmmod_registry_value_t *args, uint32_t nargs) {
     pm_wasmmod_registry_value_t res;
@@ -294,7 +375,6 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
      * unload. One static artifact slot: the upy build flow is sequential,
      * same posture as the editor's tree slot. */
     if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const pm_metal_build_unit_t *, const char *, const char *, uint8_t **, size_t *, char *, size_t)") == 0) {
-        static char cbacking[512u * 1024u];
         pm_util_mem_arena_t *arena;
         pm_metal_build_unit_t unit;
         uint8_t *obj = NULL;
@@ -306,7 +386,10 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         memset(&unit, 0, sizeof(unit));
         snprintf(unit.fqn, sizeof(unit.fqn), "%s", mp_obj_str_get_str(args[0]));
-        arena = pm_util_mem_arena_create(cbacking, sizeof(cbacking));
+        {
+            size_t cap = compile_arena_cap();
+            arena = pm_util_mem_arena_create(s_compile_backing, cap);
+        }
         if (arena == NULL) {
             return mp_const_none;
         }
@@ -348,7 +431,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         /* destroy the previous artifact first: the rebuild contract (the
          * loader publishes under the unit fqn; a live previous module
          * would shadow the new one). */
-        pm_metal_build_artifact_destroy(&s_build_artifact);
+        build_artifact_destroy(&s_build_artifact);
         memset(&s_build_artifact, 0, sizeof(s_build_artifact));
         rc = ((int32_t (*)(pm_util_mem_arena_t *, const pm_metal_build_unit_t *,
             uint8_t **, const size_t *, uint32_t, pm_metal_build_artifact_t *,
@@ -370,16 +453,66 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             && s_build_artifact.bytes == NULL) {
             return mp_const_none;
         }
-        if (pm_metal_build_artifact_lookup(&s_build_artifact,
+        if (build_artifact_lookup(&s_build_artifact,
                 mp_obj_str_get_str(args[0])) == NULL) {
             return mp_const_none;
         }
         return mp_obj_new_int_from_uint(1u);
     }
     if (strcmp(sig, "void(pm_metal_build_artifact_t *)") == 0) {
-        pm_metal_build_artifact_destroy(&s_build_artifact);
+        build_artifact_destroy(&s_build_artifact);
         memset(&s_build_artifact, 0, sizeof(s_build_artifact));
         return mp_const_none;
+    }
+    /* metal.jit.py object loop: compile(source, module_name) -> mpy bytes
+     * (µPy compiling Python in-process), load(mpy_bytes, module_name) ->
+     * rc (bytes back into a live module). The Python twin of build's
+     * compile_source/link. Shares the one-shot compile scratch above —
+     * the flows are sequential, and a second 512KB static would bloat
+     * firmware bss. */
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const char *, size_t, const char *, uint8_t **, size_t *, char *, size_t)") == 0) {
+        pm_util_mem_arena_t *arena;
+        uint8_t *mpy = NULL;
+        size_t mpy_len = 0;
+        size_t src_len;
+        int32_t rc;
+        char err[512];
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("object_compile needs source, module_name"));
+        }
+        src_len = strlen(mp_obj_str_get_str(args[0]));
+        {
+            size_t cap = compile_arena_cap();
+            arena = pm_util_mem_arena_create(s_compile_backing, cap);
+        }
+        if (arena == NULL) {
+            return mp_const_none;
+        }
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const char *, size_t, const char *,
+            uint8_t **, size_t *, char *, size_t))p)(
+            arena, mp_obj_str_get_str(args[0]), src_len,
+            mp_obj_str_get_str(args[1]), &mpy, &mpy_len, err, sizeof(err));
+        pm_util_mem_arena_destroy(arena);
+        if (rc != 0 || mpy == NULL) {
+            return mp_const_none;
+        }
+        return mp_obj_new_bytes(mpy, mpy_len);
+    }
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const uint8_t *, size_t, const char *, char *, size_t)") == 0) {
+        mp_buffer_info_t bi;
+        int32_t rc;
+        char err[512];
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("object_load needs mpy bytes, module_name"));
+        }
+        mp_get_buffer_raise(args[0], &bi, MP_BUFFER_READ);
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const uint8_t *, size_t, const char *,
+            char *, size_t))p)(
+            NULL, (const uint8_t *)bi.buf, bi.len,
+            mp_obj_str_get_str(args[1]), err, sizeof(err));
+        return mp_obj_new_int(rc);
     }
     /* metal.build accessor spine (Phase 11): at(fqn, name) -> handle (an
      * int; 0 = unresolvable), at_info(handle) -> dict of the joined answer,

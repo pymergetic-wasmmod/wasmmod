@@ -467,16 +467,47 @@ pub fn emit_init_pyi(fqn: &str, funcs: &[(String, String)]) -> String {
         out.push_str("# No live Python callables introspected.\n");
         return out;
     }
+    let mut kws: Vec<&str> = Vec::new();
     out.push_str("from typing import Any\n\n");
     for (name, stub) in funcs {
         if stub.is_empty() {
-            out.push_str(&format!("def {name}(*args: Any, **kwargs: Any) -> Any: ...\n\n"));
+            if is_python_keyword(name) {
+                kws.push(name);
+            } else {
+                out.push_str(&format!("def {name}(*args: Any, **kwargs: Any) -> Any: ...\n\n"));
+            }
         } else {
             out.push_str(stub);
             out.push('\n');
         }
     }
+    // A keyword can never be a def name or an annotation target in valid
+    // Python syntax. The runtime attribute is real (the loader sets it via
+    // setattr), so expose it through module __getattr__ with a Literal of
+    // the name — the only PEP 484 way to type a dynamic attribute.
+    if !kws.is_empty() {
+        out.push_str("from typing import Callable, Literal\n\n");
+        for kw in kws {
+            out.push_str(&format!(
+                "def __getattr__(name: Literal[\"{kw}\"]) -> Callable[..., Any]: ...\n\n"
+            ));
+        }
+    }
     out
+}
+
+/// Reserved words that cannot appear as a def name in valid Python syntax.
+/// Soft keywords (match, case, _) are legal function names — excluded.
+pub fn is_python_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "False" | "None" | "True" | "and" | "as" | "assert" | "async"
+            | "await" | "break" | "class" | "continue" | "def" | "del"
+            | "elif" | "else" | "except" | "finally" | "for" | "from"
+            | "global" | "if" | "import" | "in" | "is" | "lambda" | "nonlocal"
+            | "not" | "or" | "pass" | "raise" | "return" | "try" | "while"
+            | "with" | "yield"
+    )
 }
 
 /// Build a rich pyi from callable names (µPy port / tests).
