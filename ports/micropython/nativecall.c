@@ -10,10 +10,12 @@
 #include "ports/micropython/objhandle.h"
 #include "pymergetic/wasmmod/registry/__exports__.h"
 #include "pymergetic/wasmmod/registry/__types__.h"
+#ifdef PM_WASMMOD_METAL_TYPES
 #include "pymergetic/metal/build/__types__.h"
 #include "pymergetic/metal/edit/__types__.h"
 #include "pymergetic/metal/jit/c/__types__.h"
 #include "pymergetic/metal/workspace/__types__.h"
+#endif
 #include "pymergetic/util/mem.h"
 
 /* Wasm/AOT exports are registry_fn_t trampolines (args/results), not a
@@ -25,6 +27,7 @@ static int wasm_container(const char *fqn) {
         || k == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_AOT;
 }
 
+#ifdef PM_WASMMOD_METAL_TYPES
 /* metal.edit C editor (Phase 12): the upy editor flow is sequential (parse,
  * locate, edit, write), so one static tree slot serves every bridge — the
  * parse_c handle is the slot's validity, exactly like the accessor spine. */
@@ -63,6 +66,7 @@ static void *build_artifact_lookup(const pm_metal_build_artifact_t *art,
     }
     return fn(art, name);
 }
+#endif /* PM_WASMMOD_METAL_TYPES */
 
 /* One-shot compile scratch shared by the build and jit.py compile bridges:
  * the upy flows are sequential (the card contract, same posture as the
@@ -321,6 +325,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_int(((int32_t (*)(const char *, const char *))p)(
             mp_obj_str_get_str(args[0]), mp_obj_str_get_str(args[1])));
     }
+#ifdef PM_WASMMOD_METAL_TYPES
     /* metal.build change ledger: note_add appends (target, kind, reason, refs)
      * and returns the status; the refs tuple rides a const char * array. */
     if (strcmp(sig, "int32_t(const char *, pm_metal_build_note_kind_t, const char *, const char *const *, uint32_t)") == 0) {
@@ -352,6 +357,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_int(((int32_t (*)(const char *, int32_t))p)(
             mp_obj_str_get_str(args[0]), (int32_t)mp_obj_get_int(args[1])));
     }
+#endif /* PM_WASMMOD_METAL_TYPES */
     /* metal.build notes_query: (target, kind) -> the matching JSON lines as
      * one str. The out-buffer + count are marshalled here. */
     if (strcmp(sig, "int32_t(const char *, int32_t, char *, size_t, uint32_t *)") == 0) {
@@ -369,6 +375,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         return mp_obj_new_str(buf, strlen(buf));
     }
+#ifdef PM_WASMMOD_METAL_TYPES
     /* metal.build wasm-seat link (Phase 13): compile(fqn, src) -> wasm module
      * bytes, link(fqn, bytes) -> load through the loader (registry publishes
      * the named exports), lookup(name) -> export existence, destroy() ->
@@ -464,6 +471,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         memset(&s_build_artifact, 0, sizeof(s_build_artifact));
         return mp_const_none;
     }
+#endif /* PM_WASMMOD_METAL_TYPES */
     /* metal.jit.py object loop: compile(source, module_name) -> mpy bytes
      * (µPy compiling Python in-process), load(mpy_bytes, module_name) ->
      * rc (bytes back into a live module). The Python twin of build's
@@ -514,6 +522,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             mp_obj_str_get_str(args[1]), err, sizeof(err));
         return mp_obj_new_int(rc);
     }
+#ifdef PM_WASMMOD_METAL_TYPES
     /* metal.build accessor spine (Phase 11): at(fqn, name) -> handle (an
      * int; 0 = unresolvable), at_info(handle) -> dict of the joined answer,
      * at_ast(handle) -> (has_editor, lang). The struct out-param of
@@ -716,6 +725,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             return mp_obj_new_tuple(2, pair);
         }
     }
+#endif /* PM_WASMMOD_METAL_TYPES */
     if (strcmp(sig, "const char *(void)") == 0) {
         const char *s;
         if (n_args != 0) {
@@ -782,6 +792,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         const char *s = mp_obj_str_get_str(args[0]);
         return mp_obj_new_int(((int32_t (*)(const char *))p)(s));
     }
+#ifdef PM_WASMMOD_METAL_TYPES
     if (strcmp(sig, "int32_t(char[PM_METAL_NET_SWARM_MEMBER_ID_LEN])") == 0) {
         /* net.swarm.membership.node_id: an out-buffer of the node's base-16
          * identity (40 chars). Present as bytes, mirroring zenoh zid. */
@@ -808,6 +819,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         items[1] = (rc == 1) ? mp_obj_new_bytes(zid, 16) : mp_const_none;
         return mp_obj_new_tuple(2, items);
     }
+#endif /* PM_WASMMOD_METAL_TYPES */
     if (strcmp(sig, "int32_t(uint8_t, uint8_t *, uint8_t *)") == 0) {
         /* net.zenoh.scout: raw scout with a whatami-target arg + two outs.
          * Returns (rc, peer_id_bytes) too; the target rides the one arg. */
@@ -880,6 +892,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_tuple(2, pair);
     }
 
+#ifdef PM_WASMMOD_METAL_TYPES
     /* metal.workspace (Phase 14): materialize() -> (rc, n_files), mirror_set
      * (root) -> rc, file_count() -> int, extract_external(name, gz-bytes) ->
      * (rc, n_files). The materialize/extract arena is per-call scratch
@@ -946,5 +959,6 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         pair[1] = mp_obj_new_int_from_uint(n_files);
         return mp_obj_new_tuple(2, pair);
     }
+#endif /* PM_WASMMOD_METAL_TYPES */
     mp_raise_ValueError(MP_ERROR_TEXT("unsupported native sig (use CONNECT from C/RS)"));
 }
