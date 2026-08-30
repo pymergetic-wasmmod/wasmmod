@@ -10,10 +10,13 @@
 #include "ports/micropython/objhandle.h"
 #include "pymergetic/wasmmod/registry/__exports__.h"
 #include "pymergetic/wasmmod/registry/__types__.h"
+#ifdef PM_WASMMOD_METAL_TYPES
 #include "pymergetic/metal/build/__types__.h"
 #include "pymergetic/metal/edit/__types__.h"
 #include "pymergetic/metal/jit/c/__types__.h"
+#include "pymergetic/metal/jit/cpp/__types__.h"
 #include "pymergetic/metal/workspace/__types__.h"
+#endif
 #include "pymergetic/util/mem.h"
 
 /* Wasm/AOT exports are registry_fn_t trampolines (args/results), not a
@@ -25,15 +28,45 @@ static int wasm_container(const char *fqn) {
         || k == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_AOT;
 }
 
+#ifdef PM_WASMMOD_METAL_TYPES
 /* metal.edit C editor (Phase 12): the upy editor flow is sequential (parse,
  * locate, edit, write), so one static tree slot serves every bridge — the
  * parse_c handle is the slot's validity, exactly like the accessor spine. */
 static pm_metal_edit_tree_t s_edit_tree;
 
+/* Kernel header roots for the jit.c compile bridges — the same roots the
+ * host build compiles card sources against, absolute so the REPL's compiles
+ * resolve regardless of cwd. metal.mk (native seats) and micropython.mk
+ * already bake PM_METAL_TCC_LIB_DIR; the src roots derive from the wasmmod
+ * tree the bridge itself lives in. */
+#ifndef PM_NATIVECALL_WASMMOD_ROOT
+#define PM_NATIVECALL_WASMMOD_ROOT "/nonexistent/wasmmod"
+#endif
+#define PM_NATIVECALL_METAL_SRC PM_NATIVECALL_WASMMOD_ROOT "/../metal/src"
+#define PM_NATIVECALL_WASMMOD_SRC PM_NATIVECALL_WASMMOD_ROOT "/src"
+/* firmware never JIT-compiles C in-process (its jit cards refuse), so it
+ * carries no TCC root — the macro degenerates to an unused empty string
+ * and the compile bridges are never driven there. */
+#ifndef PM_METAL_TCC_LIB_DIR
+#define PM_METAL_TCC_LIB_DIR ""
+#endif
+#define PM_NATIVECALL_TCC_INC PM_METAL_TCC_LIB_DIR "/include"
+
 /* metal.build wasm-seat link (Phase 13): same posture — the upy build flow is
  * compile -> link -> lookup -> destroy, so one static artifact slot serves the
  * bridges; the link face repopulates it under the rebuild contract. */
 static pm_metal_build_artifact_t s_build_artifact;
+
+/* metal.jit.cpp transpile chain: lex -> parse -> lower(/ast_dump) walks one
+ * arena (tokens and AST are arena-owned; the tree is gone when the arena is).
+ * The upy flow is sequential by contract — same posture as the edit tree —
+ * so one static arena + toklist + unit slot serves every bridge; lex(1)
+ * repopulates the slots (dropping any previous chain) and lower/ast_dump
+ * read them. The parse handle returned to Python is (1): the slots, not the
+ * int, carry the state. */
+static pm_util_mem_arena_t *s_cpp_arena;
+static pm_jit_cpp_toklist_t s_cpp_toks;
+static pm_jit_cpp_ast_t *s_cpp_unit;
 
 /* The build card's artifact faces are resolved through the registry, not
  * linked: upywm's tree is wasmmod-only (no metal objects), so a direct call
@@ -63,6 +96,7 @@ static void *build_artifact_lookup(const pm_metal_build_artifact_t *art,
     }
     return fn(art, name);
 }
+#endif /* PM_WASMMOD_METAL_TYPES */
 
 /* One-shot compile scratch shared by the build and jit.py compile bridges:
  * the upy flows are sequential (the card contract, same posture as the
@@ -78,6 +112,31 @@ static void *build_artifact_lookup(const pm_metal_build_artifact_t *art,
 #define PM_NATIVECALL_COMPILE_BACKING (32u * 1024u * 1024u)
 #endif
 static char s_compile_backing[PM_NATIVECALL_COMPILE_BACKING];
+
+#ifdef PM_WASMMOD_METAL_TYPES
+/* jit.cpp transpile-chain scratch: one arena lives as long as the chain
+ * (lex -> parse -> lower), so it cannot share the one-shot compile backing
+ * above — that one is destroyed per call. The feed uses 64MB for the card's
+ * own source; the REPL chain stays up until the next lex(1) drops it.
+ * Firmware never transpiles C++ in-process (the card is boot-only there),
+ * so it carries the same small honest buffer. */
+#if defined(PM_METAL_FIRMWARE)
+#define PM_NATIVECALL_CPP_BACKING (2u * 1024u * 1024u)
+#else
+#define PM_NATIVECALL_CPP_BACKING (64u * 1024u * 1024u)
+#endif
+static char s_cpp_backing[PM_NATIVECALL_CPP_BACKING]
+    __attribute__((aligned(4096)));
+
+static void cpp_chain_drop(void) {
+    if (s_cpp_arena != NULL) {
+        pm_util_mem_arena_destroy(s_cpp_arena);
+        s_cpp_arena = NULL;
+    }
+    memset(&s_cpp_toks, 0, sizeof(s_cpp_toks));
+    s_cpp_unit = NULL;
+}
+#endif /* PM_WASMMOD_METAL_TYPES */
 
 /* Compile-scratch budget: when the current process carries a memory budget
  * (metal.process), the one-shot compile arena is capped to it — a compile in a
@@ -321,6 +380,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_int(((int32_t (*)(const char *, const char *))p)(
             mp_obj_str_get_str(args[0]), mp_obj_str_get_str(args[1])));
     }
+#ifdef PM_WASMMOD_METAL_TYPES
     /* metal.build change ledger: note_add appends (target, kind, reason, refs)
      * and returns the status; the refs tuple rides a const char * array. */
     if (strcmp(sig, "int32_t(const char *, pm_metal_build_note_kind_t, const char *, const char *const *, uint32_t)") == 0) {
@@ -352,6 +412,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_int(((int32_t (*)(const char *, int32_t))p)(
             mp_obj_str_get_str(args[0]), (int32_t)mp_obj_get_int(args[1])));
     }
+#endif /* PM_WASMMOD_METAL_TYPES */
     /* metal.build notes_query: (target, kind) -> the matching JSON lines as
      * one str. The out-buffer + count are marshalled here. */
     if (strcmp(sig, "int32_t(const char *, int32_t, char *, size_t, uint32_t *)") == 0) {
@@ -369,6 +430,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         return mp_obj_new_str(buf, strlen(buf));
     }
+#ifdef PM_WASMMOD_METAL_TYPES
     /* metal.build wasm-seat link (Phase 13): compile(fqn, src) -> wasm module
      * bytes, link(fqn, bytes) -> load through the loader (registry publishes
      * the named exports), lookup(name) -> export existence, destroy() ->
@@ -406,8 +468,11 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
     }
     if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const pm_metal_build_unit_t *, uint8_t **, const size_t *, uint32_t, pm_metal_build_artifact_t *, char *, size_t)") == 0) {
         /* PM_UTIL_MEM_MIN_SPAN is 8 pages and the base must be page-aligned:
-         * over-allocate and hand the arena the aligned interior. */
-        static char lbacking[64u * 1024u] __attribute__((aligned(4096)));
+         * over-allocate and hand the arena the aligned interior. 64MB: the
+         * link relocates whole-card objects (the jit cards' self-host C is
+         * ~250KB of source, ~1MB of ELF with symbol/reloc tables) and the
+         * relocator's fixups ride the arena; small backings oom at load. */
+        static char lbacking[64u * 1024u * 1024u] __attribute__((aligned(4096)));
         pm_util_mem_arena_t *arena;
         pm_metal_build_unit_t unit;
         uint8_t *obj;
@@ -459,11 +524,148 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         return mp_obj_new_int_from_uint(1u);
     }
+    /* build.call(name, *args) -> int result. The artifact lives in the
+     * static slot (link published it there); the call goes through the
+     * card's artifact_call face, which routes native (ELF) or the wasm
+     * trampoline by seat. Python ints/floats become i64 scalars; the
+     * result comes back as the callee's return value widened to i64. */
+    if (strcmp(sig, "int32_t(const pm_metal_build_artifact_t *, const char *, const int64_t *, uint32_t, int64_t *)") == 0) {
+        int64_t cargs[8];
+        int64_t res = 0;
+        uint32_t n_cargs;
+        int32_t rc;
+        const char *name;
+        if (n_args < 1 || n_args > 9) {
+            mp_raise_TypeError(MP_ERROR_TEXT("call needs name plus up to 8 args"));
+        }
+        if (s_build_artifact.n_loader_handles == 0
+            && s_build_artifact.bytes == NULL) {
+            mp_raise_msg(&mp_type_RuntimeError,
+                MP_ERROR_TEXT("call: no linked artifact (link first)"));
+        }
+        name = mp_obj_str_get_str(args[0]);
+        for (n_cargs = 0; n_cargs < (uint32_t)(n_args - 1); n_cargs++) {
+#if MICROPY_PY_BUILTINS_FLOAT
+            if (mp_obj_is_float(args[1 + n_cargs])) {
+                /* f64 travels as its bit pattern: the card's value union
+                 * is the transport, and the callee decides the type. */
+                union {
+                    double d;
+                    int64_t i;
+                } bits;
+                bits.d = mp_obj_get_float(args[1 + n_cargs]);
+                cargs[n_cargs] = bits.i;
+            } else {
+                cargs[n_cargs] = (int64_t)mp_obj_get_int(args[1 + n_cargs]);
+            }
+#else
+            cargs[n_cargs] = (int64_t)mp_obj_get_int(args[1 + n_cargs]);
+#endif
+        }
+        rc = ((int32_t (*)(const pm_metal_build_artifact_t *, const char *,
+            const int64_t *, uint32_t, int64_t *))p)(
+            &s_build_artifact, name, &cargs[0], n_cargs, &res);
+        if (rc != 0) {
+            mp_raise_msg(&mp_type_RuntimeError,
+                MP_ERROR_TEXT("call: artifact refused the call"));
+        }
+        return mp_obj_new_int_from_ull((unsigned long long)res);
+    }
     if (strcmp(sig, "void(pm_metal_build_artifact_t *)") == 0) {
         build_artifact_destroy(&s_build_artifact);
         memset(&s_build_artifact, 0, sizeof(s_build_artifact));
         return mp_const_none;
     }
+    /* metal.jit.cpp transpile chain: lex(src) -> handle (1), parse(handle)
+     * -> handle (1), lower(handle) -> C source str, ast_dump(handle) ->
+     * tree text. One arena under the whole chain (the slots above); lex(1)
+     * drops any previous chain first. The handle is the slots' validity,
+     * exactly like the editor's parse_c. */
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const char *, size_t, pm_jit_cpp_toklist_t *, char *, size_t)") == 0) {
+        const char *src;
+        int32_t rc;
+        char err[256];
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("lex needs source"));
+        }
+        src = mp_obj_str_get_str(args[0]);
+        cpp_chain_drop();
+        s_cpp_arena = pm_util_mem_arena_create(s_cpp_backing, sizeof(s_cpp_backing));
+        if (s_cpp_arena == NULL) {
+            return mp_const_none;
+        }
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const char *, size_t,
+            pm_jit_cpp_toklist_t *, char *, size_t))p)(
+            s_cpp_arena, src, strlen(src), &s_cpp_toks, err, sizeof(err));
+        if (rc != 0) {
+            cpp_chain_drop();
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(err));
+        }
+        return mp_obj_new_int_from_uint(1u);
+    }
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const pm_jit_cpp_toklist_t *, pm_jit_cpp_ast_t **, char *, size_t)") == 0) {
+        int32_t rc;
+        char err[256];
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("parse needs handle"));
+        }
+        if (s_cpp_arena == NULL) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("no lexed chain (lex first)"));
+        }
+        memset(err, 0, sizeof(err));
+        s_cpp_unit = NULL;
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const pm_jit_cpp_toklist_t *,
+            pm_jit_cpp_ast_t **, char *, size_t))p)(
+            s_cpp_arena, &s_cpp_toks, &s_cpp_unit, err, sizeof(err));
+        if (rc != 0 || s_cpp_unit == NULL) {
+            s_cpp_unit = NULL;
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(err));
+        }
+        return mp_obj_new_int_from_uint(1u);
+    }
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const pm_jit_cpp_ast_t *, char **, size_t *, char *, size_t)") == 0) {
+        char *out = NULL;
+        size_t out_len = 0;
+        int32_t rc;
+        char err[256];
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("lower needs handle"));
+        }
+        if (s_cpp_unit == NULL) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("no parsed unit (parse first)"));
+        }
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const pm_jit_cpp_ast_t *,
+            char **, size_t *, char *, size_t))p)(
+            s_cpp_arena, s_cpp_unit, &out, &out_len, err, sizeof(err));
+        if (rc != 0 || out == NULL) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(err));
+        }
+        return mp_obj_new_str(out, out_len);
+    }
+    if (strcmp(sig, "int32_t(const pm_jit_cpp_ast_t *, char *, size_t, char *, size_t)") == 0) {
+        /* the dump rides a fixed buffer: the tree text of the card's own
+         * source is ~10x the AST byte size and only ever read, so a 1MB
+         * window is the honest cap (short dump -> -1 -> refusal). */
+        static char dump[1024u * 1024u];
+        int32_t rc;
+        char err[256];
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("ast_dump needs handle"));
+        }
+        if (s_cpp_unit == NULL) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("no parsed unit (parse first)"));
+        }
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(const pm_jit_cpp_ast_t *, char *, size_t,
+            char *, size_t))p)(s_cpp_unit, dump, sizeof(dump), err, sizeof(err));
+        if (rc < 0) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(err));
+        }
+        return mp_obj_new_str(dump, (size_t)rc);
+    }
+#endif /* PM_WASMMOD_METAL_TYPES */
     /* metal.jit.py object loop: compile(source, module_name) -> mpy bytes
      * (µPy compiling Python in-process), load(mpy_bytes, module_name) ->
      * rc (bytes back into a live module). The Python twin of build's
@@ -514,6 +716,146 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             mp_obj_str_get_str(args[1]), err, sizeof(err));
         return mp_obj_new_int(rc);
     }
+    /* metal.jit.c object compile: object_compile(source) -> object bytes
+     * (ELF on native seats, a wasm module on wasm32) — the kernel's own C
+     * compiler card, TCC, in-process. The Python twin of the build card's
+     * compile_source (which carries the unit/fqn seam); this face is the
+     * raw one the cpp/rsx transpile chains hand their lowered C to.
+     * compile_opts(source, include_dirs, defines) carries the seam the
+     * feeds drive: include roots for the lowered C's own #includes, plus
+     * NAME / NAME=VALUE defines. */
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const char *, size_t, uint8_t **, size_t *, char *, size_t)") == 0) {
+        pm_util_mem_arena_t *arena;
+        uint8_t *obj = NULL;
+        size_t obj_len = 0;
+        size_t src_len;
+        int32_t rc;
+        char err[512];
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("object_compile needs source"));
+        }
+        src_len = strlen(mp_obj_str_get_str(args[0]));
+        /* Plain object_compile carries no include seam, so route through the
+         * card's _opts sibling with the kernel's own header roots — the
+         * REPL's lowered C must resolve its #includes wherever the cwd
+         * points (the feeds pass the same roots explicitly). */
+        {
+            const char *incs[24];
+            size_t n_incs = 0;
+            int32_t (*opts_fn)(pm_util_mem_arena_t *, const char *, size_t,
+                const char **, uint32_t, const char **, uint32_t,
+                uint8_t **, size_t *, char *, size_t);
+            opts_fn = (int32_t (*)(pm_util_mem_arena_t *, const char *, size_t,
+                const char **, uint32_t, const char **, uint32_t,
+                uint8_t **, size_t *, char *, size_t))
+                pm_wasmmod_registry_resolve_native(
+                    (const uint8_t *)"pymergetic.metal.jit.c", 22u,
+                    (const uint8_t *)"pm_metal_jit_c_object_compile_opts", 34u);
+            if (opts_fn == NULL) {
+                /* no _opts on this seat (unregistered card): the raw face */
+                size_t cap = compile_arena_cap();
+                arena = pm_util_mem_arena_create(s_compile_backing, cap);
+                if (arena == NULL) {
+                    return mp_const_none;
+                }
+                memset(err, 0, sizeof(err));
+                rc = ((int32_t (*)(pm_util_mem_arena_t *, const char *, size_t,
+                    uint8_t **, size_t *, char *, size_t))p)(
+                    arena, mp_obj_str_get_str(args[0]), src_len,
+                    &obj, &obj_len, err, sizeof(err));
+                pm_util_mem_arena_destroy(arena);
+                if (rc != 0 || obj == NULL) {
+                    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(err));
+                }
+                return mp_obj_new_bytes(obj, obj_len);
+            }
+#ifdef PM_WASMMOD_METAL_TYPES
+            incs[n_incs++] = PM_NATIVECALL_METAL_SRC;
+            incs[n_incs++] = PM_NATIVECALL_WASMMOD_SRC;
+            incs[n_incs++] = PM_NATIVECALL_WASMMOD_ROOT;
+            incs[n_incs++] = PM_NATIVECALL_TCC_INC;
+#endif
+            {
+                size_t cap = compile_arena_cap();
+                arena = pm_util_mem_arena_create(s_compile_backing, cap);
+            }
+            if (arena == NULL) {
+                return mp_const_none;
+            }
+            memset(err, 0, sizeof(err));
+            rc = opts_fn(arena, mp_obj_str_get_str(args[0]), src_len,
+                incs, (uint32_t)n_incs, NULL, 0,
+                &obj, &obj_len, err, sizeof(err));
+            pm_util_mem_arena_destroy(arena);
+            if (rc != 0 || obj == NULL) {
+                mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(err));
+            }
+            return mp_obj_new_bytes(obj, obj_len);
+        }
+    }
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const char *, size_t, const char **, uint32_t, const char **, uint32_t, uint8_t **, size_t *, char *, size_t)") == 0) {
+        pm_util_mem_arena_t *arena;
+        uint8_t *obj = NULL;
+        size_t obj_len = 0;
+        size_t src_len;
+        int32_t rc;
+        char err[512];
+        const char *incs[24];
+        const char *defs[16];
+        size_t n_incs = 0;
+        size_t n_defs = 0;
+        mp_obj_t *items = NULL;
+        size_t n_items = 0;
+        if (n_args != 1 && n_args != 2 && n_args != 3) {
+            mp_raise_TypeError(MP_ERROR_TEXT("compile_opts needs source[, include_dirs][, defines]"));
+        }
+        src_len = strlen(mp_obj_str_get_str(args[0]));
+        /* The kernel's own header roots ride every compile — the same roots
+         * the host build compiles card sources against (metal src,
+         * wasmmod src + root, and TCC's freestanding headers for stddef
+         * etc.). Baked at compile time, so the REPL's lowered C always
+         * resolves its #includes wherever the cwd points; the caller's
+         * list rides after them. */
+#ifdef PM_WASMMOD_METAL_TYPES
+        incs[n_incs++] = PM_NATIVECALL_METAL_SRC;
+        incs[n_incs++] = PM_NATIVECALL_WASMMOD_SRC;
+        incs[n_incs++] = PM_NATIVECALL_WASMMOD_ROOT;
+        incs[n_incs++] = PM_NATIVECALL_TCC_INC;
+#endif
+        if (n_args >= 2 && args[1] != mp_const_none) {
+            mp_obj_get_array(args[1], &n_items, &items);
+            for (size_t i = 0; i < n_items && n_incs < 24; ++i) {
+                incs[n_incs++] = mp_obj_str_get_str(items[i]);
+            }
+        }
+        if (n_args == 3 && args[2] != mp_const_none) {
+            mp_obj_get_array(args[2], &n_items, &items);
+            n_defs = n_items < 16 ? n_items : 16;
+            for (size_t i = 0; i < n_defs; ++i) {
+                defs[i] = mp_obj_str_get_str(items[i]);
+            }
+        }
+        {
+            size_t cap = compile_arena_cap();
+            arena = pm_util_mem_arena_create(s_compile_backing, cap);
+        }
+        if (arena == NULL) {
+            return mp_const_none;
+        }
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const char *, size_t,
+            const char **, uint32_t, const char **, uint32_t,
+            uint8_t **, size_t *, char *, size_t))p)(
+            arena, mp_obj_str_get_str(args[0]), src_len,
+            incs, (uint32_t)n_incs, defs, (uint32_t)n_defs,
+            &obj, &obj_len, err, sizeof(err));
+        pm_util_mem_arena_destroy(arena);
+        if (rc != 0 || obj == NULL) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(err));
+        }
+        return mp_obj_new_bytes(obj, obj_len);
+    }
+#ifdef PM_WASMMOD_METAL_TYPES
     /* metal.build accessor spine (Phase 11): at(fqn, name) -> handle (an
      * int; 0 = unresolvable), at_info(handle) -> dict of the joined answer,
      * at_ast(handle) -> (has_editor, lang). The struct out-param of
@@ -716,6 +1058,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             return mp_obj_new_tuple(2, pair);
         }
     }
+#endif /* PM_WASMMOD_METAL_TYPES */
     if (strcmp(sig, "const char *(void)") == 0) {
         const char *s;
         if (n_args != 0) {
@@ -782,6 +1125,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         const char *s = mp_obj_str_get_str(args[0]);
         return mp_obj_new_int(((int32_t (*)(const char *))p)(s));
     }
+#ifdef PM_WASMMOD_METAL_TYPES
     if (strcmp(sig, "int32_t(char[PM_METAL_NET_SWARM_MEMBER_ID_LEN])") == 0) {
         /* net.swarm.membership.node_id: an out-buffer of the node's base-16
          * identity (40 chars). Present as bytes, mirroring zenoh zid. */
@@ -808,6 +1152,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         items[1] = (rc == 1) ? mp_obj_new_bytes(zid, 16) : mp_const_none;
         return mp_obj_new_tuple(2, items);
     }
+#endif /* PM_WASMMOD_METAL_TYPES */
     if (strcmp(sig, "int32_t(uint8_t, uint8_t *, uint8_t *)") == 0) {
         /* net.zenoh.scout: raw scout with a whatami-target arg + two outs.
          * Returns (rc, peer_id_bytes) too; the target rides the one arg. */
@@ -853,7 +1198,9 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         path = mp_obj_str_get_str(args[0]);
         max_len = mp_obj_get_int(args[1]);
-        if (max_len < 0 || max_len > (256u * 1024u)) {
+        /* 2MB: card sources are ~250KB, mpy/firmware blobs are the only
+         * larger bodies — a read of those is a probe, not a load. */
+        if (max_len < 0 || max_len > (2u * 1024u * 1024u)) {
             mp_raise_ValueError(MP_ERROR_TEXT("read max_len out of range"));
         }
         buf = m_new(uint8_t, max_len == 0 ? 1u : (size_t)max_len);
@@ -880,6 +1227,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_tuple(2, pair);
     }
 
+#ifdef PM_WASMMOD_METAL_TYPES
     /* metal.workspace (Phase 14): materialize() -> (rc, n_files), mirror_set
      * (root) -> rc, file_count() -> int, extract_external(name, gz-bytes) ->
      * (rc, n_files). The materialize/extract arena is per-call scratch
@@ -946,5 +1294,6 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         pair[1] = mp_obj_new_int_from_uint(n_files);
         return mp_obj_new_tuple(2, pair);
     }
+#endif /* PM_WASMMOD_METAL_TYPES */
     mp_raise_ValueError(MP_ERROR_TEXT("unsupported native sig (use CONNECT from C/RS)"));
 }

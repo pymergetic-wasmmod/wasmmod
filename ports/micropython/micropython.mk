@@ -22,12 +22,16 @@ PM_WASMMOD_BROWSER := 1
 endif
 
 INC += -I$(WASMMOD_ABS) -I$(WASMMOD_ABS)/src
-# nativecall.c's metal bridges (build/edit/jit.c/workspace __types__.h) resolve
-# on every µPy seat — including upywm, whose tree is wasmmod-only and so has
-# no other metal include path. Header-only includes: no metal object is
-# linked into a wasmmod-only build (the bridges resolve at runtime through
-# the registry and refuse politely when the cards are absent).
+# nativecall.c's metal bridges (build/edit/jit.c/workspace __types__.h) need
+# the metal headers. mp's tree has extmod/metal; upywm's tree is wasmmod-only
+# and carries no metal at all — there the metal-typed bridges compile out and
+# only the registry-resident paths that need no metal types remain. Header-only
+# includes: no metal object is ever linked into a wasmmod-only build.
+ifneq ($(wildcard $(TOP)/extmod/metal/src),)
 INC += -I$(TOP)/extmod/metal/src
+# abspath: the baked root must survive any cwd the REPL later runs from.
+CFLAGS += -DPM_WASMMOD_METAL_TYPES=1 -DPM_NATIVECALL_WASMMOD_ROOT=\"$(abspath $(WASMMOD_ABS))\"
+endif
 
 include $(WASMMOD_ABS)/gen.mk
 
