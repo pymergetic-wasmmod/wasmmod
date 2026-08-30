@@ -42,6 +42,7 @@ fn main() {
     ensure_export_rs_stubs();
     build_util_mem();
     build_util_zlib();
+    build_types();
     if bundle_mbedtls() {
         build_mbedtls();
     }
@@ -56,6 +57,7 @@ const EXPORT_RS_STUBS: &[&str] = &[
     "src/pymergetic/util/mem/__exports__.rs",
     "src/pymergetic/util/zlib/__exports__.rs",
     "src/pymergetic/util/pysample/__exports__.rs",
+    "src/pymergetic/types/__exports__.rs",
     "src/pymergetic/wasmmod/io/__exports__.rs",
     "src/pymergetic/wasmmod/net/cdn/__exports__.rs",
 ];
@@ -118,6 +120,39 @@ fn build_util_mem() {
     let out = std::env::var("OUT_DIR").expect("OUT_DIR");
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static:+whole-archive=pm_util_mem");
+}
+
+fn build_types() {
+    let root = manifest_dir();
+    println!("cargo:rerun-if-changed=src/pymergetic/types/__impl__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/types/__tests__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/types/__types__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/types/__exports__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/types.h");
+
+    // Depends on util.mem (arena allocs) — same whole-archive posture as
+    // mem itself so the PM_MOD_EXPORT_C / PM_MOD_TEST_C / PM_TYPE_DEFINE_C
+    // .init_array ctors survive --gc-sections in staticlib consumers.
+    // Tests include the umbrella (types.h → generated __exports__.h);
+    // skip them when faces are wiped so wasmmod-gen can recreate first.
+    let mut build = cc::Build::new();
+    build
+        .file("src/pymergetic/types/__impl__.c")
+        .include(&root)
+        .include(format!("{root}/src"))
+        .define("PM_WASMMOD_GUEST", "0")
+        .warnings(true)
+        .cargo_metadata(false);
+    if exports_h_exists("src/pymergetic/types/__exports__.h")
+        && exports_h_exists("src/pymergetic/util/mem/__exports__.h")
+    {
+        build.file("src/pymergetic/types/__tests__.c");
+        build.define("PM_MOD_TESTS", "1");
+    }
+    build.compile("pm_types");
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static:+whole-archive=pm_types");
 }
 
 fn build_util_zlib() {

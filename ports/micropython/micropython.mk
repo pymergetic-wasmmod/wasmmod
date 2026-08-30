@@ -72,6 +72,7 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/third_party/tlsf/tlsf.c \
 	$(WASMMOD_DIR)/src/pymergetic/util/zlib/__impl__.c \
 	$(WASMMOD_DIR)/../../lib/uzlib/lz77.c \
+	$(WASMMOD_DIR)/src/pymergetic/types/__impl__.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/boot/__impl__.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/io/__impl__.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/net/cdn/__impl__.c \
@@ -189,6 +190,7 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/ports/common/memcookie.c \
 	$(WASMMOD_DIR)/src/pymergetic/util/zlib/__impl__.c \
 	$(WASMMOD_DIR)/../../lib/uzlib/lz77.c \
+	$(WASMMOD_DIR)/src/pymergetic/types/__impl__.c \
 	$(WASMMOD_DIR)/ports/micropython/modpymergetic.c \
 	$(WASMMOD_DIR)/ports/micropython/modwasmmod.c \
 	$(WASMMOD_DIR)/ports/micropython/modcdn.c \
@@ -243,7 +245,9 @@ FORCE:
 $(BUILD)/firmware.elf: $(WASMMOD_STATICLIB)
 $(BUILD)/micropython: $(WASMMOD_STATICLIB)
 
-LDFLAGS_EXTMOD += -L$(WASMMOD_CARGO_TARGET) -l$(WASMMOD_CARGO_LIB) -lpthread -ldl -lm -lstdc++
+# -rdynamic: resident card faces (PM_MOD_EXPORT_C) live in the staticlib and
+# are resolved at runtime via dlsym(RTLD_DEFAULT) by the import hook.
+LDFLAGS_EXTMOD += -rdynamic -L$(WASMMOD_CARGO_TARGET) -l$(WASMMOD_CARGO_LIB) -lpthread -ldl -lm -lstdc++
 # io HTTPS leaves U mbedtls_*; unix already compiles lib/mbedtls (ssl).
 # Cargo --no-default-features drops bundle-mbedtls so this .a is not a second copy.
 # WAMR vmlib is a separate static lib (build.rs); locate it under cargo OUT_DIR.
