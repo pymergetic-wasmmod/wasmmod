@@ -18,9 +18,27 @@ typedef struct _mp_wasm_ready_fun_t {
 } mp_wasm_ready_fun_t;
 
 static mp_obj_t ready_fun_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
-    (void)n_kw;
     mp_wasm_ready_fun_t *self = MP_OBJ_TO_PTR(self_in);
-    return mp_wasm_native_call(self->fqn, self->export_name, n_args, args);
+    /* Keyword args ride along: the card faces are declared as plain
+     * positional C prototypes, so kw args fold onto the tail as
+     * positionals (kwargs-from-dict order is the caller's declaration
+     * order — the .pyi faces spell them positionally for exactly this
+     * reason). */
+    if (n_kw == 0) {
+        return mp_wasm_native_call(self->fqn, self->export_name, n_args, args);
+    }
+    {
+        /* args layout: n_args positionals, then n_kw key/value pairs */
+        mp_obj_t flat[n_args + n_kw];
+        size_t i;
+        if (n_args > 0) {
+            memcpy(flat, args, n_args * sizeof(mp_obj_t));
+        }
+        for (i = 0; i < n_kw; i++) {
+            flat[n_args + i] = args[n_args + 2u * i + 1u];
+        }
+        return mp_wasm_native_call(self->fqn, self->export_name, n_args + n_kw, flat);
+    }
 }
 
 static MP_DEFINE_CONST_OBJ_TYPE(

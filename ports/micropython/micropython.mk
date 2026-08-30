@@ -29,7 +29,8 @@ INC += -I$(WASMMOD_ABS) -I$(WASMMOD_ABS)/src
 # includes: no metal object is ever linked into a wasmmod-only build.
 ifneq ($(wildcard $(TOP)/extmod/metal/src),)
 INC += -I$(TOP)/extmod/metal/src
-CFLAGS += -DPM_WASMMOD_METAL_TYPES=1
+# abspath: the baked root must survive any cwd the REPL later runs from.
+CFLAGS += -DPM_WASMMOD_METAL_TYPES=1 -DPM_NATIVECALL_WASMMOD_ROOT=\"$(abspath $(WASMMOD_ABS))\"
 endif
 
 include $(WASMMOD_ABS)/gen.mk
