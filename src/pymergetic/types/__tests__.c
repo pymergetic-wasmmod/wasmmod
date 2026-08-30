@@ -21,21 +21,12 @@ static int32_t fail(const char *why) {
 }
 
 /*----------------------------------------------------------------------
- * PM_TYPE_DEFINE_C — define a type in the impl language: a static
- * const descriptor + a ctor registering it into the live registry.
- * Fields MUST be sorted by name_hash ascending (the binary-search
- * contract); the prove asserts the order at runtime so an author who
- * gets it wrong fails the gate, not the search.
+ * Types under test — defined with the public PM_TYPE_DEFINE_C from
+ * pymergetic/types/__types__.h (moved there so any card can author
+ * types). Fields sorted by name_hash ascending; the prove asserts the
+ * order at runtime so an author who gets it wrong fails the gate,
+ * not the search.
  *--------------------------------------------------------------------*/
-#define PM_TYPE_DEFINE_C(desc_sym, fqn_lit, kind_val, inst_size, parent_sym, \
-    field_arr, field_n) \
-    static const pm_type_descriptor_t desc_sym = { \
-        PM_TYPE_DESCRIPTOR_MAGIC, (kind_val), (inst_size), \
-        (fqn_lit), (fqn_lit), (parent_sym), (field_n), (field_arr), 0, NULL, \
-    }; \
-    static void __attribute__((constructor)) desc_sym##_reg(void) { \
-        (void)pm_types_registry_register(&desc_sym); \
-    }
 
 /* djb2-16 name hashes (compile-time today, verified at runtime):
  *   id 0x7832  created 0x0A3D  name 0x0C46  age 0x5D32

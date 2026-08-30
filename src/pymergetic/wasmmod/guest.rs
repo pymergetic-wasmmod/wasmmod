@@ -149,6 +149,233 @@ pub struct pm_mod_bootdep_t {
 
 unsafe impl Sync for pm_mod_bootdep_t {}
 
+/*----------------------------------------------------------------------
+ * pymergetic.types C-ABI mirrors for PM_TYPE_DEFINE_RS! — same posture
+ * as pm_mod_boot_t above (the defining layout lives in
+ * pymergetic/types/__types__.h, impl = "c"; this is the Rust face).
+ *--------------------------------------------------------------------*/
+
+pub const PM_TYPE_DESCRIPTOR_MAGIC: u32 = 0x54595045; /* "TYPE" */
+pub const PM_TYPE_DESC_STRUCT: u16 = 0;
+
+/* Primitive descriptors — the same statics PM_TYPE_DEFINE_C references
+ * in C (pymergetic/types/__types__.h). Field rows point at these
+ * directly: no registry lookup in the ctor, because .init_array order
+ * is link order and the primitives' own ctors may not have run yet
+ * when a card's ctor fires. */
+unsafe extern "C" {
+    pub static PM_TYPE_NIL_DESC: pm_types_descriptor_rs;
+    pub static PM_TYPE_I32_DESC: pm_types_descriptor_rs;
+    pub static PM_TYPE_I64_DESC: pm_types_descriptor_rs;
+    pub static PM_TYPE_U32_DESC: pm_types_descriptor_rs;
+    pub static PM_TYPE_U64_DESC: pm_types_descriptor_rs;
+    pub static PM_TYPE_F32_DESC: pm_types_descriptor_rs;
+    pub static PM_TYPE_F64_DESC: pm_types_descriptor_rs;
+    pub static PM_TYPE_BOOL_DESC: pm_types_descriptor_rs;
+    pub static PM_TYPE_STR_DESC: pm_types_descriptor_rs;
+    pub static PM_TYPE_BYTES_DESC: pm_types_descriptor_rs;
+    /* list / dict have no exported symbol (file-local in the C card)
+     * — field rows for those fall through to a registry find. */
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct pm_types_field_rs {
+    pub name_hash: u16,
+    pub _flags: u16,
+    pub offset: u32,
+    pub type_: *const core::ffi::c_void, /* const pm_type_descriptor_t * */
+    pub name: *const u8,
+}
+
+unsafe impl Sync for pm_types_field_rs {}
+
+#[repr(C)]
+pub struct pm_types_descriptor_rs {
+    pub magic: u32,
+    pub kind: u16,
+    pub instance_size: u16,
+    pub name: *const u8,
+    pub fqn: *const u8,
+    pub parent: *const core::ffi::c_void, /* const pm_type_descriptor_t * */
+    pub field_count: u16,
+    pub fields: *const pm_types_field_rs,
+    pub method_count: u16,
+    pub methods: *const core::ffi::c_void, /* const pm_type_method_t * */
+}
+
+unsafe impl Sync for pm_types_descriptor_rs {}
+
+/// Host-side type registration (same job as `PM_TYPE_DEFINE_C` in
+/// pymergetic/types/__types__.h). Fields resolve their type descriptors
+/// from the registry at ctor time (boot-order: card ctors run after the
+/// types card's primitives), then the descriptor registers — the same
+/// single-threaded-ctor contract the C face uses. The registry calls go
+/// through `crate::types::` (the generated face, one declaration).
+///
+/// ```ignore
+/// PM_TYPE_DEFINE_RS!("pymergetic.metal.geo.Point", PM_TYPE_DESC_STRUCT,
+///     16, None,
+///     &[
+///         ("x", "pymergetic.types.f64", 0),
+///         ("y", "pymergetic.types.f64", 8),
+///     ]);
+/// ```
+#[macro_export]
+macro_rules! PM_TYPE_DEFINE_RS {
+    ($fqn:expr, $kind:expr, $inst_size:expr, $parent:expr, $fields:expr) => {
+        const _: () = {
+            static __PM_TYPE_FIELD_SPEC: &[(&str, &str, u32)] = $fields;
+            // Fixed-capacity field rows, filled at ctor time (boot order:
+            // types card primitives register before card ctors run).
+            static mut __PM_TYPE_FIELDS: [$crate::wasmmod::guest::pm_types_field_rs; 64] =
+                [$crate::wasmmod::guest::pm_types_field_rs {
+                    name_hash: 0,
+                    _flags: 0,
+                    offset: 0,
+                    type_: core::ptr::null(),
+                    name: core::ptr::null(),
+                }; 64];
+            /* NUL-terminated backing for each row's name / type fqn —
+             * &str literals are not NUL-terminated, and C strcmp must
+             * never run past (separate array so the ABI rows keep the
+             * pm_type_field_t stride). */
+            static mut __PM_TYPE_NAME_BUFS: [[u8; 32]; 64] = [[0; 32]; 64];
+            static mut __PM_TYPE_TYPE_BUFS: [[u8; 192]; 64] = [[0; 192]; 64];
+            static __PM_TYPE_DESC: $crate::wasmmod::guest::pm_types_descriptor_rs = $crate::wasmmod::guest::pm_types_descriptor_rs {
+                magic: $crate::wasmmod::guest::PM_TYPE_DESCRIPTOR_MAGIC,
+                kind: $kind,
+                instance_size: $inst_size,
+                name: concat!($fqn, "\0").as_ptr(),
+                fqn: concat!($fqn, "\0").as_ptr(),
+                parent: core::ptr::null(),
+                field_count: __PM_TYPE_FIELD_SPEC.len() as u16,
+                fields: unsafe { core::ptr::addr_of!(__PM_TYPE_FIELDS) as *const $crate::wasmmod::guest::pm_types_field_rs },
+                method_count: 0,
+                methods: core::ptr::null(),
+            };
+            #[used]
+            #[cfg_attr(
+                any(target_os = "linux", target_os = "android"),
+                unsafe(link_section = ".init_array")
+            )]
+            #[cfg_attr(
+                target_vendor = "apple",
+                unsafe(link_section = "__DATA,__mod_init_func")
+            )]
+            static __PM_TYPE_REG: extern "C" fn() = {
+                extern "C" fn __pm_type_ctor() {
+                    unsafe {
+                        let n = __PM_TYPE_FIELD_SPEC.len();
+                        let rows = core::ptr::addr_of_mut!(__PM_TYPE_FIELDS) as *mut u8;
+                        let names = core::ptr::addr_of_mut!(__PM_TYPE_NAME_BUFS) as *mut u8;
+                        let types = core::ptr::addr_of_mut!(__PM_TYPE_TYPE_BUFS) as *mut u8;
+                        /* Row stride: pm_types_field_rs is #[repr(C)] —
+                         * read it from the type itself, never hardcode. */
+                        let stride = core::mem::size_of::<$crate::wasmmod::guest::pm_types_field_rs>();
+                        for i in 0..n {
+                            let (name, type_fqn, offset) = __PM_TYPE_FIELD_SPEC[i];
+                            let row = rows.add(i * stride)
+                                as *mut $crate::wasmmod::guest::pm_types_field_rs;
+                            let nb = name.as_bytes();
+                            let nlen = nb.len().min(31);
+                            let nbuf = names.add(i * 32);
+                            for j in 0..nlen {
+                                *nbuf.add(j) = nb[j];
+                            }
+                            *nbuf.add(nlen) = 0;
+                            (*row).name = nbuf;
+                            (*row).offset = offset;
+                            let mut h: u32 = 5381;
+                            for &b in &nb[..nlen] {
+                                h = h.wrapping_mul(33).wrapping_add(b as u32);
+                            }
+                            (*row).name_hash = (h & 0xFFFF) as u16;
+                            if !type_fqn.is_empty() {
+                                /* Primitives: static descriptor refs (same as
+                                 * the C face) — boot-order independent.
+                                 * Struct fqns: registry find (those cards'
+                                 * ctors register descriptors; the gen-time
+                                 * scan stages them, and the linked binary
+                                 * resolves them after boot completes). */
+                                let desc: *const core::ffi::c_void = match type_fqn {
+                                    "pymergetic.types.nil" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_NIL_DESC
+                                        ).cast()
+                                    }
+                                    "pymergetic.types.i32" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_I32_DESC
+                                        ).cast()
+                                    }
+                                    "pymergetic.types.i64" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_I64_DESC
+                                        ).cast()
+                                    }
+                                    "pymergetic.types.u32" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_U32_DESC
+                                        ).cast()
+                                    }
+                                    "pymergetic.types.u64" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_U64_DESC
+                                        ).cast()
+                                    }
+                                    "pymergetic.types.f32" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_F32_DESC
+                                        ).cast()
+                                    }
+                                    "pymergetic.types.f64" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_F64_DESC
+                                        ).cast()
+                                    }
+                                    "pymergetic.types.bool" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_BOOL_DESC
+                                        ).cast()
+                                    }
+                                    "pymergetic.types.str" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_STR_DESC
+                                        ).cast()
+                                    }
+                                    "pymergetic.types.bytes" => {
+                                        core::ptr::addr_of!(
+                                            $crate::wasmmod::guest::PM_TYPE_BYTES_DESC
+                                        ).cast()
+                                    }
+                                    _ => {
+                                        let bytes = type_fqn.as_bytes();
+                                        let len = bytes.len().min(191);
+                                        let tbuf = types.add(i * 192);
+                                        for j in 0..len {
+                                            *tbuf.add(j) = bytes[j];
+                                        }
+                                        *tbuf.add(len) = 0;
+                                        $crate::types::pm_types_registry_find(tbuf)
+                                            as *const core::ffi::c_void
+                                    }
+                                };
+                                (*row).type_ = desc;
+                            }
+                        }
+                        let _ = $crate::types::pm_types_registry_register(
+                            core::ptr::addr_of!(__PM_TYPE_DESC)
+                                as *const $crate::types::pm_type_descriptor_t,
+                        );
+                    }
+                }
+                __pm_type_ctor
+            };
+        };
+    };
+}
+
 pub unsafe fn pm_mod_boot_add(rec: *const pm_mod_boot_t) -> i32 {
     unsafe { crate::wasmmod::boot::pm_mod_boot_add(rec.cast()) }
 }
@@ -229,4 +456,65 @@ macro_rules! PM_MOD_BOOTDEP_RS {
             };
         };
     };
+}
+
+#[cfg(test)]
+mod type_define_tests {
+    //! Prove PM_TYPE_DEFINE_RS! end-to-end on the host build: the
+    //! .init_array ctor resolves field descriptors from the live
+    //! registry and registers the type — the same single-registry
+    //! contract PM_TYPE_DEFINE_C uses. The macro runs at module scope
+    //! (its ctor fires at process start, before any test).
+    #[cfg(feature = "gen")]
+    crate::PM_TYPE_DEFINE_RS!(
+        "pymergetic.wasmmod.guest_test.Point",
+        crate::wasmmod::guest::PM_TYPE_DESC_STRUCT,
+        16,
+        None,
+        &[("x", "pymergetic.types.f64", 0), ("y", "pymergetic.types.f64", 8)]
+    );
+
+    #[cfg(feature = "gen")]
+    #[test]
+    fn rs_type_define_registers() {
+        let fqn = b"pymergetic.wasmmod.guest_test.Point\0";
+        let d = unsafe { crate::types::pm_types_registry_find(fqn.as_ptr()) };
+        assert!(!d.is_null(), "PM_TYPE_DEFINE_RS! ctor registered the type");
+        let view = unsafe {
+            let mut view = crate::wasmmod::guest::pm_types_descriptor_rs {
+                magic: 0,
+                kind: 0,
+                instance_size: 0,
+                name: core::ptr::null(),
+                fqn: core::ptr::null(),
+                parent: core::ptr::null(),
+                field_count: 0,
+                fields: core::ptr::null(),
+                method_count: 0,
+                methods: core::ptr::null(),
+            };
+            core::ptr::copy_nonoverlapping(d.cast(), &mut view, 1);
+            view
+        };
+        assert_eq!(view.magic, crate::wasmmod::guest::PM_TYPE_DESCRIPTOR_MAGIC);
+        assert_eq!(view.instance_size, 16);
+        assert_eq!(view.field_count, 2);
+        /* Field rows: name pointers must be valid, hashes computed,
+         * primitive descriptors resolved from the registry. */
+        unsafe {
+            let mut prev = 0u16;
+            for i in 0..view.field_count as usize {
+                let f = &*view.fields.add(i);
+                assert!(!f.name.is_null(), "field name set");
+                let name = core::ffi::c_str::CStr::from_ptr(f.name.cast()).to_string_lossy();
+                assert_eq!(name, if i == 0 { "x" } else { "y" });
+                assert!(f.name_hash > 0, "hash computed");
+                if i > 0 {
+                    assert!(f.name_hash > prev, "sorted by name_hash");
+                }
+                prev = f.name_hash;
+                assert!(!f.type_.is_null(), "primitive descriptor resolved");
+            }
+        }
+    }
 }

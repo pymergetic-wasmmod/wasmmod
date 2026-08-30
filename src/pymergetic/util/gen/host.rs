@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::wasmmod::registry::pm_wasmmod_registry_container_kind_t;
 
-use super::discover::{ensure_card_exports, FaceSource};
+use super::discover::{ensure_card_exports, ensure_card_types, FaceSource};
 use super::{
     apply_faces, face_path, faces_for_fqn, introspect_container, introspect_exports, FACE_INIT_PYI,
     FsSink, GenSink,
@@ -87,6 +87,8 @@ struct Row {
     /// Card `version` when set (publish unit / kernel).
     version: Option<String>,
     nfuncs: u32,
+    /// Live/staged types owned by this card (view faces emit for them).
+    ntypes: u32,
 }
 
 struct Leaf {
@@ -96,6 +98,7 @@ struct Leaf {
     plane: Plane,
     version: Option<String>,
     nfuncs: u32,
+    ntypes: u32,
 }
 
 struct TreeNode {
@@ -123,6 +126,7 @@ impl TreeNode {
             plane: row.plane,
             version: row.version.clone(),
             nfuncs: row.nfuncs,
+            ntypes: row.ntypes,
         });
     }
 }
@@ -323,6 +327,9 @@ __exports__.rs
 __imports__.h
 __imports__.rs
 __version__.h
+__view__.h
+__view__.rs
+__view__.pyi
 !.gitignore
 ";
 
@@ -344,30 +351,37 @@ fn emit_card_gitignore(dir: &Path, check: bool) -> i32 {
 }
 
 fn status_cols(leaf: &Leaf, color: bool) -> String {
-    let n = if leaf.outcome == Outcome::Skip {
-        paint(color, "2", "—")
-    } else {
-        format!("{} {}", leaf.nfuncs, paint(color, "2", "fn"))
-    };
+    let mut tail = String::new();
+    if leaf.ntypes > 0 {
+        tail.push_str(&format!(
+            "  {} {}",
+            leaf.ntypes,
+            paint(color, "2", "ty")
+        ));
+    }
     if leaf.outcome == Outcome::Skip {
         // Still show card impl + plane; no faces / fns. Version is on the name.
         return format!(
-            "{}  {}  {}  {}  {}",
+            "{}  {}  {}  {}  {}{tail}",
             outcome_label(leaf.outcome, color),
             impl_label(leaf.impl_lang, color),
             paint(color, "2", "—"),
             plane_label(leaf.plane, color),
-            n,
+            if leaf.outcome == Outcome::Skip {
+                paint(color, "2", "—").to_string()
+            } else {
+                format!("{} {}", leaf.nfuncs, paint(color, "2", "fn"))
+            },
         );
     }
     format!(
-        "{}  {} {} {}  {}  {}",
+        "{}  {} {} {}  {}  {}{tail}",
         outcome_label(leaf.outcome, color),
         impl_label(leaf.impl_lang, color),
         paint(color, "2", "→"),
         faces_label(leaf.faces, leaf.impl_lang, color),
         plane_label(leaf.plane, color),
-        n,
+        format!("{} {}", leaf.nfuncs, paint(color, "2", "fn")),
     )
 }
 
@@ -676,6 +690,9 @@ pub fn gen_run_paths(roots: &[&Path], check: bool) -> i32 {
         let types_on_disk = dir.join("__types__.h").is_file();
         let impl_lang = impl_of(load_impl(&card).as_deref());
         let source = ensure_card_exports(dir, &fqn);
+        // Type staging pass: PM_TYPE_DEFINE_* from unlinked muscle, so view
+        // faces emit for every card (the linked binary stays runtime truth).
+        let ntypes = ensure_card_types(dir) as u32;
         let build = load_build(&card);
         let plane = plane_of(source, &fqn, build);
         let version = load_version(&card);
@@ -705,6 +722,7 @@ pub fn gen_run_paths(roots: &[&Path], check: bool) -> i32 {
                     plane,
                     version,
                     nfuncs,
+                    ntypes,
                 });
             }
             1 => {
@@ -717,6 +735,7 @@ pub fn gen_run_paths(roots: &[&Path], check: bool) -> i32 {
                         plane,
                         version,
                         nfuncs,
+                        ntypes,
                     });
                 }
                 drift = 1;
@@ -734,6 +753,7 @@ pub fn gen_run_paths(roots: &[&Path], check: bool) -> i32 {
                     plane,
                     version,
                     nfuncs: 0,
+                    ntypes,
                 });
             }
         }

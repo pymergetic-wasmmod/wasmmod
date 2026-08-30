@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -973,6 +974,227 @@ const pm_type_descriptor_t *pm_types_registry_at(uint32_t index) {
     return s_registry[index];
 }
 
+/*-- Registry introspection (facegen / metal mod sync) ------------------
+ * Copy-out ABI (same posture as pm_wasmmod_registry_export_at): the
+ * caller buffers every string. Strings are capped at 256/64 bytes —
+ * longer names truncate; fqn width fits card paths by construction.
+ *--------------------------------------------------------------------*/
+int32_t pm_types_registry_type_at(uint32_t index,
+    char *fqn_buf, uint32_t fqn_cap,
+    uint16_t *kind, uint16_t *instance_size,
+    char *parent_fqn_buf, uint32_t parent_cap,
+    uint16_t *field_count) {
+    const pm_type_descriptor_t *d;
+    if (index >= s_registry_count) {
+        return 0;
+    }
+    d = s_registry[index];
+    if (d->fqn == NULL) {
+        return 0;
+    }
+    if (fqn_buf != NULL && fqn_cap > 0) {
+        snprintf(fqn_buf, fqn_cap, "%s", d->fqn != NULL ? d->fqn : "");
+    }
+    if (kind != NULL) {
+        *kind = d->kind;
+    }
+    if (instance_size != NULL) {
+        *instance_size = d->instance_size;
+    }
+    if (parent_fqn_buf != NULL && parent_cap > 0) {
+        snprintf(parent_fqn_buf, parent_cap, "%s",
+            (d->parent != NULL && d->parent->fqn != NULL) ? d->parent->fqn : "");
+    }
+    if (field_count != NULL) {
+        *field_count = d->field_count;
+    }
+    return 1;
+}
+
+int32_t pm_types_registry_field_at(uint32_t index, uint16_t field,
+    char *name_buf, uint32_t name_cap,
+    uint16_t *name_hash, uint32_t *offset,
+    char *type_fqn_buf, uint32_t type_cap) {
+    const pm_type_descriptor_t *d;
+    if (index >= s_registry_count) {
+        return 0;
+    }
+    d = s_registry[index];
+    if (field >= d->field_count) {
+        return 0;
+    }
+    /* Partially staged rows (scan found fewer rows than the author
+     * declared) surface as NULL name — refuse, never crash the caller. */
+    if (d->fields == NULL || d->fields[field].name == NULL) {
+        return 0;
+    }
+    if (name_buf != NULL && name_cap > 0) {
+        snprintf(name_buf, name_cap, "%s", d->fields[field].name);
+    }
+    if (name_hash != NULL) {
+        *name_hash = d->fields[field].name_hash;
+    }
+    if (offset != NULL) {
+        *offset = d->fields[field].offset;
+    }
+    if (type_fqn_buf != NULL && type_cap > 0) {
+        snprintf(type_fqn_buf, type_cap, "%s",
+            (d->fields[field].type != NULL && d->fields[field].type->fqn != NULL)
+                ? d->fields[field].type->fqn : "");
+    }
+    return 1;
+}
+
+/*-- Source-scan staging (facegen for unlinked guest cards) --------------
+ * Facegen scans __impl__.c / __impl__.rs for PM_TYPE_DEFINE_* when the
+ * card is not linked into the gen binary. Staged descriptors live in
+ * the same registry (sorted, fqn-keyed) so the introspection path is
+ * one code path. Staged fields are capped (staging is best-effort for
+ * view emission; the linked binary remains the runtime truth).
+ *
+ * Staging is a host-tool-only path (wasmmod-gen); guests never scan.
+ * The field store must have pm_type_field_t's exact stride so the
+ * descriptor's `fields` pointer walks real rows (the embedded-string
+ * struct would give every field but the first a misaligned view).
+ *--------------------------------------------------------------------*/
+#define PM_TYPES_STAGE_MAX_FIELDS 64u
+
+typedef struct pm_types_stage_field {
+    char name[32];
+    char type_fqn[128];
+} pm_types_stage_meta_t;
+
+typedef struct pm_types_stage_desc {
+    pm_type_descriptor_t desc;
+    char fqn[192];
+    pm_type_field_t fields[PM_TYPES_STAGE_MAX_FIELDS];
+    pm_types_stage_meta_t meta[PM_TYPES_STAGE_MAX_FIELDS];
+} pm_types_stage_desc_t;
+
+#define PM_TYPES_STAGE_MAX_DESCS 96u
+
+static pm_types_stage_desc_t s_stage[PM_TYPES_STAGE_MAX_DESCS];
+static uint32_t s_stage_count;
+
+/* Staging arena: descriptors are heap-backed statics, so registration
+ * accepts their addresses for the process lifetime. Field name/type
+ * strings are copied into the staged block (scan passes transient
+ * buffers — the same rule register_fn in gen applies). */
+int32_t pm_types_registry_stage(const char *fqn,
+    uint16_t kind, uint16_t instance_size, const char *parent_fqn,
+    uint16_t field_count) {
+    uint32_t i;
+    pm_types_stage_desc_t *s;
+    if (fqn == NULL || s_stage_count >= PM_TYPES_STAGE_MAX_DESCS) {
+        return -1;
+    }
+    /* Idempotent on same fqn (re-scans across roots in one gen run). */
+    for (i = 0; i < s_stage_count; i++) {
+        if (strcmp(s_stage[i].fqn, fqn) == 0) {
+            return 0;
+        }
+    }
+    s = &s_stage[s_stage_count++];
+    memset(s, 0, sizeof(*s));
+    snprintf(s->fqn, sizeof(s->fqn), "%s", fqn);
+    s->desc.magic = PM_TYPE_DESCRIPTOR_MAGIC;
+    s->desc.kind = kind;
+    s->desc.instance_size = instance_size;
+    s->desc.name = s->fqn; /* leaf; introspection only reads fqn */
+    s->desc.fqn = s->fqn;
+    s->desc.field_count = field_count;
+    s->desc.fields = field_count
+        ? (const pm_type_field_t *)(void *)s->fields
+        : NULL;
+    if (parent_fqn != NULL && parent_fqn[0] != '\0') {
+        /* Parent pointer resolved lazily at field-stage time (parent
+         * registers first in a scan pass — sorted array order). */
+        const pm_type_descriptor_t *p = pm_types_registry_find(parent_fqn);
+        s->desc.parent = p;
+    }
+    return pm_types_registry_register(&s->desc);
+}
+
+int32_t pm_types_registry_stage_field(const char *fqn, uint16_t field_index,
+    const char *name, uint32_t offset, const char *type_fqn) {
+    uint32_t i;
+    pm_types_stage_desc_t *s;
+    for (i = 0; i < s_stage_count; i++) {
+        if (strcmp(s_stage[i].fqn, fqn) == 0) {
+            break;
+        }
+    }
+    if (i >= s_stage_count || field_index >= PM_TYPES_STAGE_MAX_FIELDS) {
+        return -1;
+    }
+    s = &s_stage[i];
+    pm_type_field_t *f = &s->fields[field_index];
+    pm_types_stage_meta_t *m = &s->meta[field_index];
+    memset(f, 0, sizeof(*f));
+    memset(m, 0, sizeof(*m));
+    snprintf(m->name, sizeof(m->name), "%s", name != NULL ? name : "");
+    f->name = m->name;
+    f->name_hash = pm_types_name_hash(m->name);
+    f->offset = offset;
+    if (type_fqn != NULL && type_fqn[0] != '\0') {
+        snprintf(m->type_fqn, sizeof(m->type_fqn), "%s", type_fqn);
+        f->type = pm_types_registry_find(type_fqn);
+    }
+    return 0;
+}
+
+/* Finish staging for `fqn`: sort own fields by name_hash (the registry
+ * contract) and recompute instance_size from the highest cell end when
+ * the author left it 0. Must run after all field stages for the fqn. */
+int32_t pm_types_registry_stage_commit(const char *fqn) {
+    uint32_t i, j, n;
+    pm_types_stage_desc_t *s;
+    for (i = 0; i < s_stage_count; i++) {
+        if (strcmp(s_stage[i].fqn, fqn) == 0) {
+            break;
+        }
+    }
+    if (i >= s_stage_count) {
+        return -1;
+    }
+    s = &s_stage[i];
+    n = s->desc.field_count;
+    if (n > PM_TYPES_STAGE_MAX_FIELDS) {
+        n = PM_TYPES_STAGE_MAX_FIELDS;
+    }
+    for (i = 0; i + 1 < n; i++) {
+        for (j = i + 1; j < n; j++) {
+            if (s->fields[j].name_hash < s->fields[i].name_hash) {
+                pm_type_field_t tf = s->fields[i];
+                pm_types_stage_meta_t tm = s->meta[i];
+                s->fields[i] = s->fields[j];
+                s->meta[i] = s->meta[j];
+                s->fields[j] = tf;
+                s->meta[j] = tm;
+                /* name points into meta — rewire after the swap. */
+                s->fields[i].name = s->meta[i].name;
+                s->fields[j].name = s->meta[j].name;
+            }
+        }
+    }
+    if (s->desc.instance_size == 0 && n > 0) {
+        uint32_t end = 0;
+        for (i = 0; i < n; i++) {
+            uint32_t cell = (uint32_t)sizeof(pm_type_value_t);
+            if (s->fields[i].type != NULL
+                    && s->fields[i].type->kind == PM_TYPE_DESC_PRIMITIVE
+                    && s->fields[i].type->instance_size != 0) {
+                cell = s->fields[i].type->instance_size;
+            }
+            if (s->fields[i].offset + cell > end) {
+                end = s->fields[i].offset + cell;
+            }
+        }
+        s->desc.instance_size = (uint16_t)end;
+    }
+    return 0;
+}
+
 /*----------------------------------------------------------------------
  * Name hash — 16-bit djb2. Collisions are a descriptor-authoring bug
  * (the PM_TYPE_DEFINE_C contract sorts and the prove checks), so the
@@ -1058,5 +1280,11 @@ PM_MOD_EXPORT_C(pymergetic.types, pm_types_field_i64, pm_types_field_i64, int32_
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_field_set_i32, pm_types_field_set_i32, int32_t(pm_type_value_t *, uint16_t, int32_t));
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_field_set_f64, pm_types_field_set_f64, int32_t(pm_type_value_t *, uint16_t, double));
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_find, pm_types_registry_find, const pm_type_descriptor_t *(const char *));
+PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_register, pm_types_registry_register, int32_t(const pm_type_descriptor_t *));
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_count, pm_types_registry_count, uint32_t(void));
+PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_type_at, pm_types_registry_type_at, int32_t(uint32_t, char *, uint32_t, uint16_t *, uint16_t *, char *, uint32_t, uint16_t *));
+PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_field_at, pm_types_registry_field_at, int32_t(uint32_t, uint16_t, char *, uint32_t, uint16_t *, uint32_t *, char *, uint32_t));
+PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_stage, pm_types_registry_stage, int32_t(const char *, uint16_t, uint16_t, const char *, uint16_t));
+PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_stage_field, pm_types_registry_stage_field, int32_t(const char *, uint16_t, const char *, uint32_t, const char *));
+PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_stage_commit, pm_types_registry_stage_commit, int32_t(const char *));
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_name_hash, pm_types_name_hash, uint16_t(const char *));
