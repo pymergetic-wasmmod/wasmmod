@@ -25,6 +25,8 @@ typedef struct mp_wasm_elf_image_t {
     uint32_t file_len;
     mp_wasm_elf_sym_t *syms;
     uint32_t n_syms;
+    unsigned char *tls_block; // materialized __thread storage (SHF_TLS objs)
+    size_t tls_size;
 } mp_wasm_elf_image_t;
 
 // Resolve an undefined ELF symbol (SHN_UNDEF) to a callable address.

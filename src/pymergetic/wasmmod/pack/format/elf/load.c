@@ -42,6 +42,7 @@
 #define SHT_REL 9
 #define SHF_ALLOC 0x2
 #define SHF_EXECINSTR 0x4
+#define SHF_TLS 0x400
 #define SHN_UNDEF 0
 #define SHN_ABS 0xfff1
 #define SHN_COMMON 0xfff2
@@ -52,6 +53,7 @@
 #define STT_OBJECT 1
 #define STT_FUNC 2
 #define STT_SECTION 3
+#define STT_TLS 6
 #define ELF64_ST_TYPE(i) ((i) & 0xf)
 #define ELF64_ST_BIND(i) ((i) >> 4)
 #define ELF64_R_SYM(i) ((i) >> 32)
@@ -68,6 +70,7 @@
 #define R_X86_64_GOTPCREL 9
 #define R_X86_64_REX_GOTPCRELX 42
 #define R_X86_64_GOTPCRELX 41
+#define R_X86_64_TPOFF32 23
 
 #define R_AARCH64_NONE 0
 #define R_AARCH64_ABS64 257
@@ -175,6 +178,68 @@ static bool reloc_needs_got(uint16_t em, uint32_t typ) {
     return false;
 }
 
+/* ---------------- TLS support (R_X86_64_TPOFF32) ----------------
+ * Objects compiled with __thread carry .tdata/.tbss sections (SHF_ALLOC |
+ * SHF_TLS, laid into the image like any ALLOC section) and reference the
+ * symbols with TPOFF32: value = sym_addr - %fs_base.
+ *
+ * The loader materializes ONE real TLS block per image: allocated from the
+ * heap, .tdata template copied in, .tbss zeroed, and every STT_TLS symbol
+ * resolved into it. TPOFF32 then computes block-relative offsets against
+ * %fs:0. The seats are single-fs-threaded, so thread == process and the
+ * computation is exact; a threaded seat would need a per-thread block and
+ * re-relocation (documented in the header). */
+static __thread unsigned char *tls_img_block;
+static size_t tls_img_block_used;
+
+/* Read %fs:0 (the thread pointer). x86_64 only; other arches have no
+ * TPOFF32 to serve. */
+#if defined(__x86_64__)
+static uintptr_t elf_fs_base(void) {
+    uintptr_t fs;
+    __asm__ volatile("movq %%fs:0, %0" : "=r"(fs));
+    return fs;
+}
+#else
+static uintptr_t elf_fs_base(void) {
+    return 0;
+}
+#endif
+
+/* Materialize this image's TLS block from its .tdata template (in the
+ * already-copied image) and .tbss size. tdata_off is the section's IMAGE
+ * offset (where the template bytes live); tbss_off is unused (NOBITS has no
+ * bytes — the block's zero-fill covers it). The block layout is the
+ * TLS-segment layout — .tdata at 0, .tbss after it — so a symbol's
+ * st_value (section-relative) lands on the right byte. Returns the block
+ * address, or 0 on failure / non-x86_64 hosts. The __thread slot holds
+ * the CURRENT image's block — loads are not nested, so one slot serves
+ * the whole link. */
+static uintptr_t elf_tls_materialize(uint8_t *img, size_t tdata_off,
+    size_t tdata_size, size_t tbss_off, size_t tbss_size) {
+    unsigned char *b;
+    size_t total;
+    (void)tbss_off;
+    if (elf_fs_base() == 0) {
+        return 0;
+    }
+    total = tdata_size + tbss_size;
+    if (total == 0) {
+        return 0;
+    }
+    b = (unsigned char *)MICROPY_WASM_MALLOC(total);
+    if (b == NULL) {
+        return 0;
+    }
+    memset(b, 0, total);
+    if (tdata_size != 0) {
+        memcpy(b, img + tdata_off, tdata_size);
+    }
+    tls_img_block = b;
+    tls_img_block_used = total;
+    return (uintptr_t)b;
+}
+
 static void aarch64_patch_adrp(uint32_t *ins, int64_t page_imm) {
     // page_imm is signed page count (delta >> 12).
     uint32_t immlo = (uint32_t)(page_imm & 3);
@@ -251,6 +316,14 @@ static bool elf_apply_rela(uint8_t *P, uintptr_t S, int64_t A, uint32_t typ,
                 return false;
             }
             *(uint32_t *)P = (uint32_t)v;
+            break;
+        }
+        case R_X86_64_TPOFF32: {
+            /* value = sym - thread pointer. S was already redirected into
+             * the materialized TLS block at symbol-resolution time, so the
+             * subtraction lands the offset the fs-relative access needs. */
+            int64_t v = (int64_t)S - (int64_t)elf_fs_base();
+            *(int32_t *)P = (int32_t)v;
             break;
         }
         case R_X86_64_PC64:
@@ -405,6 +478,9 @@ void mp_wasm_elf_image_free(mp_wasm_elf_image_t *img) {
     }
     if (img->syms) {
         MICROPY_WASM_FREE(img->syms);
+    }
+    if (img->tls_block) {
+        MICROPY_WASM_FREE(img->tls_block);
     }
     MICROPY_WASM_FREE(img);
 }
@@ -567,6 +643,38 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
         memcpy(base + sec_addr[i], elf + sh.sh_offset, (size_t)sh.sh_size);
     }
 
+    // Materialize the TLS block (if the object has TLS sections) so STT_TLS
+    // symbols resolve into real thread storage, not the image template.
+    {
+        size_t tdata_off = 0, tdata_size = 0, tbss_off = 0, tbss_size = 0;
+        int has_tls = 0;
+        for (uint16_t i = 0; i < eh.e_shnum; ++i) {
+            Elf64_Shdr sh;
+            get_shdr(elf, len, &eh, i, &sh);
+            if ((sh.sh_flags & SHF_TLS) == 0 || sh.sh_size == 0) {
+                continue;
+            }
+            has_tls = 1;
+            if (sh.sh_type == SHT_NOBITS) {
+                tbss_off = sec_addr[i];
+                tbss_size = (size_t)sh.sh_size;
+            } else {
+                tdata_off = sec_addr[i];
+                tdata_size = (size_t)sh.sh_size;
+            }
+        }
+        if (has_tls) {
+            if (elf_tls_materialize(base, tdata_off, tdata_size,
+                tbss_off, tbss_size) == 0) {
+                munmap(map, map_size);
+                MICROPY_WASM_FREE(sec_addr);
+                MICROPY_WASM_FREE(got_off);
+                set_err(errbuf, errbuf_len, "tls materialize failed");
+                return false;
+            }
+        }
+    }
+
     // Resolve symbol address: defined → image; undef → optional resolve callback.
     uintptr_t *sym_addr = MICROPY_WASM_MALLOC((size_t)nsym * sizeof(uintptr_t));
     if (sym_addr == NULL) {
@@ -603,6 +711,12 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             continue;
         }
         sym_addr[i] = (uintptr_t)(base + sec_addr[s->st_shndx] + s->st_value);
+        // STT_TLS: the value is an offset into the TLS segment, and the
+        // real storage is the materialized block — redirect so TPOFF32
+        // computes against it.
+        if (ELF64_ST_TYPE(s->st_info) == STT_TLS && tls_img_block != NULL) {
+            sym_addr[i] = (uintptr_t)tls_img_block + s->st_value;
+        }
     }
 
     // Fill GOT entries with resolved symbol addresses.
@@ -778,6 +892,14 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             w++;
         }
     }
+
+    // The TLS block transfers to the image (freed on image destroy). The
+    // __thread slot is a load-scoped pointer — clear it so a nested load
+    // cannot redirect a later symbol resolution into this block.
+    img->tls_block = tls_img_block;
+    img->tls_size = tls_img_block_used;
+    tls_img_block = NULL;
+    tls_img_block_used = 0;
 
     MICROPY_WASM_FREE(sec_addr);
     MICROPY_WASM_FREE(got_off);
@@ -1024,6 +1146,44 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
         set_err(errbuf, errbuf_len, "oom");
         goto fail;
     }
+
+    /* Materialize the shared TLS block across every object's TLS sections
+     * (offsets are image-relative, so one block covers all objects). */
+    tls_img_block = NULL;
+    {
+        size_t tdata_off = 0, tdata_size = 0, tbss_off = 0, tbss_size = 0;
+        int has_tls = 0;
+        for (i = 0; i < n_objs; ++i) {
+            for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
+                Elf64_Shdr sh;
+                if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)) {
+                    continue;
+                }
+                if ((sh.sh_flags & SHF_TLS) == 0 || sh.sh_size == 0) {
+                    continue;
+                }
+                has_tls = 1;
+                {
+                    size_t off = o[i].image_base + o[i].sec_addr[s];
+                    if (sh.sh_type == SHT_NOBITS) {
+                        tbss_off = off;
+                        tbss_size = (size_t)sh.sh_size;
+                    } else {
+                        tdata_off = off;
+                        tdata_size = (size_t)sh.sh_size;
+                    }
+                }
+            }
+        }
+        if (has_tls) {
+            if (elf_tls_materialize(base, tdata_off, tdata_size,
+                tbss_off, tbss_size) == 0) {
+                set_err(errbuf, errbuf_len, "tls materialize failed");
+                goto fail;
+            }
+        }
+    }
+
     for (i = 0; i < n_objs; ++i) {
         const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
         const char *strtab = (const char *)(o[i].elf + o[i].strsh.sh_offset);
@@ -1043,6 +1203,10 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
             defs[n_def].name = strtab + s->st_name;
             defs[n_def].addr = (uintptr_t)(base + o[i].image_base
                 + o[i].sec_addr[s->st_shndx] + s->st_value);
+            // cross-object TLS references go through the shared block too
+            if (ELF64_ST_TYPE(s->st_info) == STT_TLS && tls_img_block != NULL) {
+                defs[n_def].addr = (uintptr_t)tls_img_block + s->st_value;
+            }
             n_def++;
         }
     }
@@ -1089,6 +1253,10 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
             }
             o[i].sym_addr[k] = (uintptr_t)(base + o[i].image_base
                 + o[i].sec_addr[s->st_shndx] + s->st_value);
+            // STT_TLS: redirect into the materialized TLS block.
+            if (ELF64_ST_TYPE(s->st_info) == STT_TLS && tls_img_block != NULL) {
+                o[i].sym_addr[k] = (uintptr_t)tls_img_block + s->st_value;
+            }
         }
         for (uint32_t k = 0; k < o[i].nsym; ++k) {
             if (o[i].got_off[k] == 0xffffffffu) {
@@ -1263,6 +1431,13 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
         }
     }
 
+    /* The TLS block transfers to the image (freed on destroy); clear the
+     * load-scoped slot so a nested load cannot redirect into it. */
+    img->tls_block = tls_img_block;
+    img->tls_size = tls_img_block_used;
+    tls_img_block = NULL;
+    tls_img_block_used = 0;
+
     MICROPY_WASM_FREE(defs);
     multi_free_objs(o, n_objs);
     *out = img;
@@ -1273,6 +1448,11 @@ fail:
         mp_wasm_elf_image_free(img);
     } else if (map != NULL) {
         munmap(map, map_size);
+    }
+    if (tls_img_block != NULL) {
+        MICROPY_WASM_FREE(tls_img_block);
+        tls_img_block = NULL;
+        tls_img_block_used = 0;
     }
     if (defs != NULL) {
         MICROPY_WASM_FREE(defs);
