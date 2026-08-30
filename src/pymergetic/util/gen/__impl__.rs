@@ -321,6 +321,8 @@ fn map_c_type_to_rust(c: &str) -> (String, bool, Option<String>) {
         let rust = match base.as_str() {
             "void" => "()",
             "int" | "int32_t" | "pm_wasmmod_mem_cookie_t" | "pm_wasmmod_obj_handle_t" => "i32",
+            "uint16_t" | "int16_t" => "u16",
+            "int8_t" => "i8",
             "uint32_t" | "unsigned" | "unsigned int" => "u32",
             "int64_t" => "i64",
             "uint64_t" => "u64",

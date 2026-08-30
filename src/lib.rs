@@ -76,6 +76,9 @@ mod upy_host_alloc {
     pub extern "C" fn rust_eh_personality() {}
 }
 
+#[path = "pymergetic/types.rs"]
+pub mod types;
+
 #[path = "pymergetic/util.rs"]
 pub mod util;
 

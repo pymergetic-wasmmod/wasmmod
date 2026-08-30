@@ -8,6 +8,7 @@
 
 #include "ports/common/memcookie.h"
 #include "ports/micropython/objhandle.h"
+#include "pymergetic/types/__types__.h"
 #include "pymergetic/wasmmod/registry/__exports__.h"
 #include "pymergetic/wasmmod/registry/__types__.h"
 #ifdef PM_WASMMOD_METAL_TYPES
@@ -213,6 +214,17 @@ static int fetch_sig(const char *fqn, const char *export_name, char *sig, size_t
     }
     sig[0] = '\0';
     return -1;
+}
+
+/* pymergetic.types: unwrap a 16-byte bytes object into the universal
+ * value. Python sees constructors return exactly this shape. */
+static void fetch_type_value(mp_obj_t obj, pm_type_value_t *out) {
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(obj, &bufinfo, MP_BUFFER_READ);
+    if (bufinfo.len != sizeof(pm_type_value_t)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("types: value must be 16 bytes"));
+    }
+    memcpy(out, bufinfo.buf, sizeof(*out));
 }
 
 mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
@@ -1386,5 +1398,153 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_tuple(2, pair);
     }
 #endif /* PM_WASMMOD_METAL_TYPES */
+
+    /*----------------------------------------------------------------------
+     * pymergetic.types — the universal 16-byte value crosses as a 16-byte
+     * bytes object (host layout: tag/aux/aux2/_rsv + payload). Constructors
+     * get a bridge-owned scratch arena; compound values live in it for the
+     * session (arena owns the block — same posture as the C tests). Mutators
+     * (field_set, list_push, dict_set) return the updated value bytes since
+     * µPy bytes are immutable; callers rebind like `v = t.set(v, ...)`.
+     *--------------------------------------------------------------------*/
+    if (strcmp(fqn, "pymergetic.types") == 0) {
+        static char tbacking[64u * 1024u];
+        static pm_util_mem_arena_t *tarena;
+        if (tarena == NULL) {
+            tarena = pm_util_mem_arena_create(tbacking, sizeof(tbacking));
+        }
+        if (tarena == NULL) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("types arena init failed"));
+        }
+        if (strcmp(export_name, "pm_types_nil") == 0
+            || strcmp(export_name, "pm_types_i32") == 0
+            || strcmp(export_name, "pm_types_i64") == 0
+            || strcmp(export_name, "pm_types_f64") == 0
+            || strcmp(export_name, "pm_types_bool") == 0
+            || strcmp(export_name, "pm_types_str") == 0
+            || strcmp(export_name, "pm_types_list_new") == 0
+            || strcmp(export_name, "pm_types_dict_new") == 0) {
+            /* Constructors. */
+            pm_type_value_t v = pm_types_nil();
+            if (strcmp(export_name, "pm_types_i32") == 0) {
+                v = pm_types_i32((int32_t)mp_obj_get_int(args[0]));
+            }
+#if MICROPY_LONGINT_IMPL != MICROPY_LONGINT_IMPL_NONE
+            else if (strcmp(export_name, "pm_types_i64") == 0) {
+                v = pm_types_i64((int64_t)mp_obj_get_ll(args[0]));
+            }
+#endif
+#if MICROPY_PY_BUILTINS_FLOAT
+            else if (strcmp(export_name, "pm_types_f64") == 0) {
+                v = pm_types_f64(mp_obj_get_float(args[0]));
+            }
+#endif
+            else if (strcmp(export_name, "pm_types_bool") == 0) {
+                v = pm_types_bool(mp_obj_is_true(args[0]));
+            } else if (strcmp(export_name, "pm_types_str") == 0) {
+                const char *s = mp_obj_str_get_str(args[0]);
+                v = pm_types_str(tarena, s, (uint32_t)strlen(s));
+            } else if (strcmp(export_name, "pm_types_list_new") == 0) {
+                v = pm_types_list_new(tarena, (uint32_t)mp_obj_get_int(args[0]));
+            } else if (strcmp(export_name, "pm_types_dict_new") == 0) {
+                v = pm_types_dict_new(tarena, (uint32_t)mp_obj_get_int(args[0]));
+            }
+            return mp_obj_new_bytes((const byte *)&v, sizeof(v));
+        }
+        if (strcmp(export_name, "pm_types_kind") == 0
+            || strcmp(export_name, "pm_types_is_nil") == 0
+            || strcmp(export_name, "pm_types_is_struct") == 0
+            || strcmp(export_name, "pm_types_registry_count") == 0) {
+            /* Zero/one-arg int probes. */
+            if (strcmp(export_name, "pm_types_registry_count") == 0) {
+                return mp_obj_new_int_from_uint(pm_types_registry_count());
+            }
+            pm_type_value_t v;
+            fetch_type_value(args[0], &v);
+            if (strcmp(export_name, "pm_types_kind") == 0) {
+                return mp_obj_new_int(pm_types_kind(v));
+            }
+            if (strcmp(export_name, "pm_types_is_nil") == 0) {
+                return mp_obj_new_int(pm_types_is_nil(v));
+            }
+            return mp_obj_new_int(pm_types_is_struct(v));
+        }
+        if (strcmp(export_name, "pm_types_field_i32") == 0
+            || strcmp(export_name, "pm_types_field_f64") == 0
+            || strcmp(export_name, "pm_types_field_i64") == 0) {
+            /* (value, name_hash) -> int/float; -2 hash means field miss. */
+            pm_type_value_t v;
+            fetch_type_value(args[0], &v);
+            uint16_t hash = (uint16_t)mp_obj_get_int(args[1]);
+            if (strcmp(export_name, "pm_types_field_i32") == 0) {
+                int32_t out = 0;
+                if (pm_types_field_i32(v, hash, &out) != 0) {
+                    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("types: field miss"));
+                }
+                return mp_obj_new_int(out);
+            }
+#if MICROPY_PY_BUILTINS_FLOAT
+            if (strcmp(export_name, "pm_types_field_f64") == 0) {
+                double out = 0.0;
+                if (pm_types_field_f64(v, hash, &out) != 0) {
+                    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("types: field miss"));
+                }
+                return mp_obj_new_float(out);
+            }
+#endif
+            int64_t out = 0;
+#if MICROPY_LONGINT_IMPL != MICROPY_LONGINT_IMPL_NONE
+            if (pm_types_field_i64(v, hash, &out) != 0) {
+                mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("types: field miss"));
+            }
+            return mp_obj_new_int_from_ll(out);
+#else
+            (void)out;
+            mp_raise_TypeError(MP_ERROR_TEXT("types: i64 needs longint"));
+#endif
+        }
+        if (strcmp(export_name, "pm_types_field_set_i32") == 0
+            || strcmp(export_name, "pm_types_field_set_f64") == 0) {
+            /* (value, name_hash, newval) -> updated value bytes. */
+            pm_type_value_t v;
+            fetch_type_value(args[0], &v);
+            uint16_t hash = (uint16_t)mp_obj_get_int(args[1]);
+            if (strcmp(export_name, "pm_types_field_set_i32") == 0) {
+                (void)pm_types_field_set_i32(&v, hash, (int32_t)mp_obj_get_int(args[2]));
+            }
+#if MICROPY_PY_BUILTINS_FLOAT
+            else {
+                (void)pm_types_field_set_f64(&v, hash, mp_obj_get_float(args[2]));
+            }
+#endif
+            return mp_obj_new_bytes((const byte *)&v, sizeof(v));
+        }
+        if (strcmp(export_name, "pm_types_list_push") == 0) {
+            pm_type_value_t v, item;
+            fetch_type_value(args[0], &v);
+            fetch_type_value(args[1], &item);
+            (void)pm_types_list_push(&v, item);
+            return mp_obj_new_bytes((const byte *)&v, sizeof(v));
+        }
+        if (strcmp(export_name, "pm_types_dict_set") == 0) {
+            pm_type_value_t v, key, val;
+            fetch_type_value(args[0], &v);
+            fetch_type_value(args[1], &key);
+            fetch_type_value(args[2], &val);
+            (void)pm_types_dict_set(&v, key, val);
+            return mp_obj_new_bytes((const byte *)&v, sizeof(v));
+        }
+        if (strcmp(export_name, "pm_types_registry_find") == 0) {
+            const pm_type_descriptor_t *d = pm_types_registry_find(
+                mp_obj_str_get_str(args[0]));
+            if (d == NULL) {
+                return mp_const_none;
+            }
+            return mp_obj_new_int_from_uint((mp_uint_t)d);
+        }
+        if (strcmp(export_name, "pm_types_name_hash") == 0) {
+            return mp_obj_new_int(pm_types_name_hash(mp_obj_str_get_str(args[0])));
+        }
+    }
     mp_raise_ValueError(MP_ERROR_TEXT("unsupported native sig (use CONNECT from C/RS)"));
 }
