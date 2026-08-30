@@ -38,10 +38,38 @@ pub struct LiveExport {
     pub sig: String,
 }
 
+/// One live type descriptor as introspected from the type registry
+/// (`PM_TYPE_DEFINE_C` / `PM_TYPE_DEFINE_RS!` registration). Gen-only:
+/// the freestanding staticlib never introspects for view emission.
+#[cfg(feature = "gen")]
+#[derive(Clone, Debug)]
+pub struct LiveTypeField {
+    pub name: String,
+    pub name_hash: u16,
+    pub offset: u32,
+    /// Field type fqn ("" = undeclared / any).
+    pub type_fqn: String,
+}
+
+#[cfg(feature = "gen")]
+#[derive(Clone, Debug)]
+pub struct LiveType {
+    pub fqn: String,
+    pub kind: u16,
+    pub instance_size: u16,
+    /// Parent fqn ("" = root).
+    pub parent_fqn: String,
+    pub fields: Vec<LiveTypeField>,
+}
+
 /// Face filenames emitted beside a module card / under a sink prefix.
 pub const FACE_EXPORTS_H: &str = "__exports__.h";
 pub const FACE_EXPORTS_RS: &str = "__exports__.rs";
 pub const FACE_INIT_PYI: &str = "__init__.pyi";
+/// Typed-view faces (from the live type registry) — same cards, new names.
+pub const FACE_VIEW_H: &str = "__view__.h";
+pub const FACE_VIEW_RS: &str = "__view__.rs";
+pub const FACE_VIEW_PYI: &str = "__view__.pyi";
 
 /// Optional live-µPy provider: fill `out` with `__init__.pyi` text for `fqn`.
 /// Return 1 = provided, 0 = no Python surface (use stub), -1 = error.
@@ -196,6 +224,134 @@ pub fn resolve_exports(fqn: &str) -> (String, Vec<LiveExport>) {
     (key, exports)
 }
 
+/*----------------------------------------------------------------------
+ * Live type registry introspection — descriptors registered by
+ * PM_TYPE_DEFINE_C / PM_TYPE_DEFINE_RS! (one registry with the
+ * module exports). Copy-out C ABI, so no struct-offset assumptions.
+ * Declared here directly, not via types/__exports__.rs: gen writes
+ * those faces, so it must not depend on them (bootstrap cycle).
+ *--------------------------------------------------------------------*/
+
+/* Gen-only: the freestanding staticlib never introspects for views. */
+#[cfg(feature = "gen")]
+unsafe extern "C" {
+    fn pm_types_registry_count() -> u32;
+    fn pm_types_registry_type_at(
+        index: u32,
+        fqn_buf: *mut u8,
+        fqn_cap: u32,
+        kind: *mut u16,
+        instance_size: *mut u16,
+        parent_fqn_buf: *mut u8,
+        parent_cap: u32,
+        field_count: *mut u16,
+    ) -> i32;
+    fn pm_types_registry_field_at(
+        index: u32,
+        field: u16,
+        name_buf: *mut u8,
+        name_cap: u32,
+        name_hash: *mut u16,
+        offset: *mut u32,
+        type_fqn_buf: *mut u8,
+        type_cap: u32,
+    ) -> i32;
+}
+
+#[cfg(feature = "gen")]
+fn cstr_from(buf: &[u8]) -> String {
+    let n = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..n]).into_owned()
+}
+
+/// All registered descriptors (index order). Primitive/list/dict
+/// builtins are skipped: they carry no view payload.
+#[cfg(feature = "gen")]
+pub fn introspect_types() -> Vec<LiveType> {
+    let n = unsafe { pm_types_registry_count() };
+    let mut out = Vec::new();
+    for i in 0..n {
+        let mut fqn = [0u8; 256];
+        let mut kind = 0u16;
+        let mut inst = 0u16;
+        let mut parent = [0u8; 256];
+        let mut nfields = 0u16;
+        let ok = unsafe {
+            pm_types_registry_type_at(
+                i,
+                fqn.as_mut_ptr(),
+                256,
+                &mut kind,
+                &mut inst,
+                parent.as_mut_ptr(),
+                256,
+                &mut nfields,
+            )
+        };
+        if ok == 0 {
+            continue;
+        }
+        let fqn_s = cstr_from(&fqn);
+        // Builtins (primitives, list, dict) — no view payload.
+        if fqn_s.starts_with("pymergetic.types.")
+            && matches!(
+                fqn_s.rsplit('.').next().unwrap_or(""),
+                "nil" | "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "str"
+                    | "bytes" | "list" | "dict"
+            )
+        {
+            continue;
+        }
+        let mut fields = Vec::new();
+        for f in 0..nfields {
+            let mut name = [0u8; 64];
+            let mut hash = 0u16;
+            let mut off = 0u32;
+            let mut tfqn = [0u8; 256];
+            let ok = unsafe {
+                pm_types_registry_field_at(
+                    i, f, name.as_mut_ptr(), 64, &mut hash, &mut off,
+                    tfqn.as_mut_ptr(), 256,
+                )
+            };
+            if ok == 0 {
+                // Partial row (NULL name / staged miss): a partial view is
+                // worse than none — drop the whole type.
+                fields.clear();
+                break;
+            }
+            fields.push(LiveTypeField {
+                name: cstr_from(&name),
+                name_hash: hash,
+                offset: off,
+                type_fqn: cstr_from(&tfqn),
+            });
+        }
+        if fields.is_empty() && nfields > 0 {
+            continue;
+        }
+        out.push(LiveType {
+            fqn: fqn_s,
+            kind,
+            instance_size: inst,
+            parent_fqn: cstr_from(&parent),
+            fields,
+        });
+    }
+    out
+}
+
+/// Types whose fqn starts with `fqn.` (the card's namespace) —
+/// `pymergetic.metal.geo` owns `pymergetic.metal.geo.Point`.
+#[cfg(feature = "gen")]
+pub fn types_for_fqn(fqn: &str) -> Vec<LiveType> {
+    let prefix = alloc::format!("{fqn}.");
+    introspect_types()
+        .into_iter()
+        .filter(|t| t.fqn.starts_with(&prefix))
+        .collect()
+}
+
 /// Format a C prototype line from registry sig + export name.
 /// `sig` is `ret(args)` as stored by `PM_MOD_EXPORT_C` (e.g. `int(void)`).
 pub fn prototype_line(name: &str, sig: &str) -> String {
@@ -258,6 +414,11 @@ pub fn emit_exports_h(fqn: &str, exports: &[LiveExport], types_on_disk: bool) ->
     }
     if exports.iter().any(|e| e.sig.contains("pm_wasmmod_io_")) {
         includes.push(String::from("pymergetic/wasmmod/io/__types__.h"));
+    }
+    if exports.iter().any(|e| {
+        e.sig.contains("pm_type_value_t") || e.sig.contains("pm_type_descriptor_t")
+    }) {
+        includes.push(String::from("pymergetic/types/__types__.h"));
     }
     // Module-local types face — only when a prototype names a non-builtin type
     // (otherwise clangd IWYU: "included header __types__.h is not used directly").
@@ -554,24 +715,246 @@ pub fn emit_init_pyi_from_exports(fqn: &str, exports: &[LiveExport]) -> String {
     emit_init_pyi_names(fqn, &refs)
 }
 
-/// Build the three face artifacts for `fqn` from the live registry.
+/*----------------------------------------------------------------------
+ * Typed-view faces — emitted from the live *type* registry (one pass
+ * with export faces; same source of truth, same card dirs).
+ * Gen-only (host facegen); the freestanding staticlib never emits.
+ *--------------------------------------------------------------------*/
+
+/// Field type fqn → C spelling in the view struct (packed cell).
+#[cfg(feature = "gen")]
+fn view_c_type(t: &LiveTypeField) -> &'static str {
+    match t.type_fqn.as_str() {
+        "pymergetic.types.i32" => "int32_t",
+        "pymergetic.types.i64" => "int64_t",
+        "pymergetic.types.u32" => "uint32_t",
+        "pymergetic.types.u64" => "uint64_t",
+        "pymergetic.types.f32" => "float",
+        "pymergetic.types.f64" => "double",
+        "pymergetic.types.bool" => "uint8_t",
+        _ => "pm_type_value_t", // str/bytes/struct/undeclared → value cell
+    }
+}
+
+/// Field type fqn → Rust spelling in the view struct.
+#[cfg(feature = "gen")]
+fn view_rs_type(t: &LiveTypeField) -> &'static str {
+    match t.type_fqn.as_str() {
+        "pymergetic.types.i32" => "i32",
+        "pymergetic.types.i64" => "i64",
+        "pymergetic.types.u32" => "u32",
+        "pymergetic.types.u64" => "u64",
+        "pymergetic.types.f32" => "f32",
+        "pymergetic.types.f64" => "f64",
+        "pymergetic.types.bool" => "bool",
+        _ => "pm_type_value_t",
+    }
+}
+
+/// Field type fqn → pyi annotation.
+#[cfg(feature = "gen")]
+fn view_py_type(t: &LiveTypeField) -> String {
+    match t.type_fqn.as_str() {
+        "pymergetic.types.i32" | "pymergetic.types.i64" | "pymergetic.types.u32"
+        | "pymergetic.types.u64" => String::from("int"),
+        "pymergetic.types.f32" | "pymergetic.types.f64" => String::from("float"),
+        "pymergetic.types.bool" => String::from("bool"),
+        "pymergetic.types.str" => String::from("str"),
+        "pymergetic.types.bytes" => String::from("bytes"),
+        _ => String::from("Any"), // struct/undeclared
+    }
+}
+
+/// Field size in bytes within a packed instance (must match the
+/// registry's packing rule — see pm_types_registry_stage_commit's
+/// instance_size math, which uses the same table).
+#[cfg(feature = "gen")]
+fn view_field_size(t: &LiveTypeField) -> u32 {
+    match t.type_fqn.as_str() {
+        "pymergetic.types.i32" | "pymergetic.types.u32" => 4,
+        "pymergetic.types.i64" | "pymergetic.types.u64" | "pymergetic.types.f64" => 8,
+        "pymergetic.types.f32" => 4,
+        "pymergetic.types.bool" => 1,
+        _ => 16, // value cell (str/bytes/struct/undeclared)
+    }
+}
+
+/// `pymergetic.metal.geo.Point` → (`geo_point`, `Point`)
+#[cfg(feature = "gen")]
+fn view_names(fqn: &str) -> (String, String) {
+    let mut it = fqn.rsplit('.');
+    let leaf = String::from(it.next().unwrap_or("point"));
+    let card = it.next().unwrap_or("t");
+    (format!("{}_{}", card.to_ascii_lowercase(), leaf.to_ascii_lowercase()), leaf)
+}
+
+/// `__view__.h` — packed C view structs + field-hash constants +
+/// ergonomic constructors for every live type in the card namespace.
+#[cfg(feature = "gen")]
+pub fn emit_view_h(fqn: &str, types: &[LiveType]) -> String {
+    let guard = guard_name(fqn, "VIEW");
+    let mut out = String::new();
+    out.push_str("/* DO NOT EDIT — generated by `pymergetic.util.gen` (live type registry).\n");
+    out.push_str(" * Source of truth: pm_types_registry_* after PM_TYPE_DEFINE_C / RS registration.\n");
+    out.push_str(" */\n");
+    out.push_str(&alloc::format!("#ifndef {guard}\n#define {guard}\n\n"));
+    out.push_str("#include <stddef.h>\n#include <stdint.h>\n\n");
+    out.push_str("#include \"pymergetic/types/__types__.h\"\n\n");
+    out.push_str("#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
+    for t in types {
+        let (low, _leaf) = view_names(&t.fqn);
+        out.push_str(&alloc::format!("/*-- {fqn_leaf} (kind {k}, {sz} bytes) --*/\n",
+            fqn_leaf = t.fqn, k = t.kind, sz = t.instance_size));
+        /* Offset order + explicit padding: a zero-copy view must mirror
+         * the packed layout, not the name-hash lookup order. */
+        let mut fields = t.fields.clone();
+        fields.sort_by_key(|f| f.offset);
+        let mut body = String::new();
+        let mut cursor: u32 = 0;
+        let mut pad = 0u32;
+        for f in &fields {
+            if f.offset > cursor {
+                body.push_str(&alloc::format!(
+                    "    uint8_t pm_pad{p}[0x{n:X}];\n",
+                    p = pad, n = f.offset - cursor));
+                pad += 1;
+            }
+            body.push_str(&alloc::format!(
+                "    {} {};\n", view_c_type(f), f.name));
+            cursor = f.offset + view_field_size(f);
+        }
+        if (t.instance_size as u32) > cursor {
+            body.push_str(&alloc::format!(
+                "    uint8_t pm_pad{p}[0x{n:X}];\n",
+                p = pad, n = t.instance_size as u32 - cursor));
+        }
+        out.push_str(&alloc::format!(
+            "typedef struct {{\n{fields}}} pm_{low}_view_t;\n\n",
+            fields = body,
+        ));
+        for f in &t.fields {
+            out.push_str(&alloc::format!(
+                "#define PM_FIELD_{low}_{name} 0x{hash:04X}u\n",
+                low = low.to_ascii_uppercase(),
+                name = f.name.to_ascii_uppercase(),
+                hash = f.name_hash
+            ));
+        }
+        out.push('\n');
+    }
+    out.push_str("#ifdef __cplusplus\n}\n#endif\n\n");
+    out.push_str(&alloc::format!("#endif /* {guard} */\n"));
+    out
+}
+
+/// `__view__.rs` — `#[repr(C)]` view structs with field-hash consts.
+#[cfg(feature = "gen")]
+pub fn emit_view_rs(fqn: &str, types: &[LiveType]) -> String {
+    let _ = fqn;
+    let mut out = String::new();
+    out.push_str("//! DO NOT EDIT — generated by `pymergetic.util.gen` (live type registry).\n\n");
+    out.push_str("#![allow(non_camel_case_types)]\n\n");
+    out.push_str("use pymergetic::types::{pm_type_value_t, pm_util_mem_arena_t};\n\n");
+    for t in types {
+        let (low, _leaf) = view_names(&t.fqn);
+        out.push_str(&alloc::format!("/// {fqn_t} — {k} bytes instance data.\n",
+            fqn_t = t.fqn, k = t.instance_size));
+        /* Offset order + explicit padding — mirror the C view. */
+        let mut fields = t.fields.clone();
+        fields.sort_by_key(|f| f.offset);
+        let mut body = String::new();
+        let mut cursor: u32 = 0;
+        let mut pad = 0u32;
+        for f in &fields {
+            if f.offset > cursor {
+                body.push_str(&alloc::format!(
+                    "    pub pm_pad{p}: [u8; 0x{n:X}],\n",
+                    p = pad, n = f.offset - cursor));
+                pad += 1;
+            }
+            body.push_str(&alloc::format!(
+                "    pub {}: {},\n", f.name, view_rs_type(f)));
+            cursor = f.offset + view_field_size(f);
+        }
+        if (t.instance_size as u32) > cursor {
+            body.push_str(&alloc::format!(
+                "    pub pm_pad{p}: [u8; 0x{n:X}],\n",
+                p = pad, n = t.instance_size as u32 - cursor));
+        }
+        out.push_str(&alloc::format!(
+            "#[repr(C)]\npub struct {low}_view {{\n{fields}}}\n\n",
+            fields = body
+        ));
+        out.push_str(&alloc::format!("impl {low}_view {{\n"));
+        for f in &t.fields {
+            out.push_str(&alloc::format!(
+                "    pub const FIELD_{}: u16 = 0x{:04X};\n",
+                f.name.to_ascii_uppercase(),
+                f.name_hash
+            ));
+        }
+        out.push_str("}\n\n");
+    }
+    out
+}
+
+/// `__view__.pyi` — Python model classes for the card's types.
+#[cfg(feature = "gen")]
+pub fn emit_view_pyi(fqn: &str, types: &[LiveType]) -> String {
+    let _ = fqn;
+    let mut out = String::new();
+    out.push_str("# DO NOT EDIT — generated by `pymergetic.util.gen` (live type registry).\n\n");
+    out.push_str("from typing import Any\n\n");
+    for t in types {
+        let (_low, leaf) = view_names(&t.fqn);
+        out.push_str(&alloc::format!(
+            "class {leaf}:\n    \"\"\"{fqn_t} — {k} bytes instance data.\"\"\"\n",
+            fqn_t = t.fqn,
+            k = t.instance_size
+        ));
+        for f in &t.fields {
+            out.push_str(&alloc::format!("    {}: {} = ...\n", f.name, view_py_type(f)));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// View faces for a card fqn. `None` when the card owns no types.
+#[cfg(feature = "gen")]
+pub fn view_faces_for_fqn(fqn: &str) -> Option<Vec<(String, String)>> {
+    let types = types_for_fqn(fqn);
+    if types.is_empty() {
+        return None;
+    }
+    Some(alloc::vec![
+        (String::from(FACE_VIEW_H), emit_view_h(fqn, &types)),
+        (String::from(FACE_VIEW_RS), emit_view_rs(fqn, &types)),
+        (String::from(FACE_VIEW_PYI), emit_view_pyi(fqn, &types)),
+    ])
+}
+
+/// Build the face artifacts for `fqn` from the live registry.
 /// Returns `None` when the fqn is not registered / has no exports.
 pub fn faces_for_fqn(fqn: &str, types_on_disk: bool) -> Option<Vec<(String, String)>> {
     let (_key, exports) = resolve_exports(fqn);
     if exports.is_empty() {
         return None;
     }
-    let h = emit_exports_h(fqn, &exports, types_on_disk);
-    let rs = emit_exports_rs(&exports);
-    let pyi = match pyi_via_provider(fqn) {
-        Some(rich) => rich,
-        None => emit_init_pyi_from_exports(fqn, &exports),
-    };
-    Some(alloc::vec![
-        (String::from(FACE_EXPORTS_H), h),
-        (String::from(FACE_EXPORTS_RS), rs),
-        (String::from(FACE_INIT_PYI), pyi),
-    ])
+    #[allow(unused_mut)]
+    let mut faces = alloc::vec![
+        (String::from(FACE_EXPORTS_H), emit_exports_h(fqn, &exports, types_on_disk)),
+        (String::from(FACE_EXPORTS_RS), emit_exports_rs(&exports)),
+        (String::from(FACE_INIT_PYI), match pyi_via_provider(fqn) {
+            Some(rich) => rich,
+            None => emit_init_pyi_from_exports(fqn, &exports),
+        }),
+    ];
+    #[cfg(feature = "gen")]
+    if let Some(mut views) = view_faces_for_fqn(fqn) {
+        faces.append(&mut views);
+    }
+    Some(faces)
 }
 
 /// Join sink directory prefix with a face filename (`""` → bare filename).

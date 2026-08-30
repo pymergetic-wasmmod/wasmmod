@@ -274,6 +274,27 @@ const pm_type_descriptor_t *pm_types_registry_find(const char *fqn);
 uint32_t pm_types_registry_count(void);
 const pm_type_descriptor_t *pm_types_registry_at(uint32_t index);
 
+/* Copy-out introspection for facegen (same posture as
+ * pm_wasmmod_registry_export_at — caller buffers every string). */
+int32_t  pm_types_registry_type_at(uint32_t index,
+    char *fqn_buf, uint32_t fqn_cap,
+    uint16_t *kind, uint16_t *instance_size,
+    char *parent_fqn_buf, uint32_t parent_cap,
+    uint16_t *field_count);
+int32_t  pm_types_registry_field_at(uint32_t index, uint16_t field,
+    char *name_buf, uint32_t name_cap,
+    uint16_t *name_hash, uint32_t *offset,
+    char *type_fqn_buf, uint32_t type_cap);
+
+/* Source-scan staging (facegen for cards not linked into the gen
+ * binary). Stage the descriptor, then each field, then commit. */
+int32_t  pm_types_registry_stage(const char *fqn,
+    uint16_t kind, uint16_t instance_size, const char *parent_fqn,
+    uint16_t field_count);
+int32_t  pm_types_registry_stage_field(const char *fqn, uint16_t field_index,
+    const char *name, uint32_t offset, const char *type_fqn);
+int32_t  pm_types_registry_stage_commit(const char *fqn);
+
 /* Primitive descriptor singletons — always registered at boot. */
 extern const pm_type_descriptor_t PM_TYPE_NIL_DESC;
 extern const pm_type_descriptor_t PM_TYPE_I32_DESC;
@@ -285,6 +306,50 @@ extern const pm_type_descriptor_t PM_TYPE_F64_DESC;
 extern const pm_type_descriptor_t PM_TYPE_BOOL_DESC;
 extern const pm_type_descriptor_t PM_TYPE_STR_DESC;
 extern const pm_type_descriptor_t PM_TYPE_BYTES_DESC;
+
+/*----------------------------------------------------------------------
+ * PM_TYPE_DEFINE_C — define a type in the impl language: a static
+ * const descriptor + a ctor registering it into the live registry,
+ * the same posture as PM_MOD_EXPORT_C. Fields MUST be sorted by
+ * name_hash ascending (the binary-search contract); the prove
+ * asserts the order at runtime so an author who gets it wrong fails
+ * the gate, not the search. Host: ctor / .init_array. Guests: the
+ * descriptor symbol survives in the pack table for the loader to
+ * register after instantiation.
+ *
+ * PM_TYPE_DEFINE_C(desc_sym, fqn_lit, kind_val, inst_size, parent_sym,
+ *                  field_arr, field_n)
+ *--------------------------------------------------------------------*/
+/* Self-contained guest detection (guest.h defines the canonical
+ * PM_WASMMOD_GUEST, but __types__.h must stand alone in pack builds). */
+#if defined(__wasm__) || defined(__wasm32__) || defined(__wasm64__)
+#define PM_TYPES_BUILD_GUEST 1
+#else
+#define PM_TYPES_BUILD_GUEST 0
+#endif
+
+#if !PM_TYPES_BUILD_GUEST
+#define PM_TYPE_DEFINE_C(desc_sym, fqn_lit, kind_val, inst_size, parent_sym, \
+    field_arr, field_n) \
+    static const pm_type_descriptor_t desc_sym = { \
+        PM_TYPE_DESCRIPTOR_MAGIC, (kind_val), (inst_size), \
+        (fqn_lit), (fqn_lit), (parent_sym), (field_n), (field_arr), 0, NULL, \
+    }; \
+    static void __attribute__((constructor)) desc_sym##_reg(void) { \
+        (void)pm_types_registry_register(&desc_sym); \
+    }
+#else
+/* Guests: no .init_array ctor, but the pack table / loader keeps the
+ * descriptor symbol — `used` so it survives -Wunused-const-variable
+ * and --gc-sections on emcc/clang builds. */
+#define PM_TYPE_DEFINE_C(desc_sym, fqn_lit, kind_val, inst_size, parent_sym, \
+    field_arr, field_n) \
+    __attribute__((used)) \
+    static const pm_type_descriptor_t desc_sym = { \
+        PM_TYPE_DESCRIPTOR_MAGIC, (kind_val), (inst_size), \
+        (fqn_lit), (fqn_lit), (parent_sym), (field_n), (field_arr), 0, NULL, \
+    }
+#endif
 
 #ifdef __cplusplus
 }
