@@ -731,8 +731,50 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         size_t src_len;
         int32_t rc;
         char err[512];
-        if (n_args != 1) {
+        if (n_args != 1 && n_args != 2) {
             mp_raise_TypeError(MP_ERROR_TEXT("object_compile needs source"));
+        }
+        if (n_args == 2) {
+            /* the target kwarg folded in: reroute to the target-aware face
+             * so the plain sig never has to grow one of its own */
+            int32_t (*target_fn)(pm_util_mem_arena_t *, const char *, size_t,
+                const char **, uint32_t, const char **, uint32_t, int32_t,
+                uint8_t **, size_t *, char *, size_t);
+            target_fn = (int32_t (*)(pm_util_mem_arena_t *, const char *, size_t,
+                const char **, uint32_t, const char **, uint32_t, int32_t,
+                uint8_t **, size_t *, char *, size_t))
+                pm_wasmmod_registry_resolve_native(
+                    (const uint8_t *)"pymergetic.metal.jit.c", 22u,
+                    (const uint8_t *)"pm_metal_jit_c_object_compile_target", 36u);
+            if (target_fn != NULL) {
+                const char *tincs[24];
+                size_t t_n_incs = 0;
+#ifdef PM_WASMMOD_METAL_TYPES
+                tincs[t_n_incs++] = PM_NATIVECALL_METAL_SRC;
+                tincs[t_n_incs++] = PM_NATIVECALL_WASMMOD_SRC;
+                tincs[t_n_incs++] = PM_NATIVECALL_WASMMOD_ROOT;
+                tincs[t_n_incs++] = PM_NATIVECALL_TCC_INC;
+#endif
+                {
+                    size_t cap = compile_arena_cap();
+                    arena = pm_util_mem_arena_create(s_compile_backing, cap);
+                }
+                if (arena == NULL) {
+                    return mp_const_none;
+                }
+                memset(err, 0, sizeof(err));
+                rc = target_fn(arena, mp_obj_str_get_str(args[0]),
+                    strlen(mp_obj_str_get_str(args[0])),
+                    tincs, (uint32_t)t_n_incs, NULL, 0,
+                    (int32_t)mp_obj_get_int(args[1]),
+                    &obj, &obj_len, err, sizeof(err));
+                pm_util_mem_arena_destroy(arena);
+                if (rc != 0 || obj == NULL) {
+                    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(err));
+                }
+                return mp_obj_new_bytes(obj, obj_len);
+            }
+            mp_raise_TypeError(MP_ERROR_TEXT("object_compile: target arg not supported on this seat"));
         }
         src_len = strlen(mp_obj_str_get_str(args[0]));
         /* Plain object_compile carries no include seam, so route through the
@@ -792,6 +834,55 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             }
             return mp_obj_new_bytes(obj, obj_len);
         }
+    }
+    /* metal.jit.c cross-compile knob: object_compile(source, target=N) ->
+     * object bytes made by the Nth backend. TARGET 0 is the seat's own
+     * backend (the path above); TARGET 1 is wasm32 — on ELF seats that
+     * means the second, pm_tccw_-prefixed TCC instance, on wasm32 seats
+     * the native one. Seats without the requested backend refuse with
+     * the card's errbuf, never a silent fallback. */
+    if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const char *, size_t, const char **, uint32_t, const char **, uint32_t, int32_t, uint8_t **, size_t *, char *, size_t)") == 0) {
+        pm_util_mem_arena_t *arena;
+        uint8_t *obj = NULL;
+        size_t obj_len = 0;
+        size_t src_len;
+        int32_t rc;
+        char err[512];
+        const char *incs[24];
+        size_t n_incs = 0;
+        mp_int_t target = 0;
+        if (n_args != 1 && n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("object_compile needs source[, target]"));
+        }
+        if (n_args == 2 && args[1] != mp_const_none) {
+            target = mp_obj_get_int(args[1]);
+        }
+        src_len = strlen(mp_obj_str_get_str(args[0]));
+#ifdef PM_WASMMOD_METAL_TYPES
+        incs[n_incs++] = PM_NATIVECALL_METAL_SRC;
+        incs[n_incs++] = PM_NATIVECALL_WASMMOD_SRC;
+        incs[n_incs++] = PM_NATIVECALL_WASMMOD_ROOT;
+        incs[n_incs++] = PM_NATIVECALL_TCC_INC;
+#endif
+        {
+            size_t cap = compile_arena_cap();
+            arena = pm_util_mem_arena_create(s_compile_backing, cap);
+        }
+        if (arena == NULL) {
+            return mp_const_none;
+        }
+        memset(err, 0, sizeof(err));
+        rc = ((int32_t (*)(pm_util_mem_arena_t *, const char *, size_t,
+            const char **, uint32_t, const char **, uint32_t, int32_t,
+            uint8_t **, size_t *, char *, size_t))p)(
+            arena, mp_obj_str_get_str(args[0]), src_len,
+            incs, (uint32_t)n_incs, NULL, 0, (int32_t)target,
+            &obj, &obj_len, err, sizeof(err));
+        pm_util_mem_arena_destroy(arena);
+        if (rc != 0 || obj == NULL) {
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT(err));
+        }
+        return mp_obj_new_bytes(obj, obj_len);
     }
     if (strcmp(sig, "int32_t(pm_util_mem_arena_t *, const char *, size_t, const char **, uint32_t, const char **, uint32_t, uint8_t **, size_t *, char *, size_t)") == 0) {
         pm_util_mem_arena_t *arena;
