@@ -120,7 +120,8 @@ $(BUILD)/$(WASMMOD_DIR)/ports/webassembly/wamr/platform.o: CFLAGS += \
 WASMMOD_LOCK_A := $(BUILD)/libfw_lock.a
 ifeq ($(MICROPY_PY_METAL),1)
 WASMMOD_LOCK_SRC := $(TOP)/extmod/metal/port/fw_lock/lib.rs
-WASMMOD_LOCK_EXTRA := $(TOP)/extmod/metal/src/pymergetic/metal/net/http/asgi/__impl__.rs
+WASMMOD_LOCK_EXTRA := $(TOP)/extmod/metal/src/pymergetic/metal/net/http/asgi/__impl__.rs \
+	$(TOP)/extmod/metal/src/pymergetic/metal/jit/rs/compiler/__impl__.rs
 else
 WASMMOD_LOCK_SRC := $(WASMMOD_ABS)/ports/webassembly/fw_lock/lib.rs
 WASMMOD_LOCK_EXTRA :=
