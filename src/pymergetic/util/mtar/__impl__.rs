@@ -40,9 +40,13 @@ pub const MTAR_ERR_TRUNCATED: i32 = -1;
 pub const MTAR_ERR_CHECKSUM: i32 = -2;
 pub const MTAR_ERR_SIZE: i32 = -3;
 
-fn parse_octal(field: &[u8]) -> Option<u64> {
+/// Length-passing form: the subset compiler's slices carry no length, so
+/// the caller states it (every caller slices a fixed-size header field,
+/// so `len` is the field size by construction — same bytes, same loop).
+fn parse_octal(field: &[u8], len: usize) -> Option<u64> {
     let mut val: u64 = 0;
-    for &b in field {
+    for k in 0..len {
+        let b = field[k];
         match b {
             b'0'..=b'7' => val = val * 8 + (b - b'0') as u64,
             b' ' | 0 => break,
@@ -52,15 +56,16 @@ fn parse_octal(field: &[u8]) -> Option<u64> {
     Some(val)
 }
 
-fn header_checksum_ok(header: &[u8; BLOCK]) -> bool {
+fn header_checksum_ok(header: &[u8], len: usize) -> bool {
     // Per POSIX tar: sum of all header bytes as unsigned, with the
     // checksum field itself treated as eight ASCII spaces during the sum.
-    let stored = match parse_octal(&header[CHKSUM_OFF..CHKSUM_OFF + CHKSUM_LEN]) {
+    let stored = match parse_octal(&header[CHKSUM_OFF..CHKSUM_OFF + CHKSUM_LEN], CHKSUM_LEN) {
         Some(v) => v,
         None => return false,
     };
     let mut sum: u64 = 0;
-    for (i, &b) in header.iter().enumerate() {
+    for i in 0..len {
+        let b = header[i];
         if (CHKSUM_OFF..CHKSUM_OFF + CHKSUM_LEN).contains(&i) {
             sum += b' ' as u64;
         } else {
@@ -70,20 +75,26 @@ fn header_checksum_ok(header: &[u8; BLOCK]) -> bool {
     sum == stored
 }
 
-fn is_zero_block(block: &[u8; BLOCK]) -> bool {
-    block.iter().all(|&b| b == 0)
+fn is_zero_block(block: &[u8], len: usize) -> bool {
+    for i in 0..len {
+        if block[i] != 0 {
+            return false;
+        }
+    }
+    true
 }
 
 /// Reads one entry's header at `offset`; on success also returns the
 /// offset the *next* header would start at.
 unsafe fn read_entry_at(buf: *const u8, buf_len: u32, offset: u32, out: *mut MtarEntry) -> i32 {
-    let buf_len = buf_len as usize;
-    let offset = offset as usize;
+    /* no param shadowing: the subset's C lowering has one name per fn scope */
+    let blen = buf_len as usize;
+    let off = offset as usize;
 
-    if offset >= buf_len {
+    if off >= blen {
         return MTAR_END;
     }
-    if offset + BLOCK > buf_len {
+    if off + BLOCK > blen {
         return MTAR_ERR_TRUNCATED;
     }
 
@@ -91,24 +102,31 @@ unsafe fn read_entry_at(buf: *const u8, buf_len: u32, offset: u32, out: *mut Mta
     // SAFETY: caller (pm_util_mtar_first/_next) guarantees `buf` points to
     // >= buf_len readable bytes, and offset + BLOCK <= buf_len was just
     // checked above.
-    unsafe { core::ptr::copy_nonoverlapping(buf.add(offset), header.as_mut_ptr(), BLOCK) };
+    unsafe { core::ptr::copy_nonoverlapping(buf.add(off), header.as_mut_ptr(), BLOCK) };
 
-    if is_zero_block(&header) {
+    if is_zero_block(&header, BLOCK) {
         return MTAR_END;
     }
-    if !header_checksum_ok(&header) {
+    if !header_checksum_ok(&header, BLOCK) {
         return MTAR_ERR_CHECKSUM;
     }
 
-    let name_field = &header[NAME_OFF..NAME_OFF + NAME_LEN];
-    let name_len = name_field.iter().position(|&b| b == 0).unwrap_or(NAME_LEN);
+    /* explicit scan: the subset carries no slice lengths, and position()
+     * over a slice field would need one — walk the fixed NAME_LEN window */
+    let mut name_len: usize = NAME_LEN;
+    for k in 0..NAME_LEN {
+        if header[NAME_OFF + k] == 0 {
+            name_len = k;
+            break;
+        }
+    }
 
-    let size = match parse_octal(&header[SIZE_OFF..SIZE_OFF + SIZE_LEN]) {
+    let size = match parse_octal(&header[SIZE_OFF..SIZE_OFF + SIZE_LEN], SIZE_LEN) {
         Some(v) => v,
         None => return MTAR_ERR_SIZE,
     };
-    let data_off = offset + BLOCK;
-    if data_off as u64 + size > buf_len as u64 {
+    let data_off = off + BLOCK;
+    if data_off as u64 + size > blen as u64 {
         return MTAR_ERR_TRUNCATED;
     }
 
@@ -118,12 +136,12 @@ unsafe fn read_entry_at(buf: *const u8, buf_len: u32, offset: u32, out: *mut Mta
     // SAFETY: caller guarantees `out` points to one writable MtarEntry;
     // `buf.add(..)` stays within the buffer per the bounds checks above.
     unsafe {
-        (*out).name_ptr = buf.add(offset + NAME_OFF);
+        (*out).name_ptr = buf.add(off + NAME_OFF);
         (*out).name_len = name_len as u32;
         (*out).data_ptr = buf.add(data_off);
         (*out).data_len = size as u32;
         (*out).is_dir = is_dir as i32;
-        (*out).header_off = offset as u32;
+        (*out).header_off = off as u32;
     }
 
     MTAR_OK
