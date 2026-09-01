@@ -1,6 +1,10 @@
 //! pymergetic.wasmmod.api — module tests (`__tests__.rs`).
 
-use super::*;
+use super::registry_types::{
+    pm_wasmmod_registry_fn_t, pm_wasmmod_registry_valkind_t, pm_wasmmod_registry_value_of_t,
+    pm_wasmmod_registry_value_t,
+};
+use super::{pm_wasmmod_api_call2_i32, pm_wasmmod_api_connect};
 use crate::util::mod_test::case;
 use crate::wasmmod::registry::{
     pm_wasmmod_registry_container_kind_t, pm_wasmmod_registry_export_kind_t,
