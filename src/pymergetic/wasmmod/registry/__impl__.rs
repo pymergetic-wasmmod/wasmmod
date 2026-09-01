@@ -13,94 +13,21 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::ffi::c_void;
 
+// The shared ABI shapes live in __types__.rs (the Rust twin of
+// `__types__.h`). The path-include is the same one cargo resolves — and
+// the one the build card's in-kernel rsx compile splices in — so there
+// is one definition, reached the same way from both compilers. Re-export
+// keeps `crate::wasmmod::registry::*` paths unchanged.
+#[path = "__types__.rs"]
+mod __types__;
+pub use __types__::*;
+
 use crate::util::lock::Mutex;
-
-/// Which kind of artifact a module's exports live behind. `Resident`
-/// covers a statically-linked-in C/Rust module with no container at all
-/// — this is what makes wasm "one-of" alongside elf/aot, not a hierarchy
-/// wasm sits above.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum pm_wasmmod_registry_container_kind_t {
-    Wasm = 0,
-    Aot = 1,
-    Elf = 2,
-    Resident = 3,
-}
-
-/// Marshaling shape for one export — same taxonomy already used for the
-/// Python export faces (see SOURCETREE.md "Py export face"), reused here
-/// rather than invented twice: whatever's true for a Python-visible
-/// export is true for every export, this is the one place that's real.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum pm_wasmmod_registry_export_kind_t {
-    Fn = 0,
-    Mem = 1,
-    Obj = 2,
-    I64 = 3,
-    F32 = 4,
-    F64 = 5,
-    BufPtr = 6,
-}
-
-/// A handle into the table: index + generation. Never treat the index
-/// as a direct offset from outside this module — always go through
-/// resolve/has/export_set, which check the generation and reject a
-/// handle whose slot has since been unpublished and reused. Passed by
-/// value everywhere, not a pointer — a stale copy is always safely
-/// detectable, never a dangling-pointer footgun.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct pm_wasmmod_registry_handle_t {
-    pub index: u32,
-    pub generation: u32,
-}
 
 const INVALID_HANDLE: pm_wasmmod_registry_handle_t = pm_wasmmod_registry_handle_t {
     index: u32::MAX,
     generation: 0,
 };
-
-/// The four primitive shapes a value crossing a container boundary can
-/// be — deliberately the same four as wasm's own core value types
-/// (WAMR's own `wasm_val_t` uses this exact kind+union shape), not a
-/// separate encoding invented for the registry. See `__types__.h`.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum pm_wasmmod_registry_valkind_t {
-    I32 = 0,
-    I64 = 1,
-    F32 = 2,
-    F64 = 3,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub union pm_wasmmod_registry_value_of_t {
-    pub i32: i32,
-    pub i64: i64,
-    pub f32: f32,
-    pub f64: f64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct pm_wasmmod_registry_value_t {
-    pub kind: pm_wasmmod_registry_valkind_t,
-    pub of: pm_wasmmod_registry_value_of_t,
-}
-
-/// The fixed prototype every cross-container `Fn` export conforms to
-/// once resolved via `resolve_native`/`pm_wasmmod_registry_call`.
-/// Same-artifact native-to-native calls never go through this — those
-/// stay a direct, really-typed function pointer via `connect_import`.
-pub type pm_wasmmod_registry_fn_t = unsafe extern "C" fn(
-    args: *const pm_wasmmod_registry_value_t,
-    nargs: u32,
-    results: *mut pm_wasmmod_registry_value_t,
-    nresults: u32,
-) -> i32;
 
 struct Export {
     name: String,
