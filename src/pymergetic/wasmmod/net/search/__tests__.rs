@@ -39,6 +39,9 @@ unsafe fn name_is(want: *const u8, want_len: usize, i: u32) -> bool {
 }
 
 unsafe extern "C" fn case_catalog_lists_every_pack_name_sorted() -> i32 {
+    unsafe { crate::util::mod_test::case_rc(case_catalog_lists_every_pack_name_sorted_body) }
+}
+unsafe extern "C" fn case_catalog_lists_every_pack_name_sorted_body() -> i32 {
     let q = query_none();
     let n = seed(&q);
     if n != 4 {
@@ -51,7 +54,7 @@ unsafe extern "C" fn case_catalog_lists_every_pack_name_sorted() -> i32 {
     if !name_is(b"hello\0".as_ptr(), 5, 1) {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 21, 2) {
+    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 22, 2) {
         return 1;
     }
     if !name_is(b"zlib\0".as_ptr(), 4, 3) {
@@ -61,6 +64,9 @@ unsafe extern "C" fn case_catalog_lists_every_pack_name_sorted() -> i32 {
 }
 
 unsafe extern "C" fn case_search_matches_name_substring_ci() -> i32 {
+    unsafe { crate::util::mod_test::case_rc(case_search_matches_name_substring_ci_body) }
+}
+unsafe extern "C" fn case_search_matches_name_substring_ci_body() -> i32 {
     let mut q = query_none();
     q.q = b"wasm\0".as_ptr();
     q.q_len = 4;
@@ -77,13 +83,16 @@ unsafe extern "C" fn case_search_matches_name_substring_ci() -> i32 {
     if n2 != 1 {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 21, 0) {
+    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 22, 0) {
         return 1;
     }
     0
 }
 
 unsafe extern "C" fn case_filter_by_prefix() -> i32 {
+    unsafe { crate::util::mod_test::case_rc(case_filter_by_prefix_body) }
+}
+unsafe extern "C" fn case_filter_by_prefix_body() -> i32 {
     let mut q = query_none();
     q.prefix = b"pymergetic.\0".as_ptr();
     q.prefix_len = 11;
@@ -91,13 +100,16 @@ unsafe extern "C" fn case_filter_by_prefix() -> i32 {
     if n != 1 {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 21, 0) {
+    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 22, 0) {
         return 1;
     }
     0
 }
 
 unsafe extern "C" fn case_filter_by_kind_and_arch() -> i32 {
+    unsafe { crate::util::mod_test::case_rc(case_filter_by_kind_and_arch_body) }
+}
+unsafe extern "C" fn case_filter_by_kind_and_arch_body() -> i32 {
     /* x86_64 wasm (zlib) and aot (hello) both match arch; kind narrows. */
     let mut q = query_none();
     q.kind = b"wasm\0".as_ptr();
@@ -121,7 +133,7 @@ unsafe extern "C" fn case_filter_by_kind_and_arch() -> i32 {
     if n2 != 1 {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 21, 0) {
+    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 22, 0) {
         return 1;
     }
     /* Kind alone: anything with a wasm artifact. */
@@ -142,6 +154,9 @@ unsafe extern "C" fn case_filter_by_kind_and_arch() -> i32 {
 }
 
 unsafe extern "C" fn case_result_set_abi_and_error_state() -> i32 {
+    unsafe { crate::util::mod_test::case_rc(case_result_set_abi_and_error_state_body) }
+}
+unsafe extern "C" fn case_result_set_abi_and_error_state_body() -> i32 {
     let mut q = query_none();
     q.kind = b"wasm\0".as_ptr();
     q.kind_len = 4;

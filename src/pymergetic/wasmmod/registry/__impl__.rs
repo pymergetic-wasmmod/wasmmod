@@ -3,42 +3,73 @@
 //! face; this table is what backs every native lookup underneath it,
 //! for every impl language and every call direction. See
 //! docs/REGISTRY.md for the design this implements.
+//!
+//! Subset discipline (this file compiles through the kernel's own rsx
+//! chain — ksweep), same posture as net.search / util.lock: ptr+len
+//! byte spans instead of `String`, fixed-capacity arrays with explicit
+//! counts instead of `Vec`, one raw lock primitive instead of the
+//! generic `Mutex<T>` wrapper. No allocations anywhere, which also
+//! removes the old two-phase staging story: a registration arriving
+//! from a constructor lands directly in the table, whether or not any
+//! heap exists yet.
+//!
+//! Budgets (from the tree's own registrations, with headroom — see
+//! REGISTRY.md "Storage" for the fixed-capacity trade-off):
+//!   MOD_MAX modules, EXP_MAX exports per module, TST_MAX tests,
+//!   BNC_MAX benches; FQN_CAP/VER_CAP/SIG_CAP/NAME_CAP bytes per row.
+//! An overflow is a loud refusal (0 / invalid handle), never a silent
+//! drop.
 
 #![allow(clippy::missing_safety_doc)]
 #![allow(non_camel_case_types)]
 
-// `alloc` is declared once, crate-root, in lib.rs — resolvable from any
-// module in this crate without a local `extern crate alloc;` here.
-use alloc::string::String;
-use alloc::vec::Vec;
+use core::cell::UnsafeCell;
 use core::ffi::c_void;
+use core::ptr;
 
 // The shared ABI shapes live in __types__.rs (the Rust twin of
 // `__types__.h`). The path-include is the same one cargo resolves — and
 // the one the build card's in-kernel rsx compile splices in — so there
-// is one definition, reached the same way from both compilers. Re-export
-// keeps `crate::wasmmod::registry::*` paths unchanged.
+// is one definition, reached the same way from both compilers.
 #[path = "__types__.rs"]
 mod __types__;
 pub use __types__::*;
 
-use crate::util::lock::Mutex;
+/* pymergetic.util.lock — the project's one lock card (RS muscle, C ABI),
+ * declared the same way net.search declares it: raw primitive, caller
+ * payload. The lock card is impl = rs, so this is not a second lock, it
+ * is the same one, reached through its C face. */
+#[repr(C)]
+struct pm_util_lock_t {
+    locked: u32,
+}
 
-const INVALID_HANDLE: pm_wasmmod_registry_handle_t = pm_wasmmod_registry_handle_t {
-    index: u32::MAX,
-    generation: 0,
-};
+unsafe extern "C" {
+    fn pm_util_lock_acquire(l: *mut pm_util_lock_t);
+    fn pm_util_lock_release(l: *mut pm_util_lock_t);
+}
 
-struct Export {
-    name: String,
-    kind: pm_wasmmod_registry_export_kind_t,
-    /// `Fn`/`Mem`/`I64`/`F32`/`F64`/`BufPtr`: a real native pointer.
-    /// `Obj`: an opaque token owned by whichever embedder eventually
-    /// attaches a GC (see `gc_visit`) — the registry never interprets
-    /// it, only stores and hands it back.
-    ptr: *mut c_void,
-    /// Optional C prototype spelling for facegen (e.g. `int(void)`).
-    sig: Option<String>,
+/* ---- budgets ---- */
+
+const MOD_MAX: usize = 128;
+const EXP_MAX: usize = 64;
+const TST_MAX: usize = 32;
+const BNC_MAX: usize = 8;
+const FQN_CAP: usize = 64;
+const VER_CAP: usize = 32;
+const SIG_CAP: usize = 160;
+const NAME_CAP: usize = 64;
+const OUT_CAP: usize = 4096;
+
+/* The sentinel handle: index = u32::MAX. A const struct literal is not an
+ * accepted rsx static-initializer shape (the parser wraps struct lits in a
+ * PATH), so the sentinel is a builder fn — function bodies lower struct
+ * literals fine. */
+fn invalid_handle() -> pm_wasmmod_registry_handle_t {
+    pm_wasmmod_registry_handle_t {
+        index: 4294967295u32,
+        generation: 0,
+    }
 }
 
 /// Module-local test case (`__tests__.*` / `PM_MOD_TEST_*`). Not an export —
@@ -54,18 +85,6 @@ pub type pm_wasmmod_registry_wasm_test_runner_t =
 /// so the same missing-call triage (native vs guest) applies to benches.
 pub type pm_wasmmod_registry_wasm_bench_runner_t =
     unsafe extern "C" fn(*const u8, u32, *const u8, u32, u64) -> i32;
-
-enum TestBody {
-    /// Host / resident: real `fn() -> i32` from `PM_MOD_TEST_*`.
-    Native(pm_wasmmod_registry_test_fn_t),
-    /// Guest pack: wasm export symbol; invoke via [`WASM_TEST_RUNNER`].
-    WasmExport(String),
-}
-
-struct TestEntry {
-    name: String,
-    body: TestBody,
-}
 
 /// Module-local benchmark (`__bench__.*` / `PM_MOD_BENCH_*`). Not an export —
 /// never emitted by util.gen faces, and never a pass/fail gate.
@@ -84,16 +103,69 @@ pub type pm_wasmmod_registry_bench_fn_t = unsafe extern "C" fn(u64) -> i32;
 /// `performance.now`-derived value on emcc, the firmware timer otherwise).
 pub type pm_wasmmod_registry_bench_clock_t = unsafe extern "C" fn() -> u64;
 
-enum BenchBody {
-    /// Host / resident: a real `fn(iterations) -> i32`.
-    Native(pm_wasmmod_registry_bench_fn_t),
-    /// Guest pack: wasm export symbol taking the iterations word.
-    WasmExport(String),
+/* A test/bench body is either a native fn or a wasm export name — a
+ * data-carrying enum would be a sum type, which rsx refuses; the
+ * plain-data equivalent is a kind tag + the union payload spelled as
+ * fields (null fn = WasmExport). */
+const BODY_NATIVE: u8 = 0;
+const BODY_WASM: u8 = 1;
+
+/* Clone/Copy: rows repeat inside `[row; N]` initializers (the rsx subset
+ * has no Default, and a bare struct-lit const is not an accepted static
+ * shape — asgi's Conn rows use the same derive). */
+#[derive(Clone, Copy)]
+struct Export {
+    name: [u8; NAME_CAP],
+    name_len: u32,
+    kind: pm_wasmmod_registry_export_kind_t,
+    /// `Fn`/`Mem`/`I64`/`F32`/`F64`/`BufPtr`: a real native pointer.
+    /// `Obj`: an opaque token owned by whichever embedder eventually
+    /// attaches a GC (see `gc_visit`) — the registry never interprets
+    /// it, only stores and hands it back.
+    ptr: *mut c_void,
+    /// Optional C prototype spelling for facegen (e.g. `int(void)`).
+    /// len 0 = unset.
+    sig: [u8; SIG_CAP],
+    sig_len: u32,
 }
 
+#[derive(Clone, Copy)]
+struct TestEntry {
+    name: [u8; NAME_CAP],
+    name_len: u32,
+    body_kind: u8,
+    native: Option<pm_wasmmod_registry_test_fn_t>,
+    export: [u8; NAME_CAP],
+    export_len: u32,
+}
+
+#[derive(Clone, Copy)]
 struct BenchEntry {
-    name: String,
-    body: BenchBody,
+    name: [u8; NAME_CAP],
+    name_len: u32,
+    body_kind: u8,
+    native: Option<pm_wasmmod_registry_bench_fn_t>,
+    export: [u8; NAME_CAP],
+    export_len: u32,
+}
+
+#[derive(Clone, Copy)]
+struct ModEntry {
+    fqn: [u8; FQN_CAP],
+    fqn_len: u32,
+    /// Package / kernel version string (empty = unset). Build-root packs and
+    /// host-intrinsic modules that are independently dependable.
+    version: [u8; VER_CAP],
+    version_len: u32,
+    container: pm_wasmmod_registry_container_kind_t,
+    generation: u32,
+    live: bool,
+    exports: [Export; EXP_MAX],
+    n_exports: u32,
+    tests: [TestEntry; TST_MAX],
+    n_tests: u32,
+    benches: [BenchEntry; BNC_MAX],
+    n_benches: u32,
 }
 
 /// How many repeats to run before measuring — a cheap warmup that lets the
@@ -101,513 +173,344 @@ struct BenchEntry {
 /// DHCP/SSH "drive the wire" loops.
 const BENCH_MEASURE_WARMUP: u64 = 2;
 
-static WASM_TEST_RUNNER: Mutex<Option<pm_wasmmod_registry_wasm_test_runner_t>> = Mutex::new(None);
+/* Transparent static discipline (same as net.search): Mut<T> is a
+ * one-field tuple struct rsx maps to its inner type, UnsafeCell::get
+ * hands out the pointer. */
+struct Mut<T>(UnsafeCell<T>);
+unsafe impl<T> Sync for Mut<T> {}
 
-/// Loader installs this so guest pack benches run without a host trampoline
-/// pool; a guest bench is `WasmExport` + `iterations`, driven by this hook.
-static WASM_BENCH_RUNNER: Mutex<Option<pm_wasmmod_registry_wasm_bench_runner_t>> =
-    Mutex::new(None);
-
-/// Installed by the seat that can time. Stays `None` on clockless seats so a
-/// bench reports "no clock" rather than a bogus number (see the clock doc).
-static BENCH_CLOCK: Mutex<Option<pm_wasmmod_registry_bench_clock_t>> = Mutex::new(None);
-
-struct ModEntry {
-    fqn: String,
-    /// Package / kernel version string (empty = unset). Build-root packs and
-    /// host-intrinsic modules that are independently dependable.
-    version: String,
-    container: pm_wasmmod_registry_container_kind_t,
-    generation: u32,
-    exports: Vec<Export>,
-    tests: Vec<TestEntry>,
-    benches: Vec<BenchEntry>,
-    live: bool,
-}
-
-/// How many `PM_MOD_EXPORT_*` registrations can be held before the heap
-/// exists. Around 330 across wasmmod's own C/RS cards were the old floor; the
-/// inspect/microdot/utemplate/services URLs and the asgi multi-instance exports
-/// pushed the live count higher, so this is headroom above that, counted
-/// against the `[StagedExport; STAGE_MAX]` `.bss` and only meaningful when the
-/// real total ever exceeds it again (`ndropped` > 0 is the tripwire).
-const STAGE_MAX: usize = 1024;
-
-/// One `PM_MOD_EXPORT_*` registration captured before the allocator is
-/// usable. Every field the macros pass is already static storage — string
-/// literals and a function address — so staging one costs no allocation.
-/// Addresses are held as `usize` so the struct stays plain-data and the
-/// enclosing static needs no extra unsafe auto-trait promises.
-#[derive(Clone, Copy)]
-struct StagedExport {
-    fqn: usize,
-    fqn_len: u32,
-    name: usize,
-    name_len: u32,
-    sig: usize,
-    sig_len: u32,
-    ptr: usize,
-    kind: pm_wasmmod_registry_export_kind_t,
-}
+static LOCK: Mut<pm_util_lock_t> = Mut(UnsafeCell::new(pm_util_lock_t { locked: 0 }));
 
 struct Table {
-    entries: Vec<ModEntry>,
-    /// Registrations that arrived from a constructor. Freestanding seats run
-    /// `.init_array` / `.CRT$XCU` before any heap exists (firmware `malloc` is
-    /// often a bump pointer that is still NULL at that point), so an
-    /// insert here would allocate against nothing. They are replayed by
-    /// `drain_staged` on the first read, once the heap is up.
-    staged: [StagedExport; STAGE_MAX],
-    nstaged: usize,
-    /// Registrations dropped because `staged` was full and no heap was
-    /// available to take them directly. Nonzero means STAGE_MAX is too small.
-    ndropped: u32,
+    entries: [ModEntry; MOD_MAX],
+    n_entries: u32,
+    /* bench_run_all report buffer — filled under the lock, copied out
+     * on release. Keeps the no-alloc discipline on the report path too. */
+    out: [u8; OUT_CAP],
+    out_len: u32,
 }
 
-// SAFETY: the raw pointers `Table` holds (`Export::ptr`) are opaque
-// addresses — native function pointers or embedder-owned tokens — never
-// thread-affine data, and every access goes through `TABLE`'s `Mutex`
-// (one accessor at a time). Send is the real requirement here; `Mutex`
-// derives its own `Sync` from it (see pymergetic.util.lock).
-unsafe impl Send for Table {}
+/* The one table. Sized in .bss: 128 modules * (64 exports + 32 tests +
+ * 8 benches) of fixed rows. Nothing here allocates, so the two-phase
+ * staging buffer the allocator-backed design needed is gone entirely —
+ * a ctor-time registration is just a row write.
+ *
+ * rsx shape discipline, two rules. (1) The static-initializer shape
+ * check only accepts a *bare* STRUCT_LIT / ARRAY / LITERAL (or the
+ * constant-lowering CALLs) at the top level — the parser wraps every
+ * struct literal in a PATH, so a struct-lit `const` is always refused;
+ * the zero rows therefore live only *inside* TABLE's initializer (a
+ * `Mut(UnsafeCell::new(..))` CALL, whose argument is not shape-checked),
+ * spelled as `[row; N]` repeat arrays. (2) CONST items lower in pass 0a
+ * — before the struct pass — so a const naming `Export` would emit ahead
+ * of the typedef; the inline spellings keep every type reference after
+ * its struct.
+ *
+ * Every field here is the zero value, deliberately: rsx proves the whole
+ * initializer folds to zero and emits the declaration bare, so the table
+ * rides .bss instead of a multi-megabyte explicit zero blob through the
+ * in-kernel object compiler. Dead rows therefore spell `container` as
+ * `Wasm` (variant 0) — the kind is meaningless until publish() overwrites
+ * it, and readers only ever see live rows. */
+static TABLE: Mut<Table> = Mut(UnsafeCell::new(Table {
+    entries: [ModEntry {
+        fqn: [0; FQN_CAP],
+        fqn_len: 0,
+        version: [0; VER_CAP],
+        version_len: 0,
+        container: pm_wasmmod_registry_container_kind_t::Wasm,
+        generation: 0,
+        live: false,
+        exports: [Export {
+            name: [0; NAME_CAP],
+            name_len: 0,
+            kind: pm_wasmmod_registry_export_kind_t::Fn,
+            ptr: ptr::null_mut(),
+            sig: [0; SIG_CAP],
+            sig_len: 0,
+        }; EXP_MAX],
+        n_exports: 0,
+        tests: [TestEntry {
+            name: [0; NAME_CAP],
+            name_len: 0,
+            body_kind: BODY_NATIVE,
+            native: None,
+            export: [0; NAME_CAP],
+            export_len: 0,
+        }; TST_MAX],
+        n_tests: 0,
+        benches: [BenchEntry {
+            name: [0; NAME_CAP],
+            name_len: 0,
+            body_kind: BODY_NATIVE,
+            native: None,
+            export: [0; NAME_CAP],
+            export_len: 0,
+        }; BNC_MAX],
+        n_benches: 0,
+    }; MOD_MAX],
+    n_entries: 0,
+    out: [0; OUT_CAP],
+    out_len: 0,
+}));
 
-impl Table {
-    const fn new() -> Self {
-        Self {
-            entries: Vec::new(),
-            staged: [StagedExport {
-                fqn: 0,
-                fqn_len: 0,
-                name: 0,
-                name_len: 0,
-                sig: 0,
-                sig_len: 0,
-                ptr: 0,
-                kind: pm_wasmmod_registry_export_kind_t::Fn,
-            }; STAGE_MAX],
-            nstaged: 0,
-            ndropped: 0,
-        }
+/* The loader hooks are single fn-pointer cells: one lock-free spin for
+ * the cell itself would be a second lock discipline, so they share the
+ * table lock — installers and readers are both rare. */
+static WASM_TEST_RUNNER: Mut<Option<pm_wasmmod_registry_wasm_test_runner_t>> =
+    Mut(UnsafeCell::new(None));
+static WASM_BENCH_RUNNER: Mut<Option<pm_wasmmod_registry_wasm_bench_runner_t>> =
+    Mut(UnsafeCell::new(None));
+static BENCH_CLOCK: Mut<Option<pm_wasmmod_registry_bench_clock_t>> = Mut(UnsafeCell::new(None));
+
+unsafe fn table() -> *mut Table {
+    TABLE.0.get()
+}
+
+unsafe fn lock() -> *mut pm_util_lock_t {
+    LOCK.0.get()
+}
+
+/* ---- span helpers (ptr+len discipline; no &str anywhere) ---- */
+
+unsafe fn span_eq(a: *const u8, a_len: usize, b: *const u8, b_len: usize) -> bool {
+    if a_len != b_len {
+        return false;
     }
-
-    /// Record a constructor-time registration without touching the heap.
-    /// Returns false only when the buffer is full, so the caller can fall
-    /// back to a direct insert on a seat that does have an allocator.
-    fn stage_export(
-        &mut self,
-        fqn: &str,
-        name: &str,
-        kind: pm_wasmmod_registry_export_kind_t,
-        ptr: *mut c_void,
-        sig: Option<&str>,
-    ) -> bool {
-        if self.nstaged >= STAGE_MAX {
-            return false;
-        }
-        let (sig_ptr, sig_len) = match sig {
-            Some(s) => (s.as_ptr() as usize, s.len() as u32),
-            None => (0usize, 0u32),
-        };
-        self.staged[self.nstaged] = StagedExport {
-            fqn: fqn.as_ptr() as usize,
-            fqn_len: fqn.len() as u32,
-            name: name.as_ptr() as usize,
-            name_len: name.len() as u32,
-            sig: sig_ptr,
-            sig_len,
-            ptr: ptr as usize,
-            kind,
-        };
-        self.nstaged += 1;
-        true
-    }
-
-    /// Replay everything staged before the heap existed. Called on the first
-    /// read of the table, by which point an allocator is always up.
-    fn drain_staged(&mut self) {
-        if self.nstaged == 0 {
-            return;
-        }
-        let n = core::mem::replace(&mut self.nstaged, 0);
-        for i in 0..n {
-            let s = self.staged[i];
-            // SAFETY: every address came from a `&str` backed by a string
-            // literal in the image, so the bytes outlive the whole program.
-            let (Some(fqn), Some(name)) = (
-                str_from_raw(s.fqn as *const u8, s.fqn_len),
-                str_from_raw(s.name as *const u8, s.name_len),
-            ) else {
-                continue;
-            };
-            let sig = if s.sig_len == 0 {
-                None
-            } else {
-                str_from_raw(s.sig as *const u8, s.sig_len)
-            };
-            let handle = self.ensure_resident(fqn);
-            self.export_set_sig(handle, name, s.kind, s.ptr as *mut c_void, sig);
-        }
-    }
-
-    fn publish(
-        &mut self,
-        fqn: &str,
-        container: pm_wasmmod_registry_container_kind_t,
-    ) -> pm_wasmmod_registry_handle_t {
-        // Reuse the first dead slot if one exists — unpublish leaves a
-        // hole rather than shifting indices, since every other live
-        // handle's index has to keep meaning the same thing.
-        if let Some((index, entry)) = self.entries.iter_mut().enumerate().find(|(_, e)| !e.live) {
-            let generation = entry.generation.wrapping_add(1);
-            *entry = ModEntry {
-                fqn: String::from(fqn),
-                version: String::new(),
-                container,
-                generation,
-                exports: Vec::new(),
-                tests: Vec::new(),
-                benches: Vec::new(),
-                live: true,
-            };
-            return pm_wasmmod_registry_handle_t {
-                index: index as u32,
-                generation,
-            };
-        }
-        let index = self.entries.len() as u32;
-        self.entries.push(ModEntry {
-            fqn: String::from(fqn),
-            version: String::new(),
-            container,
-            generation: 0,
-            exports: Vec::new(),
-            tests: Vec::new(),
-            benches: Vec::new(),
-            live: true,
-        });
-        pm_wasmmod_registry_handle_t {
-            index,
-            generation: 0,
-        }
-    }
-
-    fn unpublish(&mut self, handle: pm_wasmmod_registry_handle_t) -> bool {
-        match self.live_entry_mut(handle) {
-            Some(entry) => {
-                entry.live = false;
-                entry.exports.clear();
-                entry.tests.clear();
-                entry.benches.clear();
-                entry.fqn.clear();
-                entry.version.clear();
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn live_entry_mut(&mut self, handle: pm_wasmmod_registry_handle_t) -> Option<&mut ModEntry> {
-        self.entries
-            .get_mut(handle.index as usize)
-            .filter(|e| e.live && e.generation == handle.generation)
-    }
-
-    fn find_by_fqn(&self, fqn: &str) -> Option<&ModEntry> {
-        self.entries.iter().find(|e| e.live && e.fqn == fqn)
-    }
-
-    fn export_set(
-        &mut self,
-        handle: pm_wasmmod_registry_handle_t,
-        name: &str,
-        kind: pm_wasmmod_registry_export_kind_t,
-        ptr: *mut c_void,
-    ) -> bool {
-        self.export_set_sig(handle, name, kind, ptr, None)
-    }
-
-    fn export_set_sig(
-        &mut self,
-        handle: pm_wasmmod_registry_handle_t,
-        name: &str,
-        kind: pm_wasmmod_registry_export_kind_t,
-        ptr: *mut c_void,
-        sig: Option<&str>,
-    ) -> bool {
-        let Some(entry) = self.live_entry_mut(handle) else {
-            return false;
-        };
-        let sig_owned = sig.map(String::from);
-        if let Some(export) = entry.exports.iter_mut().find(|e| e.name == name) {
-            export.kind = kind;
-            export.ptr = ptr;
-            if sig_owned.is_some() {
-                export.sig = sig_owned;
-            }
-        } else {
-            entry.exports.push(Export {
-                name: String::from(name),
-                kind,
-                ptr,
-                sig: sig_owned,
-            });
-        }
-        true
-    }
-
-    /// Publish if missing; if already live, keep the existing container.
-    fn ensure(
-        &mut self,
-        fqn: &str,
-        container: pm_wasmmod_registry_container_kind_t,
-    ) -> pm_wasmmod_registry_handle_t {
-        if let Some((index, entry)) = self
-            .entries
-            .iter()
-            .enumerate()
-            .find(|(_, e)| e.live && e.fqn == fqn)
-        {
-            return pm_wasmmod_registry_handle_t {
-                index: index as u32,
-                generation: entry.generation,
-            };
-        }
-        self.publish(fqn, container)
-    }
-
-    fn ensure_resident(&mut self, fqn: &str) -> pm_wasmmod_registry_handle_t {
-        self.ensure(fqn, pm_wasmmod_registry_container_kind_t::Resident)
-    }
-
-    fn container_of(&self, fqn: &str) -> Option<pm_wasmmod_registry_container_kind_t> {
-        self.find_by_fqn(fqn).map(|e| e.container)
-    }
-
-    fn set_version(&mut self, fqn: &str, version: &str) -> bool {
-        match self.entries.iter_mut().find(|e| e.live && e.fqn == fqn) {
-            Some(e) => {
-                e.version = String::from(version);
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn version_of(&self, fqn: &str) -> Option<&str> {
-        self.find_by_fqn(fqn)
-            .map(|e| e.version.as_str())
-            .filter(|s| !s.is_empty())
-    }
-
-    fn publish_ver(
-        &mut self,
-        fqn: &str,
-        container: pm_wasmmod_registry_container_kind_t,
-        version: &str,
-    ) -> pm_wasmmod_registry_handle_t {
-        let h = self.publish(fqn, container);
-        if !version.is_empty() {
-            let _ = self.set_version(fqn, version);
-        }
-        h
-    }
-
-    /// Register (or replace) a host/resident module test case. Ensures Resident.
-    fn test_register(&mut self, fqn: &str, name: &str, f: pm_wasmmod_registry_test_fn_t) -> bool {
-        let _ = self.ensure_resident(fqn);
-        let Some(entry) = self.entries.iter_mut().find(|e| e.live && e.fqn == fqn) else {
-            return false;
-        };
-        let body = TestBody::Native(f);
-        if let Some(t) = entry.tests.iter_mut().find(|t| t.name == name) {
-            t.body = body;
-        } else {
-            entry.tests.push(TestEntry {
-                name: String::from(name),
-                body,
-            });
-        }
-        true
-    }
-
-    /// Register (or replace) a guest pack test: case name → wasm export symbol.
-    fn test_register_wasm(&mut self, fqn: &str, name: &str, export: &str) -> bool {
-        let Some(entry) = self.entries.iter_mut().find(|e| e.live && e.fqn == fqn) else {
-            return false;
-        };
-        let body = TestBody::WasmExport(String::from(export));
-        if let Some(t) = entry.tests.iter_mut().find(|t| t.name == name) {
-            t.body = body;
-        } else {
-            entry.tests.push(TestEntry {
-                name: String::from(name),
-                body,
-            });
-        }
-        true
-    }
-
-    fn test_count(&self, fqn: &str) -> u32 {
-        self.find_by_fqn(fqn)
-            .map(|e| e.tests.len() as u32)
-            .unwrap_or(0)
-    }
-
-    fn test_name_at(&self, fqn: &str, index: u32) -> Option<&str> {
-        self.find_by_fqn(fqn)
-            .and_then(|e| e.tests.get(index as usize))
-            .map(|t| t.name.as_str())
-    }
-
-    fn test_body_named(&self, fqn: &str, name: &str) -> Option<&TestBody> {
-        self.find_by_fqn(fqn)
-            .and_then(|e| e.tests.iter().find(|t| t.name == name))
-            .map(|t| &t.body)
-    }
-
-    /// Register (or replace) a host/resident module benchmark. Ensures Resident.
-    fn bench_register(&mut self, fqn: &str, name: &str, f: pm_wasmmod_registry_bench_fn_t) -> bool {
-        let _ = self.ensure_resident(fqn);
-        let Some(entry) = self.entries.iter_mut().find(|e| e.live && e.fqn == fqn) else {
-            return false;
-        };
-        let body = BenchBody::Native(f);
-        if let Some(b) = entry.benches.iter_mut().find(|b| b.name == name) {
-            b.body = body;
-        } else {
-            entry.benches.push(BenchEntry {
-                name: String::from(name),
-                body,
-            });
-        }
-        true
-    }
-
-    /// Register (or replace) a guest pack benchmark: name → wasm export symbol.
-    fn bench_register_wasm(&mut self, fqn: &str, name: &str, export: &str) -> bool {
-        let Some(entry) = self.entries.iter_mut().find(|e| e.live && e.fqn == fqn) else {
-            return false;
-        };
-        let body = BenchBody::WasmExport(String::from(export));
-        if let Some(b) = entry.benches.iter_mut().find(|b| b.name == name) {
-            b.body = body;
-        } else {
-            entry.benches.push(BenchEntry {
-                name: String::from(name),
-                body,
-            });
-        }
-        true
-    }
-
-    fn bench_count(&self, fqn: &str) -> u32 {
-        self.find_by_fqn(fqn)
-            .map(|e| e.benches.len() as u32)
-            .unwrap_or(0)
-    }
-
-    fn bench_name_at(&self, fqn: &str, index: u32) -> Option<&str> {
-        self.find_by_fqn(fqn)
-            .and_then(|e| e.benches.get(index as usize))
-            .map(|b| b.name.as_str())
-    }
-
-    fn bench_body_named(&self, fqn: &str, name: &str) -> Option<&BenchBody> {
-        self.find_by_fqn(fqn)
-            .and_then(|e| e.benches.iter().find(|b| b.name == name))
-            .map(|b| &b.body)
-    }
-
-    fn live_module_count(&self) -> u32 {
-        self.entries.iter().filter(|e| e.live).count() as u32
-    }
-
-    /// Indexed access to the N-th live module FQN. Allocation-free: called from
-    /// C host-face walks (import-time) on seats where the backing allocator is
-    /// a one-shot bump shared with the WASM guest — a per-query snapshot Vec
-    /// here allocates on every module_at/count and can fail mid-import when the
-    /// slab is under WASM+CDN pressure (firmware prove OSError / hang).
-    fn live_module_at(&self, index: u32) -> Option<&str> {
-        self.entries
-            .iter()
-            .filter(|e| e.live)
-            .nth(index as usize)
-            .map(|e| e.fqn.as_str())
-    }
-
-    fn exports_of(&self, fqn: &str) -> Option<&[Export]> {
-        self.find_by_fqn(fqn).map(|e| e.exports.as_slice())
-    }
-
-    fn resolve_native(&self, fqn: &str, export_name: &str) -> *mut c_void {
-        match self.find_by_fqn(fqn) {
-            Some(entry) => entry
-                .exports
-                .iter()
-                .find(|e| e.name == export_name)
-                .map(|e| e.ptr)
-                .unwrap_or(core::ptr::null_mut()),
-            None => core::ptr::null_mut(),
-        }
-    }
-
-    fn gc_visit(&self, visit: extern "C" fn(*mut c_void, *mut c_void), ctx: *mut c_void) {
-        for entry in self.entries.iter().filter(|e| e.live) {
-            for export in entry
-                .exports
-                .iter()
-                .filter(|e| e.kind == pm_wasmmod_registry_export_kind_t::Obj)
-            {
-                visit(export.ptr, ctx);
+    let mut i = 0usize;
+    while i < a_len {
+        unsafe {
+            if *a.add(i) != *b.add(i) {
+                return false;
             }
         }
+        i += 1;
+    }
+    true
+}
+
+/// Copy a span into a fixed row buffer; returns the stored length or
+/// SIZE_MAX on overflow (caller refuses loudly, never truncates a name
+/// into a key that would then compare equal to a prefix).
+unsafe fn span_put(dst: *mut u8, dst_cap: usize, src: *const u8, src_len: usize) -> usize {
+    if src_len > dst_cap {
+        return usize::MAX;
+    }
+    let mut i = 0usize;
+    while i < src_len {
+        unsafe {
+            *dst.add(i) = *src.add(i);
+        }
+        i += 1;
+    }
+    src_len
+}
+
+/// ptr/len are already validated non-null by the callers; the registry
+/// never interprets the bytes (names are compared as bytes, not UTF-8
+/// text), so no utf8 validation gate on the hot path.
+unsafe fn raw_ok(p: *const u8, len: u32) -> bool {
+    !p.is_null() || len == 0
+}
+
+/* ---- table ops (all under the caller-held lock) ---- */
+
+/// First dead slot, or -1 — publish reuses holes so every other live
+/// handle's index keeps meaning the same thing (see REGISTRY.md).
+unsafe fn find_dead(t: *mut Table) -> i32 {
+    let mut i = 0usize;
+    while i < (*t).n_entries as usize {
+        if !(*t).entries[i].live {
+            return i as i32;
+        }
+        i += 1;
+    }
+    if (*t).n_entries as usize >= MOD_MAX {
+        return -1;
+    }
+    let idx = (*t).n_entries as usize;
+    (*t).n_entries += 1;
+    idx as i32
+}
+
+unsafe fn entry_by_handle(
+    t: *mut Table,
+    handle: pm_wasmmod_registry_handle_t,
+) -> *mut ModEntry {
+    let i = handle.index as usize;
+    if i >= (*t).n_entries as usize || i >= MOD_MAX {
+        return core::ptr::null_mut();
+    }
+    let e = (*t).entries.as_mut_ptr().add(i);
+    if !(*e).live || (*e).generation != handle.generation {
+        return core::ptr::null_mut();
+    }
+    e
+}
+
+unsafe fn entry_by_fqn(t: *mut Table, fqn: *const u8, fqn_len: usize) -> *mut ModEntry {
+    let mut i = 0usize;
+    while i < (*t).n_entries as usize {
+        let e = (*t).entries.as_mut_ptr().add(i);
+        if (*e).live && (*e).fqn_len as usize == fqn_len {
+            let eq = unsafe {
+                span_eq((*e).fqn.as_ptr(), (*e).fqn_len as usize, fqn, fqn_len)
+            };
+            if eq {
+                return e;
+            }
+        }
+        i += 1;
+    }
+    core::ptr::null_mut()
+}
+
+unsafe fn entry_index(e: *mut ModEntry, t: *mut Table) -> u32 {
+    let base = (*t).entries.as_mut_ptr();
+    if base.is_null() || e.is_null() {
+        return u32::MAX;
+    }
+    let off = (e as usize) - (base as usize);
+    (off / core::mem::size_of::<ModEntry>()) as u32
+}
+
+/// Publish (new slot or dead-slot reuse with a generation bump).
+/// Returns the handle or the invalid sentinel when the table is full.
+unsafe fn publish(
+    t: *mut Table,
+    fqn: *const u8,
+    fqn_len: usize,
+    container: pm_wasmmod_registry_container_kind_t,
+) -> pm_wasmmod_registry_handle_t {
+    let idx = unsafe { find_dead(t) };
+    if idx < 0 {
+        return invalid_handle();
+    }
+    let e = (*t).entries.as_mut_ptr().add(idx as usize);
+    let stored = unsafe { span_put((*e).fqn.as_mut_ptr(), FQN_CAP, fqn, fqn_len) };
+    if stored == usize::MAX {
+        return invalid_handle();
+    }
+    /* A reused slot bumps its generation so every stale handle to the
+     * dead occupant keeps being detectably stale (see REGISTRY.md). */
+    (*e).generation = (*e).generation.wrapping_add(1);
+    (*e).fqn_len = stored as u32;
+    (*e).version_len = 0;
+    (*e).container = container;
+    (*e).live = true;
+    (*e).n_exports = 0;
+    (*e).n_tests = 0;
+    (*e).n_benches = 0;
+    pm_wasmmod_registry_handle_t {
+        index: idx as u32,
+        generation: (*e).generation,
     }
 }
 
-/// The table itself. `Mutex` (== `SpinLock`, see pymergetic.util.lock) —
-/// registry access is expected under multithreaded *and* cooperative
-/// scheduling (a one-runner-per-CPU kernel included), so a real
-/// lock is load-bearing here, not decoration.
-static TABLE_CELL: Mutex<Table> = Mutex::new(Table::new());
-
-/// Handle to the one registry table. `lock()` replays constructor-time
-/// registrations before handing the table over, so no reader can observe a
-/// half-populated registry and no future call site has to remember to.
-struct TableRef;
-
-static TABLE: TableRef = TableRef;
-
-impl TableRef {
-    fn lock(&self) -> crate::util::lock::MutexGuard<'static, Table> {
-        let mut guard = TABLE_CELL.lock();
-        guard.drain_staged();
-        guard
+/// Publish if missing; if already live, keep the existing container.
+unsafe fn ensure(
+    t: *mut Table,
+    fqn: *const u8,
+    fqn_len: usize,
+    container: pm_wasmmod_registry_container_kind_t,
+) -> pm_wasmmod_registry_handle_t {
+    let e = unsafe { entry_by_fqn(t, fqn, fqn_len) };
+    if !e.is_null() {
+        let idx = unsafe { entry_index(e, t) };
+        return pm_wasmmod_registry_handle_t {
+            index: idx,
+            generation: (*e).generation,
+        };
     }
-
-    /// The table without a replay. Only the staging path may use this: it runs
-    /// from a constructor, where draining would allocate against a heap that
-    /// does not exist yet.
-    fn lock_staging(&self) -> crate::util::lock::MutexGuard<'static, Table> {
-        TABLE_CELL.lock()
-    }
+    unsafe { publish(t, fqn, fqn_len, container) }
 }
 
-fn str_from_raw<'a>(ptr: *const u8, len: u32) -> Option<&'a str> {
-    if ptr.is_null() {
-        return None;
+unsafe fn export_set_sig(
+    t: *mut Table,
+    handle: pm_wasmmod_registry_handle_t,
+    name: *const u8,
+    name_len: usize,
+    kind: pm_wasmmod_registry_export_kind_t,
+    ptr: *mut c_void,
+    sig: *const u8,
+    sig_len: usize,
+) -> bool {
+    let e = unsafe { entry_by_handle(t, handle) };
+    if e.is_null() {
+        return false;
     }
-    // SAFETY: caller (a extern "C" fn below) contracts ptr/len to
-    // describe a valid, live byte range for the duration of this call.
-    let bytes = unsafe { core::slice::from_raw_parts(ptr, len as usize) };
-    core::str::from_utf8(bytes).ok()
+    if name_len > NAME_CAP || sig_len > SIG_CAP {
+        return false;
+    }
+    let mut i = 0usize;
+    while i < (*e).n_exports as usize {
+        let x = (*e).exports.as_mut_ptr().add(i);
+        if (*x).name_len as usize == name_len {
+            let eq = unsafe { span_eq((*x).name.as_ptr(), name_len, name, name_len) };
+            if eq {
+                (*x).kind = kind;
+                (*x).ptr = ptr;
+                if sig_len > 0 {
+                    let _ = unsafe { span_put((*x).sig.as_mut_ptr(), SIG_CAP, sig, sig_len) };
+                    (*x).sig_len = sig_len as u32;
+                }
+                return true;
+            }
+        }
+        i += 1;
+    }
+    if (*e).n_exports as usize >= EXP_MAX {
+        return false;
+    }
+    let x = (*e).exports.as_mut_ptr().add((*e).n_exports as usize);
+    let stored = unsafe { span_put((*x).name.as_mut_ptr(), NAME_CAP, name, name_len) };
+    if stored == usize::MAX {
+        return false;
+    }
+    (*x).name_len = stored as u32;
+    (*x).kind = kind;
+    (*x).ptr = ptr;
+    (*x).sig_len = 0;
+    if sig_len > 0 {
+        let _ = unsafe { span_put((*x).sig.as_mut_ptr(), SIG_CAP, sig, sig_len) };
+        (*x).sig_len = sig_len as u32;
+    }
+    (*e).n_exports += 1;
+    true
 }
+
+unsafe fn resolve_native(
+    t: *mut Table,
+    fqn: *const u8,
+    fqn_len: usize,
+    name: *const u8,
+    name_len: usize,
+) -> *mut c_void {
+    let e = unsafe { entry_by_fqn(t, fqn, fqn_len) };
+    if e.is_null() {
+        return core::ptr::null_mut();
+    }
+    let mut i = 0usize;
+    while i < (*e).n_exports as usize {
+        let x = (*e).exports.as_ptr().add(i);
+        if (*x).name_len as usize == name_len {
+            let eq = unsafe { span_eq((*x).name.as_ptr(), name_len, name, name_len) };
+            if eq {
+                return (*x).ptr;
+            }
+        }
+        i += 1;
+    }
+    core::ptr::null_mut()
+}
+
+/* ---- C ABI face ---- */
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pm_wasmmod_registry_init() {
-    // Nothing to do yet beyond TABLE's own static initialization — kept
-    // as an explicit entry point so callers don't need to know that, and
-    // so a future per-arena/per-pack init story has somewhere to land
-    // without a new symbol.
+    // Nothing to do: TABLE's static zero-init is the whole init — the
+    // fixed-capacity design has no heap to bring up. Kept as an explicit
+    // entry point so callers don't need to know that.
 }
 
 #[unsafe(no_mangle)]
@@ -616,15 +519,35 @@ pub unsafe extern "C" fn pm_wasmmod_registry_publish(
     fqn_len: u32,
     container: pm_wasmmod_registry_container_kind_t,
 ) -> pm_wasmmod_registry_handle_t {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
-        return INVALID_HANDLE;
-    };
-    TABLE.lock().publish(fqn, container)
+    if fqn_ptr.is_null() || fqn_len == 0 {
+        return invalid_handle();
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let h = publish(table(), fqn_ptr, fqn_len as usize, container);
+        pm_util_lock_release(lock());
+        h
+    }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn pm_wasmmod_registry_unpublish(handle: pm_wasmmod_registry_handle_t) -> i32 {
-    TABLE.lock().unpublish(handle) as i32
+pub unsafe extern "C" fn pm_wasmmod_registry_unpublish(handle: pm_wasmmod_registry_handle_t) -> i32 {
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let e = entry_by_handle(t, handle);
+        let ok = !e.is_null();
+        if ok {
+            (*e).live = false;
+            (*e).n_exports = 0;
+            (*e).n_tests = 0;
+            (*e).n_benches = 0;
+            (*e).fqn_len = 0;
+            (*e).version_len = 0;
+        }
+        pm_util_lock_release(lock());
+        ok as i32
+    }
 }
 
 /// Container kind for a live module, or `-1` if the fqn is not published.
@@ -633,12 +556,19 @@ pub unsafe extern "C" fn pm_wasmmod_registry_container(
     fqn_ptr: *const u8,
     fqn_len: u32,
 ) -> i32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return -1;
-    };
-    match TABLE.lock().container_of(fqn) {
-        Some(k) => k as i32,
-        None => -1,
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let k = if e.is_null() {
+            -1
+        } else {
+            (*e).container as i32
+        };
+        pm_util_lock_release(lock());
+        k
     }
 }
 
@@ -649,10 +579,15 @@ pub unsafe extern "C" fn pm_wasmmod_registry_ensure(
     fqn_len: u32,
     container: pm_wasmmod_registry_container_kind_t,
 ) -> pm_wasmmod_registry_handle_t {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
-        return INVALID_HANDLE;
-    };
-    TABLE.lock().ensure(fqn, container)
+    if fqn_ptr.is_null() || fqn_len == 0 {
+        return invalid_handle();
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let h = ensure(table(), fqn_ptr, fqn_len as usize, container);
+        pm_util_lock_release(lock());
+        h
+    }
 }
 
 /// Publish with an optional version string (`ver_len == 0` → unset).
@@ -664,15 +599,23 @@ pub unsafe extern "C" fn pm_wasmmod_registry_publish_ver(
     ver_ptr: *const u8,
     ver_len: u32,
 ) -> pm_wasmmod_registry_handle_t {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
-        return INVALID_HANDLE;
-    };
-    let ver = if ver_len == 0 {
-        ""
-    } else {
-        str_from_raw(ver_ptr, ver_len).unwrap_or("")
-    };
-    TABLE.lock().publish_ver(fqn, container, ver)
+    if fqn_ptr.is_null() || fqn_len == 0 {
+        return invalid_handle();
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let h = publish(t, fqn_ptr, fqn_len as usize, container);
+        if h.index != u32::MAX && ver_len > 0 && !ver_ptr.is_null() {
+            let e = entry_by_handle(t, h);
+            if !e.is_null() && ver_len as usize <= VER_CAP {
+                let _ = span_put((*e).version.as_mut_ptr(), VER_CAP, ver_ptr, ver_len as usize);
+                (*e).version_len = ver_len;
+            }
+        }
+        pm_util_lock_release(lock());
+        h
+    }
 }
 
 /// Set / replace the version on a live module. Returns 1 on success, 0 if missing.
@@ -683,13 +626,23 @@ pub unsafe extern "C" fn pm_wasmmod_registry_set_version(
     ver_ptr: *const u8,
     ver_len: u32,
 ) -> i32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 || ver_ptr.is_null() || ver_len == 0 {
         return 0;
-    };
-    let Some(ver) = str_from_raw(ver_ptr, ver_len) else {
+    }
+    if ver_len as usize > VER_CAP {
         return 0;
-    };
-    TABLE.lock().set_version(fqn, ver) as i32
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let ok = !e.is_null();
+        if ok {
+            let _ = span_put((*e).version.as_mut_ptr(), VER_CAP, ver_ptr, ver_len as usize);
+            (*e).version_len = ver_len;
+        }
+        pm_util_lock_release(lock());
+        ok as i32
+    }
 }
 
 /// Copy the version string for `fqn` into `buf`. Same buffer protocol as
@@ -702,25 +655,42 @@ pub unsafe extern "C" fn pm_wasmmod_registry_version(
     buf: *mut u8,
     buf_len_io: *mut u32,
 ) -> i32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
-    };
-    let table = TABLE.lock();
-    let Some(ver) = table.version_of(fqn) else {
-        if !buf_len_io.is_null() {
-            unsafe { *buf_len_io = 0 };
-        }
-        return 0;
-    };
-    copy_str_to_buf(ver, buf, buf_len_io)
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let ver_len = if e.is_null() { 0 } else { (*e).version_len };
+        let ver = if e.is_null() {
+            core::ptr::null()
+        } else {
+            (*e).version.as_ptr()
+        };
+        let rc = if ver_len > 0 {
+            copy_span_to_buf(ver, ver_len as usize, buf, buf_len_io)
+        } else {
+            if !buf_len_io.is_null() {
+                *buf_len_io = 0;
+            }
+            0
+        };
+        pm_util_lock_release(lock());
+        rc
+    }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pm_wasmmod_registry_has(fqn_ptr: *const u8, fqn_len: u32) -> i32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
-    };
-    TABLE.lock().find_by_fqn(fqn).is_some() as i32
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let found = !entry_by_fqn(table(), fqn_ptr, fqn_len as usize).is_null();
+        pm_util_lock_release(lock());
+        found as i32
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -731,10 +701,24 @@ pub unsafe extern "C" fn pm_wasmmod_registry_export_set(
     kind: pm_wasmmod_registry_export_kind_t,
     ptr: *mut c_void,
 ) -> i32 {
-    let Some(name) = str_from_raw(name_ptr, name_len) else {
+    if name_ptr.is_null() || name_len == 0 {
         return 0;
-    };
-    TABLE.lock().export_set(handle, name, kind, ptr) as i32
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let ok = export_set_sig(
+            table(),
+            handle,
+            name_ptr,
+            name_len as usize,
+            kind,
+            ptr,
+            core::ptr::null(),
+            0,
+        );
+        pm_util_lock_release(lock());
+        ok as i32
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -747,17 +731,24 @@ pub unsafe extern "C" fn pm_wasmmod_registry_export_set_sig(
     sig_ptr: *const u8,
     sig_len: u32,
 ) -> i32 {
-    let Some(name) = str_from_raw(name_ptr, name_len) else {
+    if name_ptr.is_null() || name_len == 0 {
         return 0;
-    };
-    let sig = if sig_len == 0 {
-        None
-    } else {
-        str_from_raw(sig_ptr, sig_len)
-    };
-    TABLE
-        .lock()
-        .export_set_sig(handle, name, kind, ptr, sig) as i32
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let ok = export_set_sig(
+            table(),
+            handle,
+            name_ptr,
+            name_len as usize,
+            kind,
+            ptr,
+            sig_ptr,
+            sig_len as usize,
+        );
+        pm_util_lock_release(lock());
+        ok as i32
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -771,58 +762,71 @@ pub unsafe extern "C" fn pm_wasmmod_registry_mod_export(
     sig_ptr: *const u8,
     sig_len: u32,
 ) -> i32 {
-    let (Some(fqn), Some(name)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(name_ptr, name_len),
-    ) else {
+    if fqn_ptr.is_null() || fqn_len == 0 || name_ptr.is_null() || name_len == 0 {
         return 0;
-    };
-    let sig = if sig_len == 0 {
-        None
-    } else {
-        str_from_raw(sig_ptr, sig_len)
-    };
-    // Reached from a constructor on every seat, which on freestanding images
-    // is before any allocator exists. Stage the plain-data record now and let
-    // the first reader replay it; only fall back to allocating inline when the
-    // staging buffer is full.
-    let mut guard = TABLE.lock_staging();
-    if guard.stage_export(fqn, name, kind, ptr, sig) {
-        return 1;
     }
-    guard.drain_staged();
-    let handle = guard.ensure_resident(fqn);
-    let ok = guard.export_set_sig(handle, name, kind, ptr, sig);
-    if !ok {
-        guard.ndropped = guard.ndropped.saturating_add(1);
+    /* Reached from a constructor on every seat; the table is fixed-
+     * capacity .bss, so this writes a row directly — no heap, no
+     * staging buffer, no drain pass. */
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let h = ensure(
+            t,
+            fqn_ptr,
+            fqn_len as usize,
+            pm_wasmmod_registry_container_kind_t::Resident,
+        );
+        let ok = h.index != u32::MAX
+            && export_set_sig(
+                t,
+                h,
+                name_ptr,
+                name_len as usize,
+                kind,
+                ptr,
+                sig_ptr,
+                sig_len as usize,
+            );
+        pm_util_lock_release(lock());
+        ok as i32
     }
-    ok as i32
 }
 
-fn copy_str_to_buf(src: &str, buf: *mut u8, buf_len_io: *mut u32) -> i32 {
-    if buf_len_io.is_null() {
-        return 0;
-    }
-    let need = src.len();
-    if need == 0 {
-        unsafe { *buf_len_io = 0 };
-        return 1;
-    }
-    let cap = unsafe { *buf_len_io } as usize;
-    if buf.is_null() || cap < need {
-        unsafe { *buf_len_io = need as u32 };
-        return 0;
-    }
+fn copy_span_to_buf(src: *const u8, src_len: usize, buf: *mut u8, buf_len_io: *mut u32) -> i32 {
     unsafe {
-        core::ptr::copy_nonoverlapping(src.as_ptr(), buf, need);
-        *buf_len_io = need as u32;
+        if buf_len_io.is_null() {
+            return 0;
+        }
+        let cap = *buf_len_io as usize;
+        if cap < src_len {
+            *buf_len_io = src_len as u32;
+            return 0;
+        }
+        if src_len > 0 && !buf.is_null() {
+            core::ptr::copy_nonoverlapping(src, buf, src_len);
+        }
+        *buf_len_io = src_len as u32;
     }
     1
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pm_wasmmod_registry_module_count() -> u32 {
-    TABLE.lock().live_module_count()
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let mut n: u32 = 0;
+        let mut i = 0usize;
+        while i < (*t).n_entries as usize {
+            if (*t).entries[i].live {
+                n += 1;
+            }
+            i += 1;
+        }
+        pm_util_lock_release(lock());
+        n
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -831,11 +835,33 @@ pub unsafe extern "C" fn pm_wasmmod_registry_module_at(
     buf: *mut u8,
     buf_len_io: *mut u32,
 ) -> i32 {
-    let table = TABLE.lock();
-    let Some(fqn) = table.live_module_at(index) else {
-        return 0;
-    };
-    copy_str_to_buf(fqn, buf, buf_len_io)
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let mut seen: u32 = 0;
+        let mut i = 0usize;
+        let mut rc = 0;
+        while i < (*t).n_entries as usize {
+            if (*t).entries[i].live {
+                if seen == index {
+                    rc = copy_span_to_buf(
+                        (*t).entries[i].fqn.as_ptr(),
+                        (*t).entries[i].fqn_len as usize,
+                        buf,
+                        buf_len_io,
+                    );
+                    break;
+                }
+                seen += 1;
+            }
+            i += 1;
+        }
+        if rc == 0 && !buf_len_io.is_null() {
+            *buf_len_io = 0;
+        }
+        pm_util_lock_release(lock());
+        rc
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -843,14 +869,16 @@ pub unsafe extern "C" fn pm_wasmmod_registry_export_count(
     fqn_ptr: *const u8,
     fqn_len: u32,
 ) -> u32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
-    };
-    TABLE
-        .lock()
-        .exports_of(fqn)
-        .map(|e| e.len() as u32)
-        .unwrap_or(0)
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let n = if e.is_null() { 0 } else { (*e).n_exports };
+        pm_util_lock_release(lock());
+        n
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -864,29 +892,45 @@ pub unsafe extern "C" fn pm_wasmmod_registry_export_at(
     sig_buf: *mut u8,
     sig_len_io: *mut u32,
 ) -> i32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
-        return 0;
-    };
-    let table = TABLE.lock();
-    let Some(exports) = table.exports_of(fqn) else {
-        return 0;
-    };
-    let Some(export) = exports.get(index as usize) else {
-        return 0;
-    };
-    if copy_str_to_buf(&export.name, name_buf, name_len_io) == 0 {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
     }
-    if !kind_out.is_null() {
-        unsafe { *kind_out = export.kind };
-    }
-    if !sig_len_io.is_null() {
-        let sig = export.sig.as_deref().unwrap_or("");
-        if copy_str_to_buf(sig, sig_buf, sig_len_io) == 0 && !sig.is_empty() {
-            return 0;
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let mut rc = 0;
+        if !e.is_null() && index < (*e).n_exports {
+            let x = (*e).exports.as_ptr().add(index as usize);
+            rc = copy_span_to_buf((*x).name.as_ptr(), (*x).name_len as usize, name_buf, name_len_io);
+            if rc == 1 {
+                if !kind_out.is_null() {
+                    *kind_out = (*x).kind;
+                }
+                if !sig_len_io.is_null() {
+                    if (*x).sig_len > 0 {
+                        rc = copy_span_to_buf(
+                            (*x).sig.as_ptr(),
+                            (*x).sig_len as usize,
+                            sig_buf,
+                            sig_len_io,
+                        );
+                    } else {
+                        *sig_len_io = 0;
+                    }
+                }
+            }
         }
+        if rc == 0 {
+            if !name_len_io.is_null() {
+                *name_len_io = 0;
+            }
+            if !sig_len_io.is_null() {
+                *sig_len_io = 0;
+            }
+        }
+        pm_util_lock_release(lock());
+        rc
     }
-    1
 }
 
 #[unsafe(no_mangle)]
@@ -896,13 +940,21 @@ pub unsafe extern "C" fn pm_wasmmod_registry_resolve_native(
     export_name_ptr: *const u8,
     export_name_len: u32,
 ) -> *mut c_void {
-    let (Some(fqn), Some(export_name)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(export_name_ptr, export_name_len),
-    ) else {
+    if fqn_ptr.is_null() || fqn_len == 0 || export_name_ptr.is_null() || export_name_len == 0 {
         return core::ptr::null_mut();
-    };
-    TABLE.lock().resolve_native(fqn, export_name)
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let p = resolve_native(
+            table(),
+            fqn_ptr,
+            fqn_len as usize,
+            export_name_ptr,
+            export_name_len as usize,
+        );
+        pm_util_lock_release(lock());
+        p
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -913,18 +965,30 @@ pub unsafe extern "C" fn pm_wasmmod_registry_connect_import(
     export_name_len: u32,
     out_slot: *mut *mut c_void,
 ) -> i32 {
-    let (Some(fqn), Some(export_name)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(export_name_ptr, export_name_len),
-    ) else {
-        return 0;
-    };
-    let ptr = TABLE.lock().resolve_native(fqn, export_name);
-    if ptr.is_null() {
+    if fqn_ptr.is_null()
+        || fqn_len == 0
+        || export_name_ptr.is_null()
+        || export_name_len == 0
+        || out_slot.is_null()
+    {
         return 0;
     }
-    unsafe { *out_slot = ptr };
-    1
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let p = resolve_native(
+            table(),
+            fqn_ptr,
+            fqn_len as usize,
+            export_name_ptr,
+            export_name_len as usize,
+        );
+        pm_util_lock_release(lock());
+        if p.is_null() {
+            return 0;
+        }
+        *out_slot = p;
+        1
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -938,22 +1002,33 @@ pub unsafe extern "C" fn pm_wasmmod_registry_call(
     results: *mut pm_wasmmod_registry_value_t,
     nresults: u32,
 ) -> i32 {
-    let (Some(fqn), Some(export_name)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(export_name_ptr, export_name_len),
-    ) else {
-        return -1;
-    };
-    let ptr = TABLE.lock().resolve_native(fqn, export_name);
-    if ptr.is_null() {
+    if fqn_ptr.is_null() || fqn_len == 0 || export_name_ptr.is_null() || export_name_len == 0 {
         return -1;
     }
-    // SAFETY: every ptr stored under PM_WASMMOD_REGISTRY_EXPORT_FN is
-    // contracted (by whoever called export_set — the loader, for wasm
-    // exports) to be a pm_wasmmod_registry_fn_t. The registry itself
-    // never calls through a ptr of any other export kind.
-    let f: pm_wasmmod_registry_fn_t = unsafe { core::mem::transmute(ptr) };
-    unsafe { f(args, nargs, results, nresults) }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let p = resolve_native(
+            table(),
+            fqn_ptr,
+            fqn_len as usize,
+            export_name_ptr,
+            export_name_len as usize,
+        );
+        pm_util_lock_release(lock());
+        if p.is_null() {
+            return -1;
+        }
+        // SAFETY: every ptr stored under PM_WASMMOD_REGISTRY_EXPORT_FN is
+        // contracted (by whoever called export_set — the loader, for wasm
+        // exports) to be a pm_wasmmod_registry_fn_t. The registry itself
+        // never calls through a ptr of any other export kind. The
+        // reinterpret goes through the fn_slot_t union (the value-level
+        // twin of the C face's helper — a pointer-to-fn-pointer cast is a
+        // load in disguise, and rsx has no transmute).
+        let mut slot = fn_slot_t { raw: p };
+        let f = unsafe { slot.fnptr };
+        unsafe { f(args, nargs, results, nresults) }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -961,7 +1036,26 @@ pub extern "C" fn pm_wasmmod_registry_gc_visit(
     visit: extern "C" fn(*mut c_void, *mut c_void),
     ctx: *mut c_void,
 ) {
-    TABLE.lock().gc_visit(visit, ctx);
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let mut i = 0usize;
+        while i < (*t).n_entries as usize {
+            let e = (*t).entries.as_ptr().add(i);
+            if (*e).live {
+                let mut j = 0usize;
+                while j < (*e).n_exports as usize {
+                    let x = (*e).exports.as_ptr().add(j);
+                    if (*x).kind == pm_wasmmod_registry_export_kind_t::Obj {
+                        visit((*x).ptr, ctx);
+                    }
+                    j += 1;
+                }
+            }
+            i += 1;
+        }
+        pm_util_lock_release(lock());
+    }
 }
 
 /// Register a module test (`__tests__.*` / `PM_MOD_TEST_*`). Returns 1 on ok.
@@ -973,14 +1067,23 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_register(
     name_len: u32,
     f: Option<pm_wasmmod_registry_test_fn_t>,
 ) -> i32 {
-    let (Some(fqn), Some(name), Some(f)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(name_ptr, name_len),
-        f,
-    ) else {
+    if fqn_ptr.is_null() || fqn_len == 0 || name_ptr.is_null() || name_len == 0 || f.is_none() {
         return 0;
-    };
-    TABLE.lock().test_register(fqn, name, f) as i32
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let h = ensure(
+            t,
+            fqn_ptr,
+            fqn_len as usize,
+            pm_wasmmod_registry_container_kind_t::Resident,
+        );
+        let e = entry_by_fqn(t, fqn_ptr, fqn_len as usize);
+        let ok = test_upsert(e, name_ptr, name_len as usize, f, BODY_NATIVE, core::ptr::null(), 0);
+        pm_util_lock_release(lock());
+        ok as i32
+    }
 }
 
 /// Register a guest pack test (case name → wasm export). No host trampoline.
@@ -993,14 +1096,137 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_register_wasm(
     export_ptr: *const u8,
     export_len: u32,
 ) -> i32 {
-    let (Some(fqn), Some(name), Some(export)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(name_ptr, name_len),
-        str_from_raw(export_ptr, export_len),
-    ) else {
+    if fqn_ptr.is_null()
+        || fqn_len == 0
+        || name_ptr.is_null()
+        || name_len == 0
+        || export_ptr.is_null()
+        || export_len == 0
+    {
         return 0;
-    };
-    TABLE.lock().test_register_wasm(fqn, name, export) as i32
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let e = entry_by_fqn(t, fqn_ptr, fqn_len as usize);
+        let ok = test_upsert(
+            e,
+            name_ptr,
+            name_len as usize,
+            None,
+            BODY_WASM,
+            export_ptr,
+            export_len as usize,
+        );
+        pm_util_lock_release(lock());
+        ok as i32
+    }
+}
+
+/// Insert-or-replace one test row; `e == null` refuses.
+unsafe fn test_upsert(
+    e: *mut ModEntry,
+    name: *const u8,
+    name_len: usize,
+    native: Option<pm_wasmmod_registry_test_fn_t>,
+    body_kind: u8,
+    export: *const u8,
+    export_len: usize,
+) -> bool {
+    if e.is_null() || name_len > NAME_CAP || export_len > NAME_CAP {
+        return false;
+    }
+    unsafe {
+        let mut i = 0usize;
+        while i < (*e).n_tests as usize {
+            let tr = (*e).tests.as_mut_ptr().add(i);
+            if (*tr).name_len as usize == name_len {
+                let eq = span_eq((*tr).name.as_ptr(), name_len, name, name_len);
+                if eq {
+                    (*tr).body_kind = body_kind;
+                    (*tr).native = native;
+                    (*tr).export_len = 0;
+                    if export_len > 0 {
+                        let _ = span_put((*tr).export.as_mut_ptr(), NAME_CAP, export, export_len);
+                        (*tr).export_len = export_len as u32;
+                    }
+                    return true;
+                }
+            }
+            i += 1;
+        }
+        if (*e).n_tests as usize >= TST_MAX {
+            return false;
+        }
+        let tr = (*e).tests.as_mut_ptr().add((*e).n_tests as usize);
+        let stored = span_put((*tr).name.as_mut_ptr(), NAME_CAP, name, name_len);
+        if stored == usize::MAX {
+            return false;
+        }
+        (*tr).name_len = stored as u32;
+        (*tr).body_kind = body_kind;
+        (*tr).native = native;
+        (*tr).export_len = 0;
+        if export_len > 0 {
+            let _ = span_put((*tr).export.as_mut_ptr(), NAME_CAP, export, export_len);
+            (*tr).export_len = export_len as u32;
+        }
+        (*e).n_tests += 1;
+        true
+    }
+}
+
+/// Same as `test_upsert` for bench rows.
+unsafe fn bench_upsert(
+    e: *mut ModEntry,
+    name: *const u8,
+    name_len: usize,
+    native: Option<pm_wasmmod_registry_bench_fn_t>,
+    body_kind: u8,
+    export: *const u8,
+    export_len: usize,
+) -> bool {
+    if e.is_null() || name_len > NAME_CAP || export_len > NAME_CAP {
+        return false;
+    }
+    unsafe {
+        let mut i = 0usize;
+        while i < (*e).n_benches as usize {
+            let br = (*e).benches.as_mut_ptr().add(i);
+            if (*br).name_len as usize == name_len {
+                let eq = span_eq((*br).name.as_ptr(), name_len, name, name_len);
+                if eq {
+                    (*br).body_kind = body_kind;
+                    (*br).native = native;
+                    (*br).export_len = 0;
+                    if export_len > 0 {
+                        let _ = span_put((*br).export.as_mut_ptr(), NAME_CAP, export, export_len);
+                        (*br).export_len = export_len as u32;
+                    }
+                    return true;
+                }
+            }
+            i += 1;
+        }
+        if (*e).n_benches as usize >= BNC_MAX {
+            return false;
+        }
+        let br = (*e).benches.as_mut_ptr().add((*e).n_benches as usize);
+        let stored = span_put((*br).name.as_mut_ptr(), NAME_CAP, name, name_len);
+        if stored == usize::MAX {
+            return false;
+        }
+        (*br).name_len = stored as u32;
+        (*br).body_kind = body_kind;
+        (*br).native = native;
+        (*br).export_len = 0;
+        if export_len > 0 {
+            let _ = span_put((*br).export.as_mut_ptr(), NAME_CAP, export, export_len);
+            (*br).export_len = export_len as u32;
+        }
+        (*e).n_benches += 1;
+        true
+    }
 }
 
 /// Loader installs this so guest pack tests run without a trampoline pool.
@@ -1008,7 +1234,11 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_register_wasm(
 pub unsafe extern "C" fn pm_wasmmod_registry_set_wasm_test_runner(
     f: Option<pm_wasmmod_registry_wasm_test_runner_t>,
 ) {
-    *WASM_TEST_RUNNER.lock() = f;
+    unsafe {
+        pm_util_lock_acquire(lock());
+        *(WASM_TEST_RUNNER.0.get()) = f;
+        pm_util_lock_release(lock());
+    }
 }
 
 /// Loader installs this so guest pack benches run without a host trampoline
@@ -1017,15 +1247,25 @@ pub unsafe extern "C" fn pm_wasmmod_registry_set_wasm_test_runner(
 pub unsafe extern "C" fn pm_wasmmod_registry_set_wasm_bench_runner(
     f: Option<pm_wasmmod_registry_wasm_bench_runner_t>,
 ) {
-    *WASM_BENCH_RUNNER.lock() = f;
+    unsafe {
+        pm_util_lock_acquire(lock());
+        *(WASM_BENCH_RUNNER.0.get()) = f;
+        pm_util_lock_release(lock());
+    }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pm_wasmmod_registry_test_count(fqn_ptr: *const u8, fqn_len: u32) -> u32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
-    };
-    TABLE.lock().test_count(fqn)
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let n = if e.is_null() { 0 } else { (*e).n_tests };
+        pm_util_lock_release(lock());
+        n
+    }
 }
 
 /// Copy test case name at `index` into `buf`. Returns 1 if present.
@@ -1037,35 +1277,66 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_at(
     buf: *mut u8,
     buf_len_io: *mut u32,
 ) -> i32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
-    };
-    let table = TABLE.lock();
-    let Some(name) = table.test_name_at(fqn, index) else {
-        if !buf_len_io.is_null() {
-            unsafe { *buf_len_io = 0 };
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let mut rc = 0;
+        if !e.is_null() && index < (*e).n_tests {
+            let tr = (*e).tests.as_ptr().add(index as usize);
+            rc = copy_span_to_buf((*tr).name.as_ptr(), (*tr).name_len as usize, buf, buf_len_io);
         }
-        return 0;
-    };
-    copy_str_to_buf(name, buf, buf_len_io)
+        if rc == 0 && !buf_len_io.is_null() {
+            *buf_len_io = 0;
+        }
+        pm_util_lock_release(lock());
+        rc
+    }
 }
 
-fn run_test_body(fqn: &str, body: &TestBody) -> i32 {
-    match body {
-        TestBody::Native(f) => unsafe { f() },
-        TestBody::WasmExport(export) => {
-            let Some(runner) = *WASM_TEST_RUNNER.lock() else {
-                return -1;
-            };
-            unsafe {
-                runner(
-                    fqn.as_ptr(),
-                    fqn.len() as u32,
-                    export.as_ptr(),
-                    export.len() as u32,
-                )
-            }
+/// One captured test body: enough plain data to run it after the table
+/// lock is released (the body may itself call back into the registry).
+struct TestBody {
+    body_kind: u8,
+    native: Option<pm_wasmmod_registry_test_fn_t>,
+    fqn: [u8; FQN_CAP],
+    fqn_len: u32,
+    export: [u8; NAME_CAP],
+    export_len: u32,
+}
+
+/// One captured bench body, same shape as TestBody with the bench fn type.
+struct BenchBody {
+    body_kind: u8,
+    native: Option<pm_wasmmod_registry_bench_fn_t>,
+    fqn: [u8; FQN_CAP],
+    fqn_len: u32,
+    export: [u8; NAME_CAP],
+    export_len: u32,
+}
+
+unsafe fn run_test_body(b: *const TestBody) -> i32 {
+    if (*b).body_kind == BODY_NATIVE {
+        if let Some(f) = (*b).native {
+            return unsafe { f() };
         }
+        return -1;
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let runner = *(WASM_TEST_RUNNER.0.get());
+        pm_util_lock_release(lock());
+        if let Some(runner) = runner {
+            return runner(
+                (*b).fqn.as_ptr(),
+                (*b).fqn_len,
+                (*b).export.as_ptr(),
+                (*b).export_len,
+            );
+        }
+        return -1;
     }
 }
 
@@ -1077,48 +1348,101 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_run(
     name_ptr: *const u8,
     name_len: u32,
 ) -> i32 {
-    let (Some(fqn), Some(name)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(name_ptr, name_len),
-    ) else {
+    if fqn_ptr.is_null() || fqn_len == 0 || name_ptr.is_null() || name_len == 0 {
         return -1;
+    }
+    let mut body = TestBody {
+        body_kind: BODY_NATIVE,
+        native: None,
+        fqn: [0; FQN_CAP],
+        fqn_len: 0,
+        export: [0; NAME_CAP],
+        export_len: 0,
     };
-    let body = {
-        let table = TABLE.lock();
-        match table.test_body_named(fqn, name) {
-            Some(TestBody::Native(f)) => TestBody::Native(*f),
-            Some(TestBody::WasmExport(e)) => TestBody::WasmExport(e.clone()),
-            None => return -1,
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let mut found = false;
+        if !e.is_null() {
+            let mut i = 0usize;
+            while i < (*e).n_tests as usize {
+                let tr = (*e).tests.as_ptr().add(i);
+                if (*tr).name_len as usize == name_len as usize {
+                    let eq = span_eq((*tr).name.as_ptr(), name_len as usize, name_ptr, name_len as usize);
+                    if eq {
+                        body.body_kind = (*tr).body_kind;
+                        body.native = (*tr).native;
+                        body.export_len = (*tr).export_len;
+                        if (*tr).export_len > 0 {
+                            core::ptr::copy_nonoverlapping(
+                                (*tr).export.as_ptr(),
+                                body.export.as_mut_ptr(),
+                                (*tr).export_len as usize,
+                            );
+                        }
+                        found = true;
+                        break;
+                    }
+                }
+                i += 1;
+            }
         }
-    };
-    run_test_body(fqn, &body)
+        if found {
+            body.fqn_len = fqn_len;
+            if fqn_len as usize <= FQN_CAP {
+                core::ptr::copy_nonoverlapping(fqn_ptr, body.fqn.as_mut_ptr(), fqn_len as usize);
+            }
+        }
+        pm_util_lock_release(lock());
+        if !found {
+            return -1;
+        }
+        run_test_body(&body)
+    }
 }
 
 /// Run every test for `fqn`. Returns number of failures (missing module → 0).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pm_wasmmod_registry_test_run_all(fqn_ptr: *const u8, fqn_len: u32) -> i32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
-    };
-    let bodies: Vec<TestBody> = {
-        let table = TABLE.lock();
-        let Some(entry) = table.find_by_fqn(fqn) else {
-            return 0;
-        };
-        entry
-            .tests
-            .iter()
-            .map(|t| match &t.body {
-                TestBody::Native(f) => TestBody::Native(*f),
-                TestBody::WasmExport(e) => TestBody::WasmExport(e.clone()),
-            })
-            .collect()
-    };
+    }
     let mut fails = 0i32;
-    for body in &bodies {
-        if run_test_body(fqn, body) != 0 {
-            fails += 1;
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let n = if e.is_null() { 0 } else { (*e).n_tests };
+        let mut i = 0usize;
+        while i < n as usize {
+            let tr = (*e).tests.as_ptr().add(i);
+            let mut body = TestBody {
+                body_kind: (*tr).body_kind,
+                native: (*tr).native,
+                fqn: [0; FQN_CAP],
+                fqn_len: 0,
+                export: [0; NAME_CAP],
+                export_len: (*tr).export_len,
+            };
+            if (*tr).export_len > 0 {
+                core::ptr::copy_nonoverlapping(
+                    (*tr).export.as_ptr(),
+                    body.export.as_mut_ptr(),
+                    (*tr).export_len as usize,
+                );
+            }
+            if fqn_len as usize <= FQN_CAP {
+                body.fqn_len = fqn_len;
+                core::ptr::copy_nonoverlapping(fqn_ptr, body.fqn.as_mut_ptr(), fqn_len as usize);
+            }
+            pm_util_lock_release(lock());
+            let rc = run_test_body(&body);
+            pm_util_lock_acquire(lock());
+            if rc != 0 {
+                fails += 1;
+            }
+            i += 1;
         }
+        pm_util_lock_release(lock());
     }
     fails
 }
@@ -1130,7 +1454,11 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_run_all(fqn_ptr: *const u8, fq
 pub unsafe extern "C" fn pm_wasmmod_registry_set_bench_clock(
     f: Option<pm_wasmmod_registry_bench_clock_t>,
 ) {
-    *BENCH_CLOCK.lock() = f;
+    unsafe {
+        pm_util_lock_acquire(lock());
+        *(BENCH_CLOCK.0.get()) = f;
+        pm_util_lock_release(lock());
+    }
 }
 
 /// Register a module benchmark (`__bench__.*` / `PM_MOD_BENCH_*`). Returns 1
@@ -1143,14 +1471,24 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_register(
     name_len: u32,
     f: Option<pm_wasmmod_registry_bench_fn_t>,
 ) -> i32 {
-    let (Some(fqn), Some(name), Some(f)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(name_ptr, name_len),
-        f,
-    ) else {
+    if fqn_ptr.is_null() || fqn_len == 0 || name_ptr.is_null() || name_len == 0 || f.is_none() {
         return 0;
-    };
-    TABLE.lock().bench_register(fqn, name, f) as i32
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let h = ensure(
+            t,
+            fqn_ptr,
+            fqn_len as usize,
+            pm_wasmmod_registry_container_kind_t::Resident,
+        );
+        let _ = h;
+        let e = entry_by_fqn(t, fqn_ptr, fqn_len as usize);
+        let ok = bench_upsert(e, name_ptr, name_len as usize, f, BODY_NATIVE, core::ptr::null(), 0);
+        pm_util_lock_release(lock());
+        ok as i32
+    }
 }
 
 /// Register a guest pack benchmark (name → wasm export). No host trampoline.
@@ -1163,22 +1501,45 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_register_wasm(
     export_ptr: *const u8,
     export_len: u32,
 ) -> i32 {
-    let (Some(fqn), Some(name), Some(export)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(name_ptr, name_len),
-        str_from_raw(export_ptr, export_len),
-    ) else {
+    if fqn_ptr.is_null()
+        || fqn_len == 0
+        || name_ptr.is_null()
+        || name_len == 0
+        || export_ptr.is_null()
+        || export_len == 0
+    {
         return 0;
-    };
-    TABLE.lock().bench_register_wasm(fqn, name, export) as i32
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let e = entry_by_fqn(t, fqn_ptr, fqn_len as usize);
+        let ok = bench_upsert(
+            e,
+            name_ptr,
+            name_len as usize,
+            None,
+            BODY_WASM,
+            export_ptr,
+            export_len as usize,
+        );
+        pm_util_lock_release(lock());
+        ok as i32
+    }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pm_wasmmod_registry_bench_count(fqn_ptr: *const u8, fqn_len: u32) -> u32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
-    };
-    TABLE.lock().bench_count(fqn)
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let n = if e.is_null() { 0 } else { (*e).n_benches };
+        pm_util_lock_release(lock());
+        n
+    }
 }
 
 /// Copy bench name at `index` into `buf`. Returns 1 if present.
@@ -1190,46 +1551,63 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_at(
     buf: *mut u8,
     buf_len_io: *mut u32,
 ) -> i32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
-    };
-    let table = TABLE.lock();
-    let Some(name) = table.bench_name_at(fqn, index) else {
-        if !buf_len_io.is_null() {
-            unsafe { *buf_len_io = 0 };
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let mut rc = 0;
+        if !e.is_null() && index < (*e).n_benches {
+            let br = (*e).benches.as_ptr().add(index as usize);
+            rc = copy_span_to_buf((*br).name.as_ptr(), (*br).name_len as usize, buf, buf_len_io);
         }
-        return 0;
-    };
-    copy_str_to_buf(name, buf, buf_len_io)
-}
-
-fn run_bench_body(fqn: &str, body: &BenchBody, iterations: u64) -> i32 {
-    match body {
-        BenchBody::Native(f) => unsafe { f(iterations) },
-        BenchBody::WasmExport(export) => {
-            let Some(runner) = *WASM_BENCH_RUNNER.lock() else {
-                // No loader to call the wasm export: a real missing-fill, not a
-                // silent pass. Same triage as a clockless seat reporting
-                // "no clock" — the guest bench can't be timed without a path to
-                // its export, so it surfaces as FAILED rather than a fake number.
-                return -1;
-            };
-            unsafe {
-                runner(
-                    fqn.as_ptr(),
-                    fqn.len() as u32,
-                    export.as_ptr(),
-                    export.len() as u32,
-                    iterations,
-                )
-            }
+        if rc == 0 && !buf_len_io.is_null() {
+            *buf_len_io = 0;
         }
+        pm_util_lock_release(lock());
+        rc
     }
 }
 
-fn bench_now() -> Option<u64> {
-    let clock = (*BENCH_CLOCK.lock())?;
-    Some(unsafe { clock() })
+unsafe fn run_bench_body(b: *const BenchBody, iterations: u64) -> i32 {
+    if (*b).body_kind == BODY_NATIVE {
+        if let Some(f) = (*b).native {
+            return unsafe { f(iterations) };
+        }
+        return -1;
+    }
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let runner = *(WASM_BENCH_RUNNER.0.get());
+        pm_util_lock_release(lock());
+        if let Some(runner) = runner {
+            // No loader to call the wasm export: a real missing-fill, not a
+            // silent pass. Same triage as a clockless seat reporting
+            // "no clock" — the guest bench can't be timed without a path to
+            // its export, so it surfaces as FAILED rather than a fake number.
+            return runner(
+                (*b).fqn.as_ptr(),
+                (*b).fqn_len,
+                (*b).export.as_ptr(),
+                (*b).export_len,
+                iterations,
+            );
+        }
+        return -1;
+    }
+}
+
+unsafe fn bench_now() -> u64 {
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let clock = *(BENCH_CLOCK.0.get());
+        pm_util_lock_release(lock());
+        if let Some(clock) = clock {
+            return clock();
+        }
+        return 0;
+    }
 }
 
 /// Result of timing one bench. Negative means it did not run:
@@ -1242,34 +1620,35 @@ const BENCH_RC_FAILED: i64 = -3;
 /// negative `BENCH_RC_*`. The bench contract is "do `iterations` ops inside
 /// this one call" (the Go `b.N` model), so a warmup call settles the runner
 /// before the measured lap, and the lap's elapsed time divides by iterations.
-fn time_bench_ns(fqn: &str, body: &BenchBody, iterations: u64) -> i64 {
+unsafe fn time_bench_ns(b: *const BenchBody, iterations: u64) -> i64 {
     if iterations == 0 {
         return BENCH_RC_FAILED;
     }
-    if bench_now().is_none() {
+    if unsafe { bench_now() } == 0 {
         return BENCH_RC_NO_CLOCK;
     }
     // Warmup: a small batch lets the runner park/schedule/init before timing,
     // so the measured lap starts warm. Failing warmup is not the bench's fault
     // unless it is genuinely broken; still surface the failure via FAILED.
-    if run_bench_body(fqn, body, BENCH_MEASURE_WARMUP) != 0 {
+    if unsafe { run_bench_body(b, BENCH_MEASURE_WARMUP) } != 0 {
         return BENCH_RC_FAILED;
     }
-    let t0 = match bench_now() {
-        Some(t) => t,
-        None => return BENCH_RC_NO_CLOCK,
-    };
-    if run_bench_body(fqn, body, iterations) != 0 {
+    let t0 = unsafe { bench_now() };
+    if t0 == 0 {
+        return BENCH_RC_NO_CLOCK;
+    }
+    if unsafe { run_bench_body(b, iterations) } != 0 {
         return BENCH_RC_FAILED;
     }
-    let t1 = match bench_now() {
-        Some(t) => t,
-        None => return BENCH_RC_NO_CLOCK,
-    };
-    let us = t1.saturating_sub(t0);
-    // ns/op from a uS clock: multiply, then divide by iterations. Use u128 so
-    // large iteration counts do not overflow before the division.
-    (us as u128 * 1000 / iterations as u128) as i64
+    let t1 = unsafe { bench_now() };
+    if t1 == 0 {
+        return BENCH_RC_NO_CLOCK;
+    }
+    let us = t1.wrapping_sub(t0);
+    // ns/op from a uS clock, u128-free (the subset has no u128): split
+    // the multiply to stay inside u64 — us is far below 2^54 in any real
+    // bench lap, so us * 1000 cannot overflow before the divide.
+    ((us as i64) * 1000) / (iterations as i64)
 }
 
 /// Run one named bench over `iterations` ops. Returns **ns/op** (≥0) or a
@@ -1282,21 +1661,111 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_run(
     name_len: u32,
     iterations: u64,
 ) -> i64 {
-    let (Some(fqn), Some(name)) = (
-        str_from_raw(fqn_ptr, fqn_len),
-        str_from_raw(name_ptr, name_len),
-    ) else {
+    if fqn_ptr.is_null() || fqn_len == 0 || name_ptr.is_null() || name_len == 0 {
         return BENCH_RC_MISSING;
+    }
+    let mut body = BenchBody {
+        body_kind: BODY_NATIVE,
+        native: None,
+        fqn: [0; FQN_CAP],
+        fqn_len: 0,
+        export: [0; NAME_CAP],
+        export_len: 0,
     };
-    let body = {
-        let table = TABLE.lock();
-        match table.bench_body_named(fqn, name) {
-            Some(BenchBody::Native(f)) => BenchBody::Native(*f),
-            Some(BenchBody::WasmExport(e)) => BenchBody::WasmExport(e.clone()),
-            None => return BENCH_RC_MISSING,
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
+        let mut found = false;
+        if !e.is_null() {
+            let mut i = 0usize;
+            while i < (*e).n_benches as usize {
+                let br = (*e).benches.as_ptr().add(i);
+                if (*br).name_len as usize == name_len as usize {
+                    let eq = span_eq((*br).name.as_ptr(), name_len as usize, name_ptr, name_len as usize);
+                    if eq {
+                        body.body_kind = (*br).body_kind;
+                        body.native = (*br).native;
+                        body.export_len = (*br).export_len;
+                        if (*br).export_len > 0 {
+                            core::ptr::copy_nonoverlapping(
+                                (*br).export.as_ptr(),
+                                body.export.as_mut_ptr(),
+                                (*br).export_len as usize,
+                            );
+                        }
+                        found = true;
+                        break;
+                    }
+                }
+                i += 1;
+            }
         }
-    };
-    time_bench_ns(fqn, &body, iterations)
+        if found {
+            body.fqn_len = fqn_len;
+            if fqn_len as usize <= FQN_CAP {
+                core::ptr::copy_nonoverlapping(fqn_ptr, body.fqn.as_mut_ptr(), fqn_len as usize);
+            }
+        }
+        pm_util_lock_release(lock());
+        if !found {
+            return BENCH_RC_MISSING;
+        }
+        time_bench_ns(&body, iterations)
+    }
+}
+
+/* bench_run_all report lines, hand-formatted (no alloc::format! in the
+ * subset): append helpers over the table's fixed out buffer. */
+unsafe fn out_reset(t: *mut Table) {
+    (*t).out_len = 0;
+}
+
+unsafe fn out_put(t: *mut Table, s: *const u8, n: usize) {
+    let at = (*t).out_len as usize;
+    if at + n > OUT_CAP {
+        return;
+    }
+    let mut i = 0usize;
+    while i < n {
+        unsafe {
+            *(*t).out.as_mut_ptr().add(at + i) = *s.add(i);
+        }
+        i += 1;
+    }
+    (*t).out_len += n as u32;
+}
+
+unsafe fn out_puts(t: *mut Table, s: *const u8) {
+    unsafe {
+        let mut n = 0usize;
+        while *s.add(n) != 0 {
+            n += 1;
+        }
+        out_put(t, s, n);
+    }
+}
+
+unsafe fn out_put_u64(t: *mut Table, v: u64) {
+    unsafe {
+        let mut digs: [u8; 20] = [0; 20];
+        let mut nd = 0usize;
+        let mut x = v;
+        if x == 0 {
+            digs[0] = b'0';
+            nd = 1;
+        } else {
+            while x > 0 && nd < 20 {
+                digs[nd] = b'0' + (x % 10) as u8;
+                x /= 10;
+                nd += 1;
+            }
+        }
+        let mut q = nd;
+        while q > 0 {
+            q -= 1;
+            out_put(t, &digs[q], 1);
+        }
+    }
 }
 
 /// Run every bench for `fqn` over `iterations` ops, formatting a report line
@@ -1313,47 +1782,79 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_run_all(
     buf: *mut u8,
     buf_len_io: *mut u32,
 ) -> i32 {
-    let Some(fqn) = str_from_raw(fqn_ptr, fqn_len) else {
-        return 0;
-    };
-    let bodies: Vec<(String, BenchBody)> = {
-        let table = TABLE.lock();
-        let Some(entry) = table.find_by_fqn(fqn) else {
-            return 0;
-        };
-        entry
-            .benches
-            .iter()
-            .map(|b| match &b.body {
-                BenchBody::Native(f) => (b.name.clone(), BenchBody::Native(*f)),
-                BenchBody::WasmExport(e) => (b.name.clone(), BenchBody::WasmExport(e.clone())),
-            })
-            .collect()
-    };
-    if bodies.is_empty() {
+    if fqn_ptr.is_null() || fqn_len == 0 {
         return 0;
     }
     let mut bad = 0i32;
-    let mut out = String::from(fqn);
-    out.push('\n');
-    for (name, body) in &bodies {
-        let ns = time_bench_ns(fqn, body, iterations);
-        if ns < 0 {
-            bad += 1;
-            out.push_str("* ");
-            out.push_str(name);
-            match ns {
-                BENCH_RC_NO_CLOCK => out.push_str(": no clock\n"),
-                BENCH_RC_MISSING => out.push_str(": missing\n"),
-                _ => out.push_str(": failed\n"),
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let t = table();
+        let e = entry_by_fqn(t, fqn_ptr, fqn_len as usize);
+        if e.is_null() || (*e).n_benches == 0 {
+            pm_util_lock_release(lock());
+            if !buf_len_io.is_null() {
+                *buf_len_io = 0;
             }
-        } else {
-            out.push_str(&alloc::format!(
-                "* {name}: {ns} ns/op over {iterations} iters\n"
-            ));
+            return 0;
         }
+        out_reset(t);
+        out_put(t, fqn_ptr, fqn_len as usize);
+        out_puts(t, b"\n\0".as_ptr());
+        /* Bench bodies are captured one at a time: each is run with the
+         * table lock released (it may call back in), and the report line
+         * is appended on re-acquire. */
+        let n = (*e).n_benches;
+        let mut i = 0usize;
+        while i < n as usize {
+            let br = (*e).benches.as_ptr().add(i);
+            let mut body = BenchBody {
+                body_kind: (*br).body_kind,
+                native: (*br).native,
+                fqn: [0; FQN_CAP],
+                fqn_len: 0,
+                export: [0; NAME_CAP],
+                export_len: (*br).export_len,
+            };
+            if (*br).export_len > 0 {
+                core::ptr::copy_nonoverlapping(
+                    (*br).export.as_ptr(),
+                    body.export.as_mut_ptr(),
+                    (*br).export_len as usize,
+                );
+            }
+            if fqn_len as usize <= FQN_CAP {
+                body.fqn_len = fqn_len;
+                core::ptr::copy_nonoverlapping(fqn_ptr, body.fqn.as_mut_ptr(), fqn_len as usize);
+            }
+            pm_util_lock_release(lock());
+            let ns = time_bench_ns(&body, iterations);
+            pm_util_lock_acquire(lock());
+            out_puts(t, b"* \0".as_ptr());
+            let br2 = (*e).benches.as_ptr().add(i);
+            out_put(t, (*br2).name.as_ptr(), (*br2).name_len as usize);
+            if ns < 0 {
+                bad += 1;
+                if ns == BENCH_RC_NO_CLOCK {
+                    out_puts(t, b": no clock\n\0".as_ptr());
+                } else if ns == BENCH_RC_MISSING {
+                    out_puts(t, b": missing\n\0".as_ptr());
+                } else {
+                    out_puts(t, b": failed\n\0".as_ptr());
+                }
+            } else {
+                out_puts(t, b": \0".as_ptr());
+                out_put_u64(t, ns as u64);
+                out_puts(t, b" ns/op over \0".as_ptr());
+                out_put_u64(t, iterations);
+                out_puts(t, b" iters\n\0".as_ptr());
+            }
+            i += 1;
+        }
+        /* copy out under the lock (the buffer is table-owned) */
+        let rc = copy_span_to_buf((*t).out.as_ptr(), (*t).out_len as usize, buf, buf_len_io);
+        pm_util_lock_release(lock());
+        let _ = rc;
     }
-    copy_str_to_buf(&out, buf, buf_len_io);
     bad
 }
 
