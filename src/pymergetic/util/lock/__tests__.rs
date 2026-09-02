@@ -1,43 +1,89 @@
 //! pymergetic.util.lock — module tests (`__tests__.rs`).
+//!
+//! Raw-primitive tests in the rsx subset (ptr discipline, no closures, no
+//! generics — the ergonomic wrapper's tests are cargo-side, like the
+//! wrapper itself). Cases register via `PM_MOD_TEST_RS!` into the registry
+//! test table.
 
 use super::*;
-use crate::util::mod_test::case;
 
-unsafe extern "C" fn case_locks_out_a_second_try_lock() -> i32 {
-    case(|| {
-        let m = Mutex::new(0i32);
-        let guard = m.lock();
-        assert!(m.try_lock().is_none());
-        drop(guard);
-        assert!(m.try_lock().is_some());
-    })
+unsafe extern "C" fn case_try_acquire_toggles() -> i32 {
+    unsafe {
+        let mut lock: pm_util_lock_t = pm_util_lock_t::new();
+        if pm_util_lock_try_acquire(&mut lock) != 1 {
+            return 1;
+        }
+        /* held: a second try must fail */
+        if pm_util_lock_try_acquire(&mut lock) != 0 {
+            return 1;
+        }
+        pm_util_lock_release(&mut lock);
+        if pm_util_lock_try_acquire(&mut lock) != 1 {
+            return 1;
+        }
+        pm_util_lock_release(&mut lock);
+    }
+    0
 }
 
-unsafe extern "C" fn case_guard_mutates_through_deref() -> i32 {
-    case(|| {
-        let m = Mutex::new(alloc::vec![1, 2, 3]);
-        m.lock().push(4);
-        assert_eq!(*m.lock(), alloc::vec![1, 2, 3, 4]);
-    })
+unsafe extern "C" fn case_acquire_release_roundtrip() -> i32 {
+    unsafe {
+        let mut lock: pm_util_lock_t = pm_util_lock_t::new();
+        pm_util_lock_acquire(&mut lock);
+        /* held: try_acquire must report contention */
+        if pm_util_lock_try_acquire(&mut lock) != 0 {
+            return 1;
+        }
+        pm_util_lock_release(&mut lock);
+        if pm_util_lock_try_acquire(&mut lock) != 1 {
+            return 1;
+        }
+        pm_util_lock_release(&mut lock);
+    }
+    0
+}
+
+unsafe extern "C" fn case_init_resets_a_held_lock() -> i32 {
+    unsafe {
+        let mut lock: pm_util_lock_t = pm_util_lock_t::new();
+        pm_util_lock_acquire(&mut lock);
+        /* re-init is the constructor discipline: state back to unlocked */
+        pm_util_lock_init(&mut lock);
+        if pm_util_lock_try_acquire(&mut lock) != 1 {
+            return 1;
+        }
+        pm_util_lock_release(&mut lock);
+    }
+    0
 }
 
 crate::PM_MOD_TEST_RS!(
     "pymergetic.util.lock",
-    "locks_out_a_second_try_lock",
-    case_locks_out_a_second_try_lock
+    "try_acquire_toggles",
+    case_try_acquire_toggles
 );
 crate::PM_MOD_TEST_RS!(
     "pymergetic.util.lock",
-    "guard_mutates_through_deref",
-    case_guard_mutates_through_deref
+    "acquire_release_roundtrip",
+    case_acquire_release_roundtrip
+);
+crate::PM_MOD_TEST_RS!(
+    "pymergetic.util.lock",
+    "init_resets_a_held_lock",
+    case_init_resets_a_held_lock
 );
 
 #[test]
-fn locks_out_a_second_try_lock() {
-    assert_eq!(unsafe { case_locks_out_a_second_try_lock() }, 0);
+fn try_acquire_toggles() {
+    assert_eq!(unsafe { case_try_acquire_toggles() }, 0);
 }
 
 #[test]
-fn guard_mutates_through_deref() {
-    assert_eq!(unsafe { case_guard_mutates_through_deref() }, 0);
+fn acquire_release_roundtrip() {
+    assert_eq!(unsafe { case_acquire_release_roundtrip() }, 0);
+}
+
+#[test]
+fn init_resets_a_held_lock() {
+    assert_eq!(unsafe { case_init_resets_a_held_lock() }, 0);
 }
