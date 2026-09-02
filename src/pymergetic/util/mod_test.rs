@@ -26,6 +26,20 @@ pub fn case(f: impl FnOnce()) -> i32 {
     }
 }
 
+/// Closure-free `case`: same TEST_LOCK serialization + panic containment,
+/// but the body returns its own rc (`0` = ok) instead of asserting. This is
+/// the form the rsx-subset cards use — their `case_*` trampolines have no
+/// closures to pass here, and an `extern "C"` fn cannot unwind a panic, so
+/// the catch_unwind is what keeps a failing assertion from aborting the
+/// whole test binary.
+pub unsafe fn case_rc(f: unsafe extern "C" fn() -> i32) -> i32 {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { f() })) {
+        Ok(rc) => rc,
+        Err(_) => 1,
+    }
+}
+
 #[test]
 fn registry_mod_tests_all() {
     let filter = std::env::var("WASMMOD_TEST_FQN").ok();
