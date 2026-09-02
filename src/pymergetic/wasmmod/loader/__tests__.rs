@@ -1,7 +1,48 @@
 //! pymergetic.wasmmod.loader — module tests (`__tests__.rs`).
+//!
+//! Type discipline: every registry shape here comes from the loader's
+//! own spliced `registry_types` face (the same bytes the in-kernel rsx
+//! compile splices), and the registry entry points are re-declared as
+//! a test-local extern block typed against those same shapes — one
+//! instance of each type in this module, no cross-module type
+//! identity to drift. (The `case_rc` trampolines keep the subset's
+//! no-closure rule; panics stay contained by `catch_unwind`.)
 
-use super::*;
+use super::registry_types::{
+    pm_wasmmod_registry_handle_t, pm_wasmmod_registry_valkind_t,
+    pm_wasmmod_registry_value_of_t, pm_wasmmod_registry_value_t,
+};
+use super::{
+    wasm_runtime_get_file_package_type, WASM_MODULE_AOT, WASM_MODULE_BYTECODE,
+    pm_wasmmod_loader_init, pm_wasmmod_loader_load, pm_wasmmod_loader_unload,
+    BYTES_CAP, FQN_CAP,
+};
 use crate::util::mod_test::case;
+
+/* Registry entry points, typed against the loader's spliced shapes
+ * (same repr(C) ABI as the registry's own — the linker binds the one
+ * symbol either way). */
+unsafe extern "C" {
+    fn pm_wasmmod_registry_call(
+        fqn_ptr: *const u8,
+        fqn_len: u32,
+        export_ptr: *const u8,
+        export_len: u32,
+        args: *const pm_wasmmod_registry_value_t,
+        nargs: u32,
+        results: *mut pm_wasmmod_registry_value_t,
+        nresults: u32,
+    ) -> i32;
+    fn pm_wasmmod_registry_has(fqn_ptr: *const u8, fqn_len: u32) -> i32;
+    fn pm_wasmmod_registry_test_count(fqn_ptr: *const u8, fqn_len: u32) -> u32;
+    fn pm_wasmmod_registry_test_run_all(fqn_ptr: *const u8, fqn_len: u32) -> i32;
+    fn pm_wasmmod_registry_resolve_native(
+        fqn_ptr: *const u8,
+        fqn_len: u32,
+        export_ptr: *const u8,
+        export_len: u32,
+    ) -> *mut core::ffi::c_void;
+}
 
 // Hand-assembled minimal WASM binary — no wasm toolchain dependency
 // for this milestone's proof, just the module byte-for-byte per the
@@ -78,28 +119,40 @@ fn compile_to_aot(wasm_bytes: &[u8]) -> Vec<u8> {
             String::from_utf8_lossy(&output.stderr)
         )
     });
+
     let _ = std::fs::remove_file(&wasm_path);
     let _ = std::fs::remove_file(&aot_path);
     aot_bytes
 }
 
+fn value_i32(v: i32) -> pm_wasmmod_registry_value_t {
+    pm_wasmmod_registry_value_t {
+        kind: pm_wasmmod_registry_valkind_t::I32,
+        of: pm_wasmmod_registry_value_of_t { i32: v },
+    }
+}
+
+/// Span helper: NUL-terminated test name -> (ptr, len) pair.
+fn zspan(s: &'static str) -> (*const u8, u32) {
+    (s.as_ptr(), s.len() as u32)
+}
+
 fn load_call_unload_roundtrips_end_to_end() {
     init_once();
     let bytes = fixture_bytes();
-    let handle = unsafe { pm_wasmmod_loader_load("test.loader.e2e".as_ptr(), "test.loader.e2e".len() as u32, bytes.as_ptr(), bytes.len() as u32) };
+    let (fqn_p, fqn_len) = zspan("test.loader.e2e");
+    let handle = unsafe { pm_wasmmod_loader_load(fqn_p, fqn_len, bytes.as_ptr(), bytes.len() as u32) };
     assert_ne!(handle.index, u32::MAX, "load should succeed on a well-formed fixture");
 
     // no-arg / one-result export
-    let mut result = pm_wasmmod_registry_value_t {
-        kind: pm_wasmmod_registry_valkind_t::I32,
-        of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 0 },
-    };
+    let mut result = value_i32(0);
+    let (answer_p, answer_len) = zspan("answer");
     let status = unsafe {
-        crate::wasmmod::registry::pm_wasmmod_registry_call(
-            "test.loader.e2e".as_ptr(),
-            "test.loader.e2e".len() as u32,
-            "answer".as_ptr(),
-            "answer".len() as u32,
+        pm_wasmmod_registry_call(
+            fqn_p,
+            fqn_len,
+            answer_p,
+            answer_len,
             core::ptr::null(),
             0,
             &mut result,
@@ -110,20 +163,15 @@ fn load_call_unload_roundtrips_end_to_end() {
     assert_eq!(unsafe { result.of.i32 }, 42);
 
     // numeric-arg / numeric-result export
-    let arg = pm_wasmmod_registry_value_t {
-        kind: pm_wasmmod_registry_valkind_t::I32,
-        of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 41 },
-    };
-    let mut result2 = pm_wasmmod_registry_value_t {
-        kind: pm_wasmmod_registry_valkind_t::I32,
-        of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 0 },
-    };
+    let arg = value_i32(41);
+    let mut result2 = value_i32(0);
+    let (add_one_p, add_one_len) = zspan("add_one");
     let status2 = unsafe {
-        crate::wasmmod::registry::pm_wasmmod_registry_call(
-            "test.loader.e2e".as_ptr(),
-            "test.loader.e2e".len() as u32,
-            "add_one".as_ptr(),
-            "add_one".len() as u32,
+        pm_wasmmod_registry_call(
+            fqn_p,
+            fqn_len,
+            add_one_p,
+            add_one_len,
             &arg,
             1,
             &mut result2,
@@ -139,13 +187,13 @@ fn load_call_unload_roundtrips_end_to_end() {
     // second unload of the same handle is rejected, not a
     // double-free.
     assert_eq!(unsafe { pm_wasmmod_loader_unload(handle) }, -1);
-    assert_eq!(unsafe { crate::wasmmod::registry::pm_wasmmod_registry_has("test.loader.e2e".as_ptr(), "test.loader.e2e".len() as u32) }, 0);
+    assert_eq!(unsafe { pm_wasmmod_registry_has(fqn_p, fqn_len) }, 0);
     let status_after_unload = unsafe {
-        crate::wasmmod::registry::pm_wasmmod_registry_call(
-            "test.loader.e2e".as_ptr(),
-            "test.loader.e2e".len() as u32,
-            "answer".as_ptr(),
-            "answer".len() as u32,
+        pm_wasmmod_registry_call(
+            fqn_p,
+            fqn_len,
+            answer_p,
+            answer_len,
             core::ptr::null(),
             0,
             &mut result,
@@ -192,26 +240,26 @@ fn pack_hello_example() -> Vec<u8> {
 fn load_call_unload_roundtrips_through_real_pmm_pack() {
     init_once();
     let wasm_bytes = pack_hello_example();
+    assert!(wasm_bytes.len() <= BYTES_CAP, "pack must fit the loader's fixed row");
     assert_eq!(
-        unsafe { wamr::wasm_runtime_get_file_package_type(wasm_bytes.as_ptr(), wasm_bytes.len() as u32) },
-        wamr::WASM_MODULE_BYTECODE
+        unsafe { wasm_runtime_get_file_package_type(wasm_bytes.as_ptr(), wasm_bytes.len() as u32) },
+        WASM_MODULE_BYTECODE
     );
 
     let fqn = "test.loader.pmm_pack_e2e";
-    let handle = unsafe { pm_wasmmod_loader_load(fqn.as_ptr(), fqn.len() as u32, wasm_bytes.as_ptr(), wasm_bytes.len() as u32) };
+    let (fqn_p, fqn_len) = zspan("test.loader.pmm_pack_e2e");
+    let handle = unsafe { pm_wasmmod_loader_load(fqn_p, fqn_len, wasm_bytes.as_ptr(), wasm_bytes.len() as u32) };
     assert_ne!(handle.index, u32::MAX, "load should succeed on a real pmm-packed .wasm");
 
     // hello() -> 42
-    let mut result = pm_wasmmod_registry_value_t {
-        kind: pm_wasmmod_registry_valkind_t::I32,
-        of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 0 },
-    };
+    let mut result = value_i32(0);
+    let (hello_p, hello_len) = zspan("hello");
     let status = unsafe {
-        crate::wasmmod::registry::pm_wasmmod_registry_call(
-            fqn.as_ptr(),
-            fqn.len() as u32,
-            "hello".as_ptr(),
-            "hello".len() as u32,
+        pm_wasmmod_registry_call(
+            fqn_p,
+            fqn_len,
+            hello_p,
+            hello_len,
             core::ptr::null(),
             0,
             &mut result,
@@ -222,26 +270,15 @@ fn load_call_unload_roundtrips_through_real_pmm_pack() {
     assert_eq!(unsafe { result.of.i32 }, 42);
 
     // add(41, 1) -> 42
-    let args = [
-        pm_wasmmod_registry_value_t {
-            kind: pm_wasmmod_registry_valkind_t::I32,
-            of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 41 },
-        },
-        pm_wasmmod_registry_value_t {
-            kind: pm_wasmmod_registry_valkind_t::I32,
-            of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 1 },
-        },
-    ];
-    let mut result2 = pm_wasmmod_registry_value_t {
-        kind: pm_wasmmod_registry_valkind_t::I32,
-        of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 0 },
-    };
+    let args = [value_i32(41), value_i32(1)];
+    let mut result2 = value_i32(0);
+    let (add_p, add_len) = zspan("add");
     let status2 = unsafe {
-        crate::wasmmod::registry::pm_wasmmod_registry_call(
-            fqn.as_ptr(),
-            fqn.len() as u32,
-            "add".as_ptr(),
-            "add".len() as u32,
+        pm_wasmmod_registry_call(
+            fqn_p,
+            fqn_len,
+            add_p,
+            add_len,
             args.as_ptr(),
             args.len() as u32,
             &mut result2,
@@ -252,36 +289,17 @@ fn load_call_unload_roundtrips_through_real_pmm_pack() {
     assert_eq!(unsafe { result2.of.i32 }, 42);
 
     // Packed __tests__.c cases land in ModEntry.tests (not product exports).
-    assert_eq!(
-        unsafe {
-            crate::wasmmod::registry::pm_wasmmod_registry_test_count(fqn.as_ptr(), fqn.len() as u32)
-        },
-        2
-    );
-    assert_eq!(
-        unsafe {
-            crate::wasmmod::registry::pm_wasmmod_registry_test_run_all(
-                fqn.as_ptr(),
-                fqn.len() as u32,
-            )
-        },
-        0
-    );
+    assert_eq!(unsafe { pm_wasmmod_registry_test_count(fqn_p, fqn_len) }, 2);
+    assert_eq!(unsafe { pm_wasmmod_registry_test_run_all(fqn_p, fqn_len) }, 0);
     // Test symbols must not be product faces.
+    let (tname_p, tname_len) = zspan("test_hello_returns_42");
     assert!(
-        unsafe {
-            crate::wasmmod::registry::pm_wasmmod_registry_resolve_native(
-                fqn.as_ptr(),
-                fqn.len() as u32,
-                "test_hello_returns_42".as_ptr(),
-                "test_hello_returns_42".len() as u32,
-            )
-        }
-        .is_null()
+        unsafe { pm_wasmmod_registry_resolve_native(fqn_p, fqn_len, tname_p, tname_len) }.is_null()
     );
 
     assert_eq!(unsafe { pm_wasmmod_loader_unload(handle) }, 0);
-    assert_eq!(unsafe { crate::wasmmod::registry::pm_wasmmod_registry_has(fqn.as_ptr(), fqn.len() as u32) }, 0);
+    assert_eq!(unsafe { pm_wasmmod_registry_has(fqn_p, fqn_len) }, 0);
+    let _ = fqn;
 }
 
 fn load_call_unload_roundtrips_through_real_aot() {
@@ -291,25 +309,24 @@ fn load_call_unload_roundtrips_through_real_aot() {
     // the rest of this test — if wamrc's own magic number ever
     // changes, better to fail loudly here than have the loader's
     // detection silently degrade to treating it as Wasm.
+    assert!(aot_bytes.len() <= BYTES_CAP, "aot fixture must fit the loader's fixed row");
     assert_eq!(
-        unsafe { wamr::wasm_runtime_get_file_package_type(aot_bytes.as_ptr(), aot_bytes.len() as u32) },
-        wamr::WASM_MODULE_AOT
+        unsafe { wasm_runtime_get_file_package_type(aot_bytes.as_ptr(), aot_bytes.len() as u32) },
+        WASM_MODULE_AOT
     );
 
-    let fqn = "test.loader.aot_e2e";
-    let handle = unsafe { pm_wasmmod_loader_load(fqn.as_ptr(), fqn.len() as u32, aot_bytes.as_ptr(), aot_bytes.len() as u32) };
+    let (fqn_p, fqn_len) = zspan("test.loader.aot_e2e");
+    let handle = unsafe { pm_wasmmod_loader_load(fqn_p, fqn_len, aot_bytes.as_ptr(), aot_bytes.len() as u32) };
     assert_ne!(handle.index, u32::MAX, "load should succeed on a real .aot file");
 
-    let mut result = pm_wasmmod_registry_value_t {
-        kind: pm_wasmmod_registry_valkind_t::I32,
-        of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 0 },
-    };
+    let mut result = value_i32(0);
+    let (answer_p, answer_len) = zspan("answer");
     let status = unsafe {
-        crate::wasmmod::registry::pm_wasmmod_registry_call(
-            fqn.as_ptr(),
-            fqn.len() as u32,
-            "answer".as_ptr(),
-            "answer".len() as u32,
+        pm_wasmmod_registry_call(
+            fqn_p,
+            fqn_len,
+            answer_p,
+            answer_len,
             core::ptr::null(),
             0,
             &mut result,
@@ -319,20 +336,15 @@ fn load_call_unload_roundtrips_through_real_aot() {
     assert_eq!(status, 0);
     assert_eq!(unsafe { result.of.i32 }, 42);
 
-    let arg = pm_wasmmod_registry_value_t {
-        kind: pm_wasmmod_registry_valkind_t::I32,
-        of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 41 },
-    };
-    let mut result2 = pm_wasmmod_registry_value_t {
-        kind: pm_wasmmod_registry_valkind_t::I32,
-        of: crate::wasmmod::registry::pm_wasmmod_registry_value_of_t { i32: 0 },
-    };
+    let arg = value_i32(41);
+    let mut result2 = value_i32(0);
+    let (add_one_p, add_one_len) = zspan("add_one");
     let status2 = unsafe {
-        crate::wasmmod::registry::pm_wasmmod_registry_call(
-            fqn.as_ptr(),
-            fqn.len() as u32,
-            "add_one".as_ptr(),
-            "add_one".len() as u32,
+        pm_wasmmod_registry_call(
+            fqn_p,
+            fqn_len,
+            add_one_p,
+            add_one_len,
             &arg,
             1,
             &mut result2,
@@ -343,15 +355,38 @@ fn load_call_unload_roundtrips_through_real_aot() {
     assert_eq!(unsafe { result2.of.i32 }, 42);
 
     assert_eq!(unsafe { pm_wasmmod_loader_unload(handle) }, 0);
-    assert_eq!(unsafe { crate::wasmmod::registry::pm_wasmmod_registry_has(fqn.as_ptr(), fqn.len() as u32) }, 0);
+    assert_eq!(unsafe { pm_wasmmod_registry_has(fqn_p, fqn_len) }, 0);
 }
 
 fn load_of_garbage_bytes_fails_cleanly_without_touching_the_registry() {
     init_once();
     let bytes = [0u8, 1, 2, 3];
-    let handle = unsafe { pm_wasmmod_loader_load("test.loader.garbage".as_ptr(), "test.loader.garbage".len() as u32, bytes.as_ptr(), bytes.len() as u32) };
+    let (fqn_p, fqn_len) = zspan("test.loader.garbage");
+    let handle = unsafe { pm_wasmmod_loader_load(fqn_p, fqn_len, bytes.as_ptr(), bytes.len() as u32) };
     assert_eq!(handle.index, u32::MAX);
-    assert_eq!(unsafe { crate::wasmmod::registry::pm_wasmmod_registry_has("test.loader.garbage".as_ptr(), "test.loader.garbage".len() as u32) }, 0);
+    assert_eq!(unsafe { pm_wasmmod_registry_has(fqn_p, fqn_len) }, 0);
+}
+
+/// Over-capacity binaries are refused loudly (never truncated): a
+/// fixture past BYTES_CAP gets the INVALID handle and leaves no
+/// registry trace.
+fn oversized_binary_is_refused_not_truncated() {
+    init_once();
+    let big: Vec<u8> = vec![0u8; BYTES_CAP + 1];
+    let (fqn_p, fqn_len) = zspan("test.loader.oversized");
+    let handle = unsafe { pm_wasmmod_loader_load(fqn_p, fqn_len, big.as_ptr(), big.len() as u32) };
+    assert_eq!(handle.index, u32::MAX);
+    assert_eq!(unsafe { pm_wasmmod_registry_has(fqn_p, fqn_len) }, 0);
+}
+
+/// An fqn longer than the fixed row is likewise refused, not clipped
+/// into a key that could later collide with a shorter prefix.
+fn oversized_fqn_is_refused_not_clipped() {
+    init_once();
+    let bytes = fixture_bytes();
+    let long = "test.loader.".to_string() + &"x".repeat(FQN_CAP);
+    let handle = unsafe { pm_wasmmod_loader_load(long.as_ptr(), long.len() as u32, bytes.as_ptr(), bytes.len() as u32) };
+    assert_eq!(handle.index, u32::MAX);
 }
 
 unsafe extern "C" fn case_load_call_unload_roundtrips_end_to_end() -> i32 {
@@ -390,3 +425,20 @@ fn test_load_of_garbage_bytes_fails_cleanly_without_touching_the_registry() {
     assert_eq!(unsafe { case_load_of_garbage_bytes_fails_cleanly_without_touching_the_registry() }, 0);
 }
 
+unsafe extern "C" fn case_oversized_binary_is_refused_not_truncated() -> i32 {
+    case(|| oversized_binary_is_refused_not_truncated())
+}
+crate::PM_MOD_TEST_RS!("pymergetic.wasmmod.loader", "oversized_binary_is_refused_not_truncated", case_oversized_binary_is_refused_not_truncated);
+#[test]
+fn test_oversized_binary_is_refused_not_truncated() {
+    assert_eq!(unsafe { case_oversized_binary_is_refused_not_truncated() }, 0);
+}
+
+unsafe extern "C" fn case_oversized_fqn_is_refused_not_clipped() -> i32 {
+    case(|| oversized_fqn_is_refused_not_clipped())
+}
+crate::PM_MOD_TEST_RS!("pymergetic.wasmmod.loader", "oversized_fqn_is_refused_not_clipped", case_oversized_fqn_is_refused_not_clipped);
+#[test]
+fn test_oversized_fqn_is_refused_not_clipped() {
+    assert_eq!(unsafe { case_oversized_fqn_is_refused_not_clipped() }, 0);
+}
