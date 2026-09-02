@@ -1,9 +1,10 @@
 //! pymergetic.wasmmod.net.search — impl. CDN pack list / search / filter over
 //! the fetched channel index.
 //!
-//! One defining lang = Rust: serde_json owns the index parsing (no C JSON
-//! parser, no duplicate `json.loads` in a Python binding). The `net.cdn` C
-//! card stays the smoke-fetcher (`pm_wasmmod_net_cdn_fetch_index` returns a
+//! One defining lang = Rust. JSON is walked by hand over byte spans (ptr+len
+//! discipline, no serde_json in the muscle — the subset has no closures and
+//! this file must compile through the kernel's own rsx chain). The `net.cdn`
+//! C card stays the smoke-fetcher (`pm_wasmmod_net_cdn_fetch_index` returns a
 //! stdlib-malloc'd buffer we free with libc `free` — the same pairing the µPy
 //! face already used). Matching mirrors what the old µPy-only `wm.search` /
 //! `wm.filter` did, so seats do not drift.
@@ -13,17 +14,30 @@
 //! `catalog`/`search`/`filter` call the caller parks on
 //! `name_at`/`meta_at` for the returned count. `meta_at` returns the pack's
 //! raw JSON entry so any seat can re-inspect metadata, not just names.
+//!
+//! Result set is fixed-capacity: RES_MAX rows, NAME_CAP/ENTRY_CAP bytes per
+//! row, ERR_CAP for the message. Overflow reports -1 with a clear error —
+//! same posture as every other fixed-budget state in this tree.
+
 #![allow(non_camel_case_types)]
 
-use crate::util::lock::Mutex;
-
-// `no_std` + `alloc`: `Vec` and `ToString` are not in the prelude.
-use alloc::string::ToString;
-use alloc::vec::Vec;
+use core::cell::UnsafeCell;
 
 const ERR_CAP: usize = 160;
+const RES_MAX: usize = 256;
+const NAME_CAP: usize = 128;
+const ENTRY_CAP: usize = 4096;
+
+/* pymergetic.util.lock — the project's one lock card (RS muscle, C ABI),
+ * declared the same way asgi declares it: raw primitive, caller payload. */
+#[repr(C)]
+struct pm_util_lock_t {
+    locked: u32,
+}
 
 unsafe extern "C" {
+    fn pm_util_lock_acquire(l: *mut pm_util_lock_t);
+    fn pm_util_lock_release(l: *mut pm_util_lock_t);
     // Pack/io buffers are `MICROPY_WASM_MALLOC` = stdlib malloc (no port
     // overrides it — see pack/alloc.h); `free` is the matching release.
     fn free(p: *mut core::ffi::c_void);
@@ -36,231 +50,609 @@ unsafe extern "C" {
     ) -> i32;
 }
 
-#[derive(Default)]
+/* Transparent static discipline (same as asgi): Mut<T> is a one-field tuple
+ * struct rsx maps to its inner type, UnsafeCell::get hands out the pointer. */
+struct Mut<T>(UnsafeCell<T>);
+unsafe impl<T> Sync for Mut<T> {}
+
 struct SearchState {
-    /// Matched pack names, sorted, deduped.
-    names: alloc::vec::Vec<alloc::vec::Vec<u8>>,
-    /// Raw JSON entry per matched name (same index as `names`).
-    entries: alloc::vec::Vec<alloc::vec::Vec<u8>>,
-    err: alloc::vec::Vec<u8>,
+    /* Matched pack names, sorted, deduped. */
+    names: [[u8; NAME_CAP]; RES_MAX],
+    names_len: [u32; RES_MAX],
+    entries: [[u8; ENTRY_CAP]; RES_MAX],
+    entries_len: [u32; RES_MAX],
+    n: u32,
+    err: [u8; ERR_CAP],
+    err_len: u32,
 }
 
-static STATE: Mutex<SearchState> = Mutex::new(SearchState {
-    names: alloc::vec::Vec::new(),
-    entries: alloc::vec::Vec::new(),
-    err: alloc::vec::Vec::new(),
-});
+static STATE_LOCK: Mut<pm_util_lock_t> = Mut(UnsafeCell::new(pm_util_lock_t { locked: 0 }));
+static STATE: Mut<SearchState> = Mut(UnsafeCell::new(SearchState {
+    names: [[0; NAME_CAP]; RES_MAX],
+    names_len: [0; RES_MAX],
+    entries: [[0; ENTRY_CAP]; RES_MAX],
+    entries_len: [0; RES_MAX],
+    n: 0,
+    err: [0; ERR_CAP],
+    err_len: 0,
+}));
 
-#[derive(Default, Clone)]
+unsafe fn state_lock() -> *mut pm_util_lock_t {
+    STATE_LOCK.0.get()
+}
+
+unsafe fn state() -> *mut SearchState {
+    STATE.0.get()
+}
+
+/* Query: byte spans, null ptr = "no constraint". Lengths are explicit —
+ * c-strings in, spans out. */
 struct Query {
-    prefix: Option<alloc::string::String>,
-    name_contains: Option<alloc::string::String>,
-    kind: Option<alloc::string::String>,
-    arch: Option<alloc::string::String>,
-    q: Option<alloc::string::String>,
+    prefix: *const u8,
+    prefix_len: usize,
+    name_contains: *const u8,
+    name_contains_len: usize,
+    kind: *const u8,
+    kind_len: usize,
+    arch: *const u8,
+    arch_len: usize,
+    q: *const u8,
+    q_len: usize,
 }
 
-fn c_str_opt(ptr: *const u8) -> Option<alloc::string::String> {
-    if ptr.is_null() {
-        return None;
+fn query_none() -> Query {
+    Query {
+        prefix: core::ptr::null(),
+        prefix_len: 0,
+        name_contains: core::ptr::null(),
+        name_contains_len: 0,
+        kind: core::ptr::null(),
+        kind_len: 0,
+        arch: core::ptr::null(),
+        arch_len: 0,
+        q: core::ptr::null(),
+        q_len: 0,
     }
-    // SAFETY: caller (an extern "C" fn below) contracts ptr to a NUL-terminated
-    // string that stays alive for the duration of this call.
-    let mut end = ptr;
-    unsafe {
-        while *end != 0 {
-            end = end.add(1);
-        }
-    }
-    let len = unsafe { end.offset_from(ptr) } as usize;
-    if len == 0 {
-        return None;
-    }
-    let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
-    alloc::string::String::from_utf8(bytes.to_vec()).ok()
-}
-
-/// Case-insensitive ASCII substring — mirrors `wasm_str_contains` so seats
-/// agree on what "search" matches.
-fn contains_ci(hay: &str, needle: &str) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-    let h = hay.as_bytes();
-    let n = needle.as_bytes();
-    if n.len() > h.len() {
-        return false;
-    }
-    'outer: for i in 0..=(h.len() - n.len()) {
-        for (j, &nb) in n.iter().enumerate() {
-            if lower_ascii(h[i + j]) != lower_ascii(nb) {
-                continue 'outer;
-            }
-        }
-        return true;
-    }
-    false
 }
 
 const fn lower_ascii(b: u8) -> u8 {
-    if b.is_ascii_uppercase() {
+    if b >= b'A' && b <= b'Z' {
         b + (b'a' - b'A')
     } else {
         b
     }
 }
 
-/// Does one `PackageEntry` value satisfy `kind` / `arch`? Looks across its
-/// top-level `artifacts` array, matching the µPy `filter` semantics.
-fn entry_matches(value: &serde_json::Value, kind: &Option<alloc::string::String>,
-    arch: &Option<alloc::string::String>) -> bool {
-    if kind.is_none() && arch.is_none() {
+/// Case-insensitive ASCII substring — mirrors `wasm_str_contains` so seats
+/// agree on what "search" matches.
+fn contains_ci(hay: *const u8, hay_len: usize, needle: *const u8, needle_len: usize) -> bool {
+    if needle_len == 0 {
         return true;
     }
-    let Some(artifacts) = value.get("artifacts") else {
+    if needle_len > hay_len {
         return false;
-    };
-    let Some(arr) = artifacts.as_array() else {
-        return false;
-    };
-    let mut kind_ok = kind.is_none();
-    let mut arch_ok = arch.is_none();
-    for a in arr {
-        if !kind_ok {
-            if let Some(v) = a.get("kind").and_then(serde_json::Value::as_str) {
-                if v == kind.as_deref().unwrap_or_default() {
-                    kind_ok = true;
+    }
+    let last = hay_len - needle_len;
+    let mut i = 0usize;
+    while i <= last {
+        let mut j = 0usize;
+        let mut all_eq = true;
+        while j < needle_len {
+            unsafe {
+                if lower_ascii(*hay.add(i + j)) != lower_ascii(*needle.add(j)) {
+                    all_eq = false;
                 }
+            }
+            if !all_eq {
+                break;
+            }
+            j += 1;
+        }
+        if all_eq {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+fn span_eq(a: *const u8, a_len: usize, b: *const u8, b_len: usize) -> bool {
+    if a_len != b_len {
+        return false;
+    }
+    let mut i = 0usize;
+    while i < a_len {
+        unsafe {
+            if *a.add(i) != *b.add(i) {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    true
+}
+
+/* ---- hand JSON span-scanner (no serde_json in the muscle) ---- */
+
+/// Skip whitespace forward from p[0..n); returns the first non-ws index.
+fn skip_ws(p: *const u8, n: usize, mut i: usize) -> usize {
+    while i < n {
+        let c = unsafe { *p.add(i) };
+        if c != b' ' && c != b'\t' && c != b'\n' && c != b'\r' {
+            break;
+        }
+        i += 1;
+    }
+    i
+}
+
+/// Find a string value's span: at i expects `"`, returns (start,end)
+/// *exclusive of the quotes*, advancing *end to the byte after the closing
+/// quote. On malformed input returns (0,0).
+unsafe fn scan_string(p: *const u8, n: usize, i: usize, end: *mut usize) -> (usize, usize) {
+    let mut at = skip_ws(p, n, i);
+    if at >= n || unsafe { *p.add(at) } != b'"' {
+        return (0, 0);
+    }
+    at += 1;
+    let start = at;
+    while at < n {
+        let c = unsafe { *p.add(at) };
+        if c == b'\\' {
+            /* escaped char — skip the escape pair */
+            if at + 1 < n {
+                at += 2;
+                continue;
+            }
+            return (0, 0);
+        }
+        if c == b'"' {
+            *end = at + 1;
+            return (start, at);
+        }
+        at += 1;
+    }
+    (0, 0)
+}
+
+/// Scan a value at i, returning its [start,end) span (whitespace-trimmed)
+/// and setting *end to the index just past it. Objects, arrays, strings,
+/// numbers, true/false/null — the span is the raw JSON text.
+unsafe fn scan_value(p: *const u8, n: usize, i: usize, end: *mut usize) -> (usize, usize) {
+    let at = skip_ws(p, n, i);
+    if at >= n {
+        *end = at;
+        return (at, at);
+    }
+    let c = unsafe { *p.add(at) };
+    if c == b'"' {
+        let mut dummy: usize = 0;
+        return scan_string(p, n, at, end);
+    }
+    if c == b'{' || c == b'[' {
+        /* balanced-brace walk: strings inside may contain braces, so the
+         * walker still honors quotes/escapes. */
+        let open = c;
+        let close = if open == b'{' { b'}' } else { b']' };
+        let mut depth: i32 = 0;
+        let mut j = at;
+        while j < n {
+            let d = *p.add(j);
+            if d == b'"' {
+                let mut e: usize = 0;
+                let _ = scan_string(p, n, j, &mut e);
+                if e == 0 {
+                    *end = j;
+                    return (at, j);
+                }
+                j = e;
+                continue;
+            }
+            if d == open {
+                depth += 1;
+            } else if d == close {
+                depth -= 1;
+                if depth == 0 {
+                    *end = j + 1;
+                    return (at, j + 1);
+                }
+            }
+            j += 1;
+        }
+        *end = j;
+        return (at, j);
+    }
+    /* number / true / false / null: run to the next delimiter. */
+    let mut j = at;
+    while j < n {
+        let d = *p.add(j);
+        if d == b',' || d == b'}' || d == b']' || d == b' ' || d == b'\t' || d == b'\n' || d == b'\r' {
+            break;
+        }
+        j += 1;
+    }
+    *end = j;
+    (at, j)
+}
+
+/// Find member `key` in the object spanning [i..n); returns the value span
+/// or (0,0). Only top-level members — nested objects are skipped as raw
+/// spans, which is exactly the one-level lookup the search needs.
+unsafe fn obj_member(p: *const u8, n: usize, i: usize, key: *const u8, key_len: usize) -> (usize, usize) {
+    let mut at = skip_ws(p, n, i);
+    if at >= n || *p.add(at) != b'{' {
+        return (0, 0);
+    }
+    at += 1;
+    loop {
+        at = skip_ws(p, n, at);
+        if at >= n {
+            return (0, 0);
+        }
+        let c = *p.add(at);
+        if c == b'}' {
+            return (0, 0);
+        }
+        if c != b'"' {
+            return (0, 0);
+        }
+        let mut kend: usize = 0;
+        let (ks, ke) = scan_string(p, n, at, &mut kend);
+        if kend == 0 {
+            return (0, 0);
+        }
+        at = kend;
+        at = skip_ws(p, n, at);
+        if at >= n || *p.add(at) != b':' {
+            return (0, 0);
+        }
+        at += 1;
+        let mut vend: usize = 0;
+        let _ = scan_value(p, n, at, &mut vend);
+        if span_eq(p.add(ks), ke - ks, key, key_len) {
+            /* re-scan the value for the caller: vend already past it */
+            let (vs, ve) = scan_value(p, n, at, &mut vend);
+            let _ = vend;
+            return (vs, ve);
+        }
+        at = vend;
+        at = skip_ws(p, n, at);
+        if at < n && *p.add(at) == b',' {
+            at += 1;
+        }
+    }
+}
+
+/// Does one `packages` entry satisfy `kind` / `arch`? Looks across its
+/// top-level `artifacts` array, matching the µPy `filter` semantics.
+unsafe fn entry_matches(p: *const u8, n: usize, vstart: usize, vend_end: usize, q: *const Query) -> bool {
+    if (*q).kind_len == 0 && (*q).arch_len == 0 {
+        return true;
+    }
+    let (as_, ae) = obj_member(p, n, vstart, b"artifacts\0".as_ptr(), 9);
+    if ae == 0 {
+        return false;
+    }
+    /* artifacts must be an array: walk its members. */
+    let mut at = skip_ws(p, n, as_);
+    if at >= n || *p.add(at) != b'[' {
+        return false;
+    }
+    at += 1;
+    let mut kind_ok = (*q).kind_len == 0;
+    let mut arch_ok = (*q).arch_len == 0;
+    loop {
+        at = skip_ws(p, n, at);
+        if at >= ae {
+            break;
+        }
+        let c = *p.add(at);
+        if c == b']' {
+            break;
+        }
+        if c == b',' {
+            at += 1;
+            continue;
+        }
+        let mut vend2: usize = 0;
+        let (os, oe) = scan_value(p, n, at, &mut vend2);
+        let _ = oe;
+        if os >= ae {
+            break;
+        }
+        if !kind_ok {
+            let (ks, ke) = obj_member(p, n, os, b"kind\0".as_ptr(), 4);
+            if ke > ks && span_eq(p.add(ks), ke - ks, (*q).kind, (*q).kind_len) {
+                kind_ok = true;
             }
         }
         if !arch_ok {
-            if let Some(v) = a.get("arch").and_then(serde_json::Value::as_str) {
-                if v == arch.as_deref().unwrap_or_default() {
-                    arch_ok = true;
-                }
+            let (ks, ke) = obj_member(p, n, os, b"arch\0".as_ptr(), 4);
+            if ke > ks && span_eq(p.add(ks), ke - ks, (*q).arch, (*q).arch_len) {
+                arch_ok = true;
             }
         }
         if kind_ok && arch_ok {
             break;
         }
+        at = vend2;
     }
     kind_ok && arch_ok
 }
 
-fn matches(name: &str, value: &serde_json::Value, q: &Query) -> bool {
-    if let Some(prefix) = &q.prefix {
-        if !name.starts_with(prefix.as_str()) {
+/// Does one package (name span known, raw value at [vstart, vend)) satisfy
+/// the query? Prefix / contains checks on the name, kind/arch on the entry.
+unsafe fn matches(p: *const u8, n: usize, ns: usize, ne: usize, vstart: usize, vend: usize, q: *const Query) -> bool {
+    let name_len = ne - ns;
+    if (*q).prefix_len > 0 {
+        if name_len < (*q).prefix_len {
+            return false;
+        }
+        if !span_eq(p.add(ns), (*q).prefix_len, (*q).prefix, (*q).prefix_len) {
             return false;
         }
     }
-    if let Some(nc) = &q.name_contains {
-        if !contains_ci(name, nc.as_str()) {
+    if (*q).name_contains_len > 0 {
+        if !contains_ci(p.add(ns), name_len, (*q).name_contains, (*q).name_contains_len) {
             return false;
         }
     }
-    if let Some(qs) = &q.q {
-        if !contains_ci(name, qs.as_str()) {
+    if (*q).q_len > 0 {
+        if !contains_ci(p.add(ns), name_len, (*q).q, (*q).q_len) {
             return false;
         }
     }
-    entry_matches(value, &q.kind, &q.arch)
+    entry_matches(p, n, vstart, vend, q)
+}
+
+/// Store one matched row (name + raw entry) into the fixed-cap state,
+/// insertion-sorted by name (byte order — the same order serde_json's
+/// sort_by produced, pinned by the tests). Dedups on exact name match.
+unsafe fn store_row(st: *mut SearchState, name: *const u8, name_len: usize, entry: *const u8, entry_len: usize) -> i32 {
+    if name_len > NAME_CAP || entry_len > ENTRY_CAP {
+        return -1;
+    }
+    let n = (*st).n;
+    if n as usize >= RES_MAX {
+        return -1;
+    }
+    /* insertion point by byte order */
+    let mut pos: u32 = 0;
+    while pos < n {
+        let clen = (*st).names_len[pos as usize] as usize;
+        let cur = (*st).names[pos as usize].as_ptr();
+        let ord = span_cmp(cur, clen, name, name_len);
+        if ord == 0 {
+            /* duplicate name — replace the entry, keep one row */
+            copy_into((*st).entries[pos as usize].as_mut_ptr(), ENTRY_CAP, entry, entry_len);
+            (*st).entries_len[pos as usize] = entry_len as u32;
+            return 0;
+        }
+        if ord > 0 {
+            break;
+        }
+        pos += 1;
+    }
+    /* shift rows [pos..n) up one */
+    let mut k = n;
+    while k > pos {
+        copy_row(st, (k - 1) as usize, k as usize);
+        k -= 1;
+    }
+    copy_into((*st).names[pos as usize].as_mut_ptr(), NAME_CAP, name, name_len);
+    (*st).names_len[pos as usize] = name_len as u32;
+    copy_into((*st).entries[pos as usize].as_mut_ptr(), ENTRY_CAP, entry, entry_len);
+    (*st).entries_len[pos as usize] = entry_len as u32;
+    (*st).n = n + 1;
+    0
+}
+
+/// memcmp-style span compare: <0, 0, >0.
+fn span_cmp(a: *const u8, a_len: usize, b: *const u8, b_len: usize) -> i32 {
+    let n = if a_len < b_len { a_len } else { b_len };
+    let mut i = 0usize;
+    while i < n {
+        unsafe {
+            let ca = *a.add(i);
+            let cb = *b.add(i);
+            if ca != cb {
+                return ca as i32 - cb as i32;
+            }
+        }
+        i += 1;
+    }
+    if a_len == b_len {
+        0
+    } else if a_len < b_len {
+        -1
+    } else {
+        1
+    }
+}
+
+unsafe fn copy_into(dst: *mut u8, dst_cap: usize, src: *const u8, n: usize) {
+    let mut i = 0usize;
+    while i < n && i < dst_cap {
+        *dst.add(i) = *src.add(i);
+        i += 1;
+    }
+}
+
+unsafe fn copy_row(st: *mut SearchState, from: usize, to: usize) {
+    copy_into(
+        (*st).names[to].as_mut_ptr(),
+        NAME_CAP,
+        (*st).names[from].as_ptr(),
+        (*st).names_len[from] as usize,
+    );
+    copy_into(
+        (*st).entries[to].as_mut_ptr(),
+        ENTRY_CAP,
+        (*st).entries[from].as_ptr(),
+        (*st).entries_len[from] as usize,
+    );
+    (*st).names_len[to] = (*st).names_len[from];
+    (*st).entries_len[to] = (*st).entries_len[from];
+}
+
+unsafe fn set_err(st: *mut SearchState, msg: *const u8, msg_len: usize) {
+    let n = if msg_len < ERR_CAP { msg_len } else { ERR_CAP };
+    copy_into((*st).err.as_mut_ptr(), ERR_CAP, msg, n);
+    (*st).err_len = n as u32;
+}
+
+/* NUL-terminated error literals (the subset's length discipline: explicit
+ * zlen at the call site, never slice `.len()`). */
+const ERR_FETCH: &[u8] = b"search: fetch index failed\0";
+const ERR_PARSE: &[u8] = b"search: index JSON: no packages object\0";
+const ERR_CAPS: &[u8] = b"search: result capacity exceeded\0";
+
+/// strlen over a NUL-terminated byte span.
+unsafe fn zlen(p: *const u8) -> usize {
+    let mut n = 0usize;
+    while *p.add(n) != 0 {
+        n += 1;
+    }
+    n
 }
 
 /// Parse the channel index JSON and keep every pack satisfying `q`.
-fn parse_and_query(raw: &[u8], q: &Query) -> Result<alloc::vec::Vec<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)>, alloc::string::String> {
-    let doc: serde_json::Value = serde_json::from_slice(raw)
-        .map_err(|e| alloc::format!("search: index JSON: {e}"))?;
-    let packages = doc
-        .get("packages")
-        .and_then(serde_json::Value::as_object)
-        .ok_or_else(|| alloc::format!("search: missing packages object"))?;
-
-    let mut out = alloc::vec::Vec::new();
-    for (name, value) in packages {
-        if !matches(name, value, q) {
+/// Returns the count, or -1 with err set in the state.
+unsafe fn parse_and_query(raw: *const u8, raw_len: usize, q: *const Query) -> i32 {
+    /* locate the top-level "packages" object */
+    let (ps, pe) = obj_member(raw, raw_len, 0, b"packages\0".as_ptr(), 8);
+    if pe == 0 {
+        let st = state();
+        pm_util_lock_acquire(state_lock());
+        set_err(st, ERR_PARSE.as_ptr(), zlen(ERR_PARSE.as_ptr()));
+        pm_util_lock_release(state_lock());
+        return -1;
+    }
+    /* walk the packages object's members: name -> raw entry */
+    let mut at = skip_ws(raw, raw_len, ps);
+    if at >= raw_len || *raw.add(at) != b'{' {
+        return -1;
+    }
+    at += 1;
+    /* lock once for the whole fill: rows go straight into the state */
+    let st = state();
+    pm_util_lock_acquire(state_lock());
+    (*st).n = 0;
+    (*st).err_len = 0;
+    let mut count: i32 = 0;
+    loop {
+        at = skip_ws(raw, raw_len, at);
+        if at >= pe {
+            break;
+        }
+        let c = *raw.add(at);
+        if c == b'}' {
+            break;
+        }
+        if c == b',' {
+            at += 1;
             continue;
         }
-        out.push((name.as_bytes().to_vec(), value.to_string().into_bytes()));
+        let mut kend: usize = 0;
+        let (ns, ne) = scan_string(raw, raw_len, at, &mut kend);
+        if kend == 0 {
+            break;
+        }
+        at = kend;
+        at = skip_ws(raw, raw_len, at);
+        if at >= raw_len || *raw.add(at) != b':' {
+            break;
+        }
+        at += 1;
+        let mut vend: usize = 0;
+        let (vs, ve) = scan_value(raw, raw_len, at, &mut vend);
+        if ve == 0 {
+            break;
+        }
+        if matches(raw, raw_len, ns, ne, vs, ve, q) {
+            if store_row(st, raw.add(ns), ne - ns, raw.add(vs), ve - vs) != 0 {
+                set_err(st, ERR_CAPS.as_ptr(), zlen(ERR_CAPS.as_ptr()));
+                pm_util_lock_release(state_lock());
+                return -1;
+            }
+            count += 1;
+        }
+        at = vend;
     }
-    // Stable, cross-seat ordering (server sorts names; the old µPy catalog
-    // returned map order — sort here so host C / Rust / µPy agree).
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(out)
-}
-
-fn set_err(state: &mut SearchState, msg: &str) {
-    state.err = msg.as_bytes().to_vec();
-}
-
-fn reset_ok(state: &mut SearchState, rows: Vec<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)>) -> i32 {
-    state.names = rows.iter().map(|(n, _)| n.clone()).collect();
-    state.entries = rows.into_iter().map(|(_, e)| e).collect();
-    state.err.clear();
-    state.names.len() as i32
+    pm_util_lock_release(state_lock());
+    count
 }
 
 /// Fetch the channel index and run `q`, storing the result set.
-fn run_query(channel: *const u8, q: &Query) -> i32 {
-    let ch = c_str_opt(channel).unwrap_or_else(|| "lead".into());
-    let ch_nul = cstr_bytes(&ch);
+unsafe fn run_query(channel: *const u8, q: *const Query) -> i32 {
+    let ch_ptr: *const u8 = if channel.is_null() {
+        b"lead\0".as_ptr()
+    } else {
+        channel
+    };
     let mut buf: *mut u8 = core::ptr::null_mut();
     let mut len: u32 = 0;
     let mut cerr = [0u8; ERR_CAP];
-    let rc = unsafe {
-        pm_wasmmod_net_cdn_fetch_index(
-            ch_nul.as_ptr(),
-            &mut buf,
-            &mut len,
-            cerr.as_mut_ptr(),
-            cerr.len(),
-        )
-    };
+    let rc = pm_wasmmod_net_cdn_fetch_index(
+        ch_ptr,
+        &mut buf,
+        &mut len,
+        cerr.as_mut_ptr(),
+        ERR_CAP,
+    );
     if rc != 0 || buf.is_null() {
-        let msg = cstr_bytes_to_str(&cerr).unwrap_or("search: fetch index failed");
-        let mut st = STATE.lock();
-        set_err(&mut st, msg);
+        let st = state();
+        pm_util_lock_acquire(state_lock());
+        let mut msg_at: usize = 0;
+        while msg_at < ERR_CAP && cerr[msg_at] != 0 {
+            msg_at += 1;
+        }
+        if msg_at == 0 {
+            set_err(st, ERR_FETCH.as_ptr(), zlen(ERR_FETCH.as_ptr()));
+        } else {
+            set_err(st, cerr.as_ptr(), msg_at);
+        }
+        pm_util_lock_release(state_lock());
         return -1;
     }
-    let raw = unsafe { core::slice::from_raw_parts(buf, len as usize) };
-    let parsed = parse_and_query(raw, q);
-    unsafe {
-        free(buf as *mut core::ffi::c_void);
-    }
-    let mut st = STATE.lock();
-    match parsed {
-        Ok(rows) => reset_ok(&mut st, rows),
-        Err(e) => {
-            set_err(&mut st, &e);
-            -1
-        }
-    }
+    let out = parse_and_query(buf, len as usize, q);
+    free(buf as *mut core::ffi::c_void);
+    out
 }
 
-fn cstr_bytes(s: &str) -> alloc::vec::Vec<u8> {
-    let mut v = alloc::vec::Vec::with_capacity(s.len() + 1);
-    v.extend_from_slice(s.as_bytes());
-    v.push(0);
-    v
-}
-
-fn cstr_bytes_to_str(b: &[u8]) -> Option<&str> {
-    let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
-    core::str::from_utf8(&b[..end]).ok().map(|s| s.trim())
+/// NUL-terminated arg -> (ptr, len). Null ptr or empty string = no
+/// constraint (len 0).
+unsafe fn c_arg(ptr: *const u8, out_len: *mut usize) -> *const u8 {
+    if ptr.is_null() {
+        *out_len = 0;
+        return core::ptr::null();
+    }
+    let mut n = 0usize;
+    while *ptr.add(n) != 0 {
+        n += 1;
+    }
+    if n == 0 {
+        *out_len = 0;
+        return core::ptr::null();
+    }
+    *out_len = n;
+    ptr
 }
 
 /// Empty the result set (all pack names on `channel`). Returns the count or -1.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pm_wasmmod_net_search_catalog(channel: *const u8) -> i32 {
-    run_query(channel, &Query::default())
+    let q = query_none();
+    run_query(channel, &q)
 }
 
 /// Result set = names whose lowercased substring equals `q` (case-insensitive).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pm_wasmmod_net_search_search(q: *const u8, channel: *const u8) -> i32 {
-    let query = Query {
-        q: c_str_opt(q),
-        ..Default::default()
-    };
+    let mut query = query_none();
+    let mut l: usize = 0;
+    query.q = c_arg(q, &mut l);
+    query.q_len = l;
     run_query(channel, &query)
 }
 
@@ -274,96 +666,124 @@ pub unsafe extern "C" fn pm_wasmmod_net_search_filter(
     arch: *const u8,
     channel: *const u8,
 ) -> i32 {
-    let query = Query {
-        prefix: c_str_opt(prefix),
-        name_contains: c_str_opt(name_contains),
-        kind: c_str_opt(kind),
-        arch: c_str_opt(arch),
-        q: None,
-    };
+    let mut query = query_none();
+    let mut l: usize = 0;
+    query.prefix = c_arg(prefix, &mut l);
+    query.prefix_len = l;
+    query.name_contains = c_arg(name_contains, &mut l);
+    query.name_contains_len = l;
+    query.kind = c_arg(kind, &mut l);
+    query.kind_len = l;
+    query.arch = c_arg(arch, &mut l);
+    query.arch_len = l;
     run_query(channel, &query)
 }
 
 /// Number of names in the current result set.
 #[unsafe(no_mangle)]
 pub extern "C" fn pm_wasmmod_net_search_count() -> u32 {
-    STATE.lock().names.len() as u32
+    unsafe {
+        pm_util_lock_acquire(state_lock());
+        let n = (*state()).n;
+        pm_util_lock_release(state_lock());
+        n
+    }
 }
 
 /// Copy the i-th matched pack name into `buf`, `*buf_len_io` in/out (bytes).
 /// Returns 1 on success (0 = out-of-range or too-small capacity reported via
 /// `*buf_len_io` = required).
 #[unsafe(no_mangle)]
-pub extern "C" fn pm_wasmmod_net_search_name_at(
+pub unsafe extern "C" fn pm_wasmmod_net_search_name_at(
     index: u32,
     buf: *mut u8,
     buf_len_io: *mut u32,
 ) -> i32 {
-    let st = STATE.lock();
-    let Some(name) = st.names.get(index as usize) else {
+    pm_util_lock_acquire(state_lock());
+    let st = state();
+    if index >= (*st).n {
         if !buf_len_io.is_null() {
-            unsafe { *buf_len_io = 0 };
+            *buf_len_io = 0;
         }
+        pm_util_lock_release(state_lock());
         return 0;
-    };
-    copy_bytes_to_buf(name, buf, buf_len_io)
+    }
+    let i = index as usize;
+    let rc = copy_bytes_to_buf(
+        (*st).names[i].as_ptr(),
+        (*st).names_len[i] as usize,
+        buf,
+        buf_len_io,
+    );
+    pm_util_lock_release(state_lock());
+    rc
 }
 
 /// Copy the i-th matched pack's raw JSON entry into `buf`.
 #[unsafe(no_mangle)]
-pub extern "C" fn pm_wasmmod_net_search_meta_at(
+pub unsafe extern "C" fn pm_wasmmod_net_search_meta_at(
     index: u32,
     buf: *mut u8,
     buf_len_io: *mut u32,
 ) -> i32 {
-    let st = STATE.lock();
-    let Some(entry) = st.entries.get(index as usize) else {
+    pm_util_lock_acquire(state_lock());
+    let st = state();
+    if index >= (*st).n {
         if !buf_len_io.is_null() {
-            unsafe { *buf_len_io = 0 };
+            *buf_len_io = 0;
         }
+        pm_util_lock_release(state_lock());
         return 0;
-    };
-    copy_bytes_to_buf(entry, buf, buf_len_io)
+    }
+    let i = index as usize;
+    let rc = copy_bytes_to_buf(
+        (*st).entries[i].as_ptr(),
+        (*st).entries_len[i] as usize,
+        buf,
+        buf_len_io,
+    );
+    pm_util_lock_release(state_lock());
+    rc
 }
 
 /// Copy the last error message ("" if none). Same errbuf convention as io.
 #[unsafe(no_mangle)]
-pub extern "C" fn pm_wasmmod_net_search_last_error(buf: *mut u8, buf_len: usize) -> i32 {
+pub unsafe extern "C" fn pm_wasmmod_net_search_last_error(buf: *mut u8, buf_len: usize) -> i32 {
     if buf.is_null() {
         return -1;
     }
-    let st = STATE.lock();
-    let e = if st.err.is_empty() {
-        alloc::vec::Vec::new()
-    } else {
-        st.err.clone()
-    };
-    unsafe { core::ptr::write_bytes(buf, 0, buf_len) };
-    let n = usize::min(e.len(), buf_len.saturating_sub(1));
-    if n > 0 {
-        unsafe {
-            core::ptr::copy_nonoverlapping(e.as_ptr(), buf, n);
-        }
+    pm_util_lock_acquire(state_lock());
+    let st = state();
+    let e_len = (*st).err_len as usize;
+    let mut z = 0usize;
+    while z < buf_len {
+        *buf.add(z) = 0;
+        z += 1;
     }
+    let n = if e_len < buf_len.saturating_sub(1) { e_len } else { buf_len.saturating_sub(1) };
+    if n > 0 {
+        core::ptr::copy_nonoverlapping((*st).err.as_ptr(), buf, n);
+    }
+    pm_util_lock_release(state_lock());
     1
 }
 
-fn copy_bytes_to_buf(src: &[u8], buf: *mut u8, buf_len_io: *mut u32) -> i32 {
-    if buf_len_io.is_null() {
-        return 0;
-    }
-    let need = src.len();
-    let cap = unsafe { *buf_len_io } as usize;
-    if cap < need {
-        unsafe { *buf_len_io = need as u32 };
-        return 0;
-    }
-    if need > 0 {
-        unsafe {
-            core::ptr::copy_nonoverlapping(src.as_ptr(), buf, need);
+fn copy_bytes_to_buf(src: *const u8, src_len: usize, buf: *mut u8, buf_len_io: *mut u32) -> i32 {
+    unsafe {
+        if buf_len_io.is_null() {
+            return 0;
         }
+        let need = src_len;
+        let cap = *buf_len_io as usize;
+        if cap < need {
+            *buf_len_io = need as u32;
+            return 0;
+        }
+        if need > 0 {
+            core::ptr::copy_nonoverlapping(src, buf, need);
+        }
+        *buf_len_io = need as u32;
     }
-    unsafe { *buf_len_io = need as u32 };
     1
 }
 
