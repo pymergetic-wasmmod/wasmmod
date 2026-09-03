@@ -102,8 +102,6 @@ static int32_t case_primitives(void) {
 
 static int32_t case_str_bytes(void) {
     pm_type_value_t s = pm_types_str(s_arena, "hello", 5);
-    const char *p = NULL;
-    uint32_t len = 0;
     if (pm_types_kind(s) != PM_TYPE_KIND_STR || s.aux != 5) {
         return fail("str shape");
     }
@@ -132,8 +130,6 @@ static int32_t case_str_bytes(void) {
     if (pm_types_str(s_arena, NULL, 3).tag != PM_TYPE_KIND_NIL) {
         return fail("str NULL refused");
     }
-    p = NULL;
-    (void)len;
     return 0;
 }
 
@@ -218,8 +214,8 @@ static int32_t case_struct(void) {
     }
     /* typed C view over the same bytes — the zero-copy story */
     {
-        const struct { double x; double y; } *view =
-            (const struct { double x; double y; } *)pm_types_obj_data(p);
+        typedef struct { double x; double y; } point_view_t;
+        const point_view_t *view = (const point_view_t *)pm_types_obj_data(p);
         if (view->x != 1.5 || view->y != 2.5) {
             return fail("typed view");
         }

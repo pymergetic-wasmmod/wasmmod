@@ -799,7 +799,15 @@ fn test_gc_visit_only_sees_live_obj_exports() {
 
 fn refusal_ring_records_a_sig_over_cap() {
     unsafe {
-        let base = pm_wasmmod_registry_refusal_count();
+        /* This case is entered twice per cargo run — once through its
+         * PM_MOD_TEST_RS registration (registry_mod_tests_all) and once
+         * through its #[test] wrapper — on parallel threads. A
+         * ring-count delta between before/after would be racy (the
+         * second entry's refusal dedups into the first's row), so the
+         * culprit row is found by scanning, not by counting deltas.
+         * No reset either: the ring is empty at test start (SIG_CAP
+         * holds every real registration), and a reset from one thread
+         * could wipe the other's evidence mid-scan. */
         /* 300-byte sig — over any cap the tree could plausibly ship */
         let long_sig = [b'x'; 300];
         assert_eq!(
@@ -816,28 +824,37 @@ fn refusal_ring_records_a_sig_over_cap() {
             0
         );
         let n = pm_wasmmod_registry_refusal_count();
-        assert!(n > base);
+        assert!(n >= 1);
+        /* scan the ring for the culprit row (fqn + name + reason) */
         let mut fqn = [0u8; 64];
         let mut fqn_len = 64u32;
         let mut name = [0u8; 96];
         let mut name_len = 96u32;
         let mut reason = 0u8;
         let mut count = 0u32;
-        assert_eq!(
-            pm_wasmmod_registry_refusal_at(
-                n - 1,
+        let mut found = false;
+        let mut i = 0u32;
+        while i < n {
+            if pm_wasmmod_registry_refusal_at(
+                i,
                 fqn.as_mut_ptr(),
                 &mut fqn_len,
                 name.as_mut_ptr(),
                 &mut name_len,
                 &mut reason,
                 &mut count,
-            ),
-            1
-        );
-        assert!(span_is(b"test.refusal\0".as_ptr(), fqn.as_ptr(), fqn_len));
-        assert!(span_is(b"over_cap\0".as_ptr(), name.as_ptr(), name_len));
-        assert_eq!(reason, 1);
+            ) == 1
+                && span_is(b"test.refusal\0".as_ptr(), fqn.as_ptr(), fqn_len)
+                && span_is(b"over_cap\0".as_ptr(), name.as_ptr(), name_len)
+                && reason == 1
+            {
+                found = true;
+                break;
+            }
+            i += 1;
+        }
+        assert!(found);
+        assert!(count >= 1);
         /* dedup: the same refusal again bumps count, not the ring */
         assert_eq!(
             pm_wasmmod_registry_mod_export(
