@@ -790,3 +790,131 @@ crate::PM_MOD_TEST_RS!("pymergetic.wasmmod.registry", "gc_visit_only_sees_live_o
 fn test_gc_visit_only_sees_live_obj_exports() {
     assert_eq!(unsafe { case_gc_visit_only_sees_live_obj_exports() }, 0);
 }
+
+/* ---- loud-refusal ring --------------------------------------------------
+ * The dark-export audit: a face whose sig exceeds SIG_CAP used to vanish
+ * silently (mod_export returned false, the ctor discarded it). Now every
+ * refused registration lands in the introspectable ring, and the manifest
+ * test (below) fails while the ring is non-empty. */
+
+fn refusal_ring_records_a_sig_over_cap() {
+    unsafe {
+        let base = pm_wasmmod_registry_refusal_count();
+        /* 300-byte sig — over any cap the tree could plausibly ship */
+        let long_sig = [b'x'; 300];
+        assert_eq!(
+            pm_wasmmod_registry_mod_export(
+                b"test.refusal\0".as_ptr(),
+                12,
+                b"over_cap\0".as_ptr(),
+                8,
+                pm_wasmmod_registry_export_kind_t::Fn,
+                core::ptr::dangling_mut::<c_void>(),
+                long_sig.as_ptr(),
+                300,
+            ),
+            0
+        );
+        let n = pm_wasmmod_registry_refusal_count();
+        assert!(n > base);
+        let mut fqn = [0u8; 64];
+        let mut fqn_len = 64u32;
+        let mut name = [0u8; 96];
+        let mut name_len = 96u32;
+        let mut reason = 0u8;
+        let mut count = 0u32;
+        assert_eq!(
+            pm_wasmmod_registry_refusal_at(
+                n - 1,
+                fqn.as_mut_ptr(),
+                &mut fqn_len,
+                name.as_mut_ptr(),
+                &mut name_len,
+                &mut reason,
+                &mut count,
+            ),
+            1
+        );
+        assert!(span_is(b"test.refusal\0".as_ptr(), fqn.as_ptr(), fqn_len));
+        assert!(span_is(b"over_cap\0".as_ptr(), name.as_ptr(), name_len));
+        assert_eq!(reason, 1);
+        /* dedup: the same refusal again bumps count, not the ring */
+        assert_eq!(
+            pm_wasmmod_registry_mod_export(
+                b"test.refusal\0".as_ptr(),
+                12,
+                b"over_cap\0".as_ptr(),
+                8,
+                pm_wasmmod_registry_export_kind_t::Fn,
+                core::ptr::dangling_mut::<c_void>(),
+                long_sig.as_ptr(),
+                300,
+            ),
+            0
+        );
+        let n2 = pm_wasmmod_registry_refusal_count();
+        assert_eq!(n2, n);
+    }
+}
+
+fn long_valid_sig_registers_within_cap() {
+    unsafe {
+        /* 173 bytes — the exact stringified length of the tree's longest
+         * face (pm_metal_jit_c_object_compile_target) that was dark at
+         * SIG_CAP=160. At 256 it must register, not refuse. */
+        let sig = [b'y'; 173];
+        assert_eq!(
+            pm_wasmmod_registry_mod_export(
+                b"test.refusal\0".as_ptr(),
+                12,
+                b"long_valid\0".as_ptr(),
+                10,
+                pm_wasmmod_registry_export_kind_t::Fn,
+                core::ptr::dangling_mut::<c_void>(),
+                sig.as_ptr(),
+                173,
+            ),
+            1
+        );
+        let mut sig_out = [0u8; 256];
+        let mut sig_out_len = 256u32;
+        let mut name = [0u8; 32];
+        let mut name_len = 32u32;
+        let mut kind = pm_wasmmod_registry_export_kind_t::Obj;
+        assert_eq!(
+            pm_wasmmod_registry_export_at(
+                b"test.refusal\0".as_ptr(),
+                12,
+                0,
+                name.as_mut_ptr(),
+                &mut name_len,
+                &mut kind,
+                sig_out.as_mut_ptr(),
+                &mut sig_out_len,
+            ),
+            1
+        );
+        assert!(span_is(b"long_valid\0".as_ptr(), name.as_ptr(), name_len));
+        assert_eq!(sig_out_len as usize, 173);
+    }
+}
+
+unsafe extern "C" fn case_refusal_ring_is_loud_and_introspectable() -> i32 {
+    unsafe { crate::util::mod_test::case_rc(case_refusal_ring_is_loud_and_introspectable_body) }
+}
+unsafe extern "C" fn case_refusal_ring_is_loud_and_introspectable_body() -> i32 {
+    unsafe {
+        refusal_ring_records_a_sig_over_cap();
+        long_valid_sig_registers_within_cap();
+    }
+    0
+}
+crate::PM_MOD_TEST_RS!(
+    "pymergetic.wasmmod.registry",
+    "refusal_ring_is_loud_and_introspectable",
+    case_refusal_ring_is_loud_and_introspectable
+);
+#[test]
+fn test_refusal_ring_is_loud_and_introspectable() {
+    assert_eq!(unsafe { case_refusal_ring_is_loud_and_introspectable() }, 0);
+}

@@ -57,9 +57,52 @@ const TST_MAX: usize = 32;
 const BNC_MAX: usize = 8;
 const FQN_CAP: usize = 64;
 const VER_CAP: usize = 32;
-const SIG_CAP: usize = 160;
+/* SIG_CAP must hold the longest valid ABI signature in the tree. The
+ * dark-export audit found silent refusals at 160 (13-arg faces:
+ * pm_metal_jit_c_object_compile_target is 173 bytes as stringified —
+ * macro-continuation whitespace counts). 256 holds it with headroom and
+ * a loud-refusal ring below turns any future overlong face into a
+ * manifest-test failure instead of a dark face. Costs 96B x EXP_MAX x
+ * MOD_MAX more .bss (~786 KiB on a ~89 MiB firmware bss; host/browser
+ * are heap-backed). The gen face reader has always allowed 512. */
+const SIG_CAP: usize = 256;
 const NAME_CAP: usize = 64;
 const OUT_CAP: usize = 4096;
+
+/* ---- loud-refusal ring ----
+ * A registration that cannot be stored (name/sig over cap, export table
+ * full, module table full) is recorded here and returned as `false` to
+ * the caller. The card's manifest test fails when this ring is non-empty
+ * at prove time — a public face may never disappear silently. */
+const REF_MAX: usize = 16;
+const REF_NAME_CAP: usize = 96;
+
+const REF_REASON_SIG_OVER_CAP: u8 = 1;
+const REF_REASON_NAME_OVER_CAP: u8 = 2;
+const REF_REASON_EXPORTS_FULL: u8 = 3;
+const REF_REASON_MODULES_FULL: u8 = 4;
+const REF_REASON_STORE_FAIL: u8 = 5;
+
+#[derive(Clone, Copy)]
+struct Refusal {
+    fqn: [u8; FQN_CAP],
+    fqn_len: u32,
+    name: [u8; REF_NAME_CAP],
+    name_len: u32,
+    reason: u8,
+    count: u32,
+}
+
+static REFUSALS: Mut<[Refusal; REF_MAX]> =
+    Mut(UnsafeCell::new([Refusal {
+        fqn: [0; FQN_CAP],
+        fqn_len: 0,
+        name: [0; REF_NAME_CAP],
+        name_len: 0,
+        reason: 0,
+        count: 0,
+    }; REF_MAX]));
+static N_REFUSALS: Mut<u32> = Mut(UnsafeCell::new(0));
 
 /* The sentinel handle: index = u32::MAX. A const struct literal is not an
  * accepted rsx static-initializer shape (the parser wraps struct lits in a
@@ -313,6 +356,69 @@ unsafe fn raw_ok(p: *const u8, len: u32) -> bool {
     !p.is_null() || len == 0
 }
 
+/// Record a refused registration into the loud-refusal ring (caller holds
+/// the table lock). The ring is deduplicated: a repeated refusal (the
+/// same fqn + name + reason) bumps `count` instead of consuming a row,
+/// so a ctor that fires per-seat records once. FQN/name longer than the
+/// row caps store their **prefix** — the row exists to name the culprit,
+/// and the introspection face reports the true lengths alongside.
+unsafe fn refusal_record(
+    fqn: *const u8,
+    fqn_len: usize,
+    name: *const u8,
+    name_len: usize,
+    reason: u8,
+) {
+    unsafe {
+        /* UnsafeCell<[Refusal; REF_MAX]>::get hands back a pointer to the
+         * array; the ring walks its rows, so view it as the element
+         * pointer (the [row; N] initializer shape is the rsx subset's
+         * only static form — same posture as TABLE). */
+        let ring = REFUSALS.0.get() as *mut Refusal;
+        let n = *N_REFUSALS.0.get();
+        let mut i = 0usize;
+        while i < n as usize && i < REF_MAX {
+            let r = ring.add(i);
+            if (*r).reason == reason
+                && (*r).fqn_len as usize == fqn_len
+                && (*r).name_len as usize == name_len
+                && span_eq((*r).fqn.as_ptr(), (*r).fqn_len as usize, fqn, fqn_len)
+                && span_eq((*r).name.as_ptr(), (*r).name_len as usize, name, name_len)
+            {
+                (*r).count += 1;
+                return;
+            }
+            i += 1;
+        }
+        if n as usize >= REF_MAX {
+            /* ring full: refuse the loudest way the no-alloc design
+             * allows — the newest refusal wins the last row. */
+            i = REF_MAX - 1;
+        } else {
+            let r = ring.add(n as usize);
+            (*r).reason = reason;
+            (*r).count = 1;
+            *N_REFUSALS.0.get() = n + 1;
+            i = n as usize;
+        }
+        let r = ring.add(i);
+        let fl = if fqn_len > FQN_CAP { FQN_CAP } else { fqn_len };
+        let nl = if name_len > REF_NAME_CAP { REF_NAME_CAP } else { name_len };
+        if !fqn.is_null() && fl > 0 {
+            let _ = span_put((*r).fqn.as_mut_ptr(), FQN_CAP, fqn, fl);
+            (*r).fqn_len = fqn_len as u32;
+        } else {
+            (*r).fqn_len = 0;
+        }
+        if !name.is_null() && nl > 0 {
+            let _ = span_put((*r).name.as_mut_ptr(), REF_NAME_CAP, name, nl);
+            (*r).name_len = name_len as u32;
+        } else {
+            (*r).name_len = 0;
+        }
+    }
+}
+
 /* ---- table ops (all under the caller-held lock) ---- */
 
 /// First dead slot, or -1 — publish reuses holes so every other live
@@ -440,6 +546,20 @@ unsafe fn export_set_sig(
         return false;
     }
     if name_len > NAME_CAP || sig_len > SIG_CAP {
+        /* loud refusal, never a silent dark face (see REF_* in budgets) */
+        unsafe {
+            refusal_record(
+                (*e).fqn.as_ptr(),
+                (*e).fqn_len as usize,
+                name,
+                name_len,
+                if name_len > NAME_CAP {
+                    REF_REASON_NAME_OVER_CAP
+                } else {
+                    REF_REASON_SIG_OVER_CAP
+                },
+            );
+        }
         return false;
     }
     let mut i = 0usize;
@@ -460,11 +580,29 @@ unsafe fn export_set_sig(
         i += 1;
     }
     if (*e).n_exports as usize >= EXP_MAX {
+        unsafe {
+            refusal_record(
+                (*e).fqn.as_ptr(),
+                (*e).fqn_len as usize,
+                name,
+                name_len,
+                REF_REASON_EXPORTS_FULL,
+            );
+        }
         return false;
     }
     let x = (*e).exports.as_mut_ptr().add((*e).n_exports as usize);
     let stored = unsafe { span_put((*x).name.as_mut_ptr(), NAME_CAP, name, name_len) };
     if stored == usize::MAX {
+        unsafe {
+            refusal_record(
+                (*e).fqn.as_ptr(),
+                (*e).fqn_len as usize,
+                name,
+                name_len,
+                REF_REASON_STORE_FAIL,
+            );
+        }
         return false;
     }
     (*x).name_len = stored as u32;
@@ -777,17 +915,31 @@ pub unsafe extern "C" fn pm_wasmmod_registry_mod_export(
             fqn_len as usize,
             pm_wasmmod_registry_container_kind_t::Resident,
         );
-        let ok = h.index != u32::MAX
-            && export_set_sig(
-                t,
-                h,
-                name_ptr,
-                name_len as usize,
-                kind,
-                ptr,
-                sig_ptr,
-                sig_len as usize,
-            );
+        if h.index == u32::MAX {
+            /* module table full or fqn store failed — a loud refusal,
+             * never a silent dark face */
+            unsafe {
+                refusal_record(
+                    fqn_ptr,
+                    fqn_len as usize,
+                    name_ptr,
+                    name_len as usize,
+                    REF_REASON_MODULES_FULL,
+                );
+            }
+            pm_util_lock_release(lock());
+            return 0;
+        }
+        let ok = export_set_sig(
+            t,
+            h,
+            name_ptr,
+            name_len as usize,
+            kind,
+            ptr,
+            sig_ptr,
+            sig_len as usize,
+        );
         pm_util_lock_release(lock());
         ok as i32
     }
@@ -930,6 +1082,79 @@ pub unsafe extern "C" fn pm_wasmmod_registry_export_at(
         }
         pm_util_lock_release(lock());
         rc
+    }
+}
+
+/* ---- loud-refusal introspection (manifest test + inspection faces) ---- */
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_refusal_count() -> u32 {
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let n = *N_REFUSALS.0.get();
+        pm_util_lock_release(lock());
+        n
+    }
+}
+
+/// One refusal row: fqn + export name (true lengths in the *_len_io outs —
+/// a row stores a prefix when a span overflows its row cap) + reason tag +
+/// repeat count. Returns 1 on success, 0 when `index` is out of range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_refusal_at(
+    index: u32,
+    fqn_buf: *mut u8,
+    fqn_len_io: *mut u32,
+    name_buf: *mut u8,
+    name_len_io: *mut u32,
+    reason_out: *mut u8,
+    count_out: *mut u32,
+) -> i32 {
+    unsafe {
+        pm_util_lock_acquire(lock());
+        let n = *N_REFUSALS.0.get();
+        let mut rc = 0;
+        if index < n {
+            let r = (REFUSALS.0.get() as *mut Refusal).add(index as usize);
+            rc = copy_span_to_buf((*r).fqn.as_ptr(), (*r).fqn_len as usize, fqn_buf, fqn_len_io);
+            if rc == 1 {
+                rc = copy_span_to_buf(
+                    (*r).name.as_ptr(),
+                    (*r).name_len as usize,
+                    name_buf,
+                    name_len_io,
+                );
+            }
+            if rc == 1 {
+                if !reason_out.is_null() {
+                    *reason_out = (*r).reason;
+                }
+                if !count_out.is_null() {
+                    *count_out = (*r).count;
+                }
+            }
+        }
+        if rc == 0 {
+            if !fqn_len_io.is_null() {
+                *fqn_len_io = 0;
+            }
+            if !name_len_io.is_null() {
+                *name_len_io = 0;
+            }
+        }
+        pm_util_lock_release(lock());
+        rc
+    }
+}
+
+/// Test face: clear the ring. Never called by product code — the ring is
+/// the persistent record of refused faces and only a test's setup resets it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pm_wasmmod_registry_refusal_reset() {
+    unsafe {
+        pm_util_lock_acquire(lock());
+        *N_REFUSALS.0.get() = 0;
+        pm_util_lock_release(lock());
     }
 }
 
@@ -1879,6 +2104,9 @@ crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_modu
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_module_at, "int32_t(uint32_t, uint8_t *, uint32_t *)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_export_count, "uint32_t(const uint8_t *, uint32_t)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_export_at, "int32_t(const uint8_t *, uint32_t, uint32_t, uint8_t *, uint32_t *, pm_wasmmod_registry_export_kind_t *, uint8_t *, uint32_t *)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_refusal_count, "uint32_t(void)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_refusal_at, "int32_t(uint32_t, uint8_t *, uint32_t *, uint8_t *, uint32_t *, uint8_t *, uint32_t *)");
+crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_refusal_reset, "void(void)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_test_register, "int32_t(const uint8_t *, uint32_t, const uint8_t *, uint32_t, pm_wasmmod_registry_test_fn_t)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_test_register_wasm, "int32_t(const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *, uint32_t)");
 crate::PM_MOD_EXPORT_RS!("pymergetic.wasmmod.registry", pm_wasmmod_registry_set_wasm_test_runner, "void(pm_wasmmod_registry_wasm_test_runner_t)");
