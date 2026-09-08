@@ -2,10 +2,19 @@
 //!
 //!   cargo run --features gen --bin wasmmod-gen -- [--check] [path]
 //!   cargo run --features build-machinery --bin wasmmod-gen -- …
+//!
+//! Host-only seat: the bin's muscle is this `main`, and it calls the
+//! crate's `gen` feature face (`gen_run_paths` — std::fs, toml, Path).
+//! Every kernel seat compiles the same file with an empty feature set,
+//! so `main` is cfg-guarded on the feature the bin already requires
+//! (`required-features = ["gen"]`): cargo builds the identical bin,
+//! the kernel TU lowers to an empty unit — no second face, no dark
+//! port (the C ABI the kernel exposes is pm_util_gen_run, unchanged).
 
 use std::env;
 use std::process::ExitCode;
 
+#[cfg(feature = "gen")]
 fn main() -> ExitCode {
     let mut check = false;
     let mut extra: Vec<String> = Vec::new();

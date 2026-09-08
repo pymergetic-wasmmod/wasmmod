@@ -26,9 +26,9 @@ impl MemSink {
         Self::default()
     }
 
-    pub fn insert(&mut self, path: &str, data: impl AsRef<[u8]>) {
+    pub fn insert(&mut self, path: &str, data: &[u8]) {
         self.files
-            .insert(String::from(path), data.as_ref().to_vec());
+            .insert(String::from(path), data.to_vec());
     }
 
     pub fn get(&self, path: &str) -> Option<&[u8]> {

@@ -16,6 +16,18 @@
 WASMMOD_DIR ?= extmod/wasmmod
 WASMMOD_ABS := $(TOP)/$(WASMMOD_DIR)
 
+# The rsx compiler card's flat TU, assembled from parts/ into the port
+# build dir — same bytes tools/rsx_assemble.py makes on the firmware
+# seats (the tree carries no flat file). The metal fw_lock includes it
+# through the env path PM_FW_RSX_FLAT. upywm (wasmmod-only tree) has no
+# metal and never defines this.
+ifneq ($(wildcard $(TOP)/extmod/metal/tools/rsx_assemble.py),)
+RSX_FLAT := $(BUILD)/rsx_compiler_flat.rs
+RSX_PARTS := $(wildcard $(TOP)/extmod/metal/src/pymergetic/metal/jit/rs/compiler/parts/*.rs)
+$(RSX_FLAT): $(RSX_PARTS) $(TOP)/extmod/metal/tools/rsx_assemble.py | $(BUILD)
+	$(Q)python3 $(TOP)/extmod/metal/tools/rsx_assemble.py -o $@
+endif
+
 # ports/webassembly sets CC=emcc after including extmod.mk.
 ifeq ($(notdir $(CURDIR)),webassembly)
 PM_WASMMOD_BROWSER := 1
@@ -121,14 +133,19 @@ WASMMOD_LOCK_A := $(BUILD)/libfw_lock.a
 ifeq ($(MICROPY_PY_METAL),1)
 WASMMOD_LOCK_SRC := $(TOP)/extmod/metal/port/fw_lock/lib.rs
 WASMMOD_LOCK_EXTRA := $(TOP)/extmod/metal/src/pymergetic/metal/net/http/asgi/__impl__.rs \
-	$(TOP)/extmod/metal/src/pymergetic/metal/jit/rs/compiler/__impl__.rs
+	$(TOP)/extmod/metal/src/pymergetic/metal/jit/rs/compiler/__impl__.rs \
+	$(RSX_FLAT)
+# the metal fw_lock includes the rsx card's flat TU through this env path.
+WASMMOD_LOCK_ENV := PM_FW_RSX_FLAT="$(abspath $(RSX_FLAT))"
 else
 WASMMOD_LOCK_SRC := $(WASMMOD_ABS)/ports/webassembly/fw_lock/lib.rs
 WASMMOD_LOCK_EXTRA :=
+WASMMOD_LOCK_ENV :=
 endif
 $(WASMMOD_LOCK_A): $(WASMMOD_LOCK_SRC) $(WASMMOD_LOCK_EXTRA) | $(BUILD)
 	$(ECHO) "RUSTC loader wasm32"
-	$(Q)rustc --edition 2024 --crate-type staticlib --crate-name fw_lock \
+	$(Q)$(WASMMOD_LOCK_ENV) \
+	rustc --edition 2024 --crate-type staticlib --crate-name fw_lock \
 		--target wasm32-unknown-unknown -C panic=abort -C opt-level=s \
 		-o $@ $<
 

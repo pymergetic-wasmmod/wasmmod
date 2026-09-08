@@ -1,3 +1,4 @@
+#![cfg(feature = "gen")]
 //! Host FS path for `pymergetic.util.gen` (feature = "gen").
 //!
 //! Card walk discovers write *paths*; faces come from the live registry after

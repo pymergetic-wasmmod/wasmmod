@@ -89,6 +89,24 @@ pub type pm_wasmmod_registry_fn_t = unsafe extern "C" fn(
     nresults: u32,
 ) -> i32;
 
+/// Bench case clock — twin of the C face's `pm_wasmmod_registry_bench_clock_t`
+/// (`__types__.h`): runs `iterations` ops, returns a monotonic u64 tick.
+/// The Rust face carried only the fn decls (`__exports__.rs` names the
+/// typedefs in param spellings); consumers that splice this face need the
+/// typedef itself — one definition per language, same ABI.
+pub type pm_wasmmod_registry_bench_clock_t = unsafe extern "C" fn() -> u64;
+
+/// Guest-pack bench runner — twin of the C face's
+/// `pm_wasmmod_registry_wasm_bench_runner_t`: runs a guest bench by wasm
+/// export name, timed like a native one. Missing twin of the same gap.
+pub type pm_wasmmod_registry_wasm_bench_runner_t = unsafe extern "C" fn(
+    fqn: *const u8,
+    fqn_len: u32,
+    export_name: *const u8,
+    export_len: u32,
+    iterations: u64,
+) -> i32;
+
 /// Construct an I32 value — twin of the C face's inline
 /// `pm_wasmmod_registry_value_i32` helper in `__types__.h`.
 #[inline]

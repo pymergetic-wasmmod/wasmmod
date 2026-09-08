@@ -1,3 +1,4 @@
+#![cfg(feature = "gen")]
 //! Host-only discovery when the live registry is empty for a card:
 //! - `impl = "py"` → scan `__init__.py` access faces from type hints (no python3)
 //! - else if `__impl__.c` has `PM_MOD_EXPORT_C` → scan call sites (guest / unlinked C)
