@@ -26,9 +26,18 @@ typedef struct pm_mod_boot {
     pm_mod_boot_ready_fn ready;
 } pm_mod_boot_t;
 
-typedef struct pm_mod_bootdep {
+typedef struct __attribute__((aligned(8))) pm_mod_bootdep {
     const char *fqn;
     const char *dep;
+    /* The struct is aligned(8) so sizeof == the linker's section stride —
+     * guest.h and guest.rs emit records aligned(8), and the collector
+     * counts (stop - start)/sizeof(record). On ELF32 the natural layout
+     * is sizeof 12 against a 16-byte section stride, misreading every
+     * record past the first as garbage (empty dep strings, phantom
+     * deps). aligned(8) makes sizeof 16 there and 24 on ELF64 — the
+     * stride on both classes, matching the Rust mirror's
+     * #[repr(C, align(8))]. Values are the enum above; only 0/1 ever
+     * stored. */
     uint32_t flags;
 } pm_mod_bootdep_t;
 

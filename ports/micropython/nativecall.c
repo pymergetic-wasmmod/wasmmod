@@ -1201,13 +1201,41 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
     }
 
     if (strcmp(sig, "int32_t(uint32_t, uint16_t, uint32_t)") == 0) {
-        /* net.zenoh.peer: peer locator (addr_be, port, mode). */
+        /* net.zenoh.peer: peer locator (addr_be, port, mode). The address is
+         * dotted-quad text ("127.0.0.1"), not a be32 int: a 31-bit small-int
+         * build (arm firmware, MICROPY_LONGINT_IMPL_NONE) cannot hold any
+         * ipv4 be32 above 0x3fffffff at all, so the int face was unpassable
+         * there. The glue parses the quad into the uint32_t the C face keeps
+         * — the card face itself does not change. */
         if (n_args != 3) {
-            mp_raise_TypeError(MP_ERROR_TEXT("peer needs three ints"));
+            mp_raise_TypeError(MP_ERROR_TEXT("peer needs addr str, port, mode"));
+        }
+        const char *a = mp_obj_str_get_str(args[0]);
+        uint32_t ip = 0;
+        uint32_t part = 0;
+        uint32_t octets = 0;
+        for (const char *c = a; ; c++) {
+            if (*c >= '0' && *c <= '9') {
+                part = part * 10u + (uint32_t)(*c - '0');
+                if (part > 255u) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("peer addr octet"));
+                }
+            } else if (*c == '.' || *c == '\0') {
+                if (part > 255u || (*c == '\0' && octets != 3u)) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("peer addr quad"));
+                }
+                ip = (ip << 8) | part;
+                part = 0;
+                octets++;
+                if (*c == '\0') {
+                    break;
+                }
+            } else {
+                mp_raise_ValueError(MP_ERROR_TEXT("peer addr char"));
+            }
         }
         return mp_obj_new_int(((int32_t (*)(uint32_t, uint16_t, uint32_t))p)(
-            (uint32_t)mp_obj_get_int(args[0]), (uint16_t)mp_obj_get_int(args[1]),
-            (uint32_t)mp_obj_get_int(args[2])));
+            ip, (uint16_t)mp_obj_get_int(args[1]), (uint32_t)mp_obj_get_int(args[2])));
     }
     if (strcmp(sig, "int32_t(uint8_t *)") == 0) {
         /* net.zenoh.zid: sole export with an uint8_t * out-param; it writes the
@@ -1535,12 +1563,13 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             return mp_obj_new_bytes((const byte *)&v, sizeof(v));
         }
         if (strcmp(export_name, "pm_types_registry_find") == 0) {
+            /* Presence probe, not a handle: every caller (guest/browser/
+             * firmware proves) only branches on found/not-found. A raw
+             * descriptor pointer as an int overflows the 31-bit small-int
+             * box on arm firmware (no longint), so the face answers bool. */
             const pm_type_descriptor_t *d = pm_types_registry_find(
                 mp_obj_str_get_str(args[0]));
-            if (d == NULL) {
-                return mp_const_none;
-            }
-            return mp_obj_new_int_from_uint((mp_uint_t)d);
+            return d != NULL ? mp_const_true : mp_const_none;
         }
         if (strcmp(export_name, "pm_types_name_hash") == 0) {
             return mp_obj_new_int(pm_types_name_hash(mp_obj_str_get_str(args[0])));
