@@ -5,10 +5,22 @@
  *
  * Copyright (c) 2026 Rouven Raudzus <raudzus@pymergetic.com>
  *
- * In-tree ELF64 ET_REL loader (x86_64 / aarch64). No dlopen / ld.so.
+ * In-tree ELF64/ELF32 ET_REL loader (x86_64 / aarch64 / arm). No dlopen / ld.so.
  *
  * Linked only when MICROPY_PY_WASM_ELF=1 (native seats). Browser/Emscripten
  * builds omit this file entirely (WASMMOD_EMSCRIPTEN → ELF=0).
+ *
+ * ELF32 (arm) objects come from the same one-file TCC recipe as the 64-bit
+ * seats (tcc_instances.mk, TCC_TARGET_ARM) and — unlike gcc/clang — TCC's
+ * arm backend emits SHT_REL with implicit addends: no r_addend field, the
+ * addend is the word already at the patch site. The walk reads it out,
+ * applies, writes the result back. The non-PIC reloc set TCC emits is small
+ * (probed on a real object, not read from a table): ABS32, REL32, PC24 (BL
+ * / b imm24), THM_CALL / THM_JUMP24 (thumb BL / b.w, encoding pair), MOVW
+ * / MOVT (literal materialization, cpuver>=7), V4BX, TLS_LE32, NONE.
+ * GOT-family relocs only appear under CONFIG_TCC_PIC, which no seat
+ * defines; reloc_needs_got still knows R_ARM_GOT_PREL so a PIC object
+ * fails politely (unresolved GOT slot), never silently.
  */
 
 #ifndef MICROPY_PY_WASM_ELF
@@ -29,8 +41,10 @@
 
 #define EI_NIDENT 16
 #define ET_REL 1
+#define EM_ARM 40
 #define EM_X86_64 62
 #define EM_AARCH64 183
+#define ELFCLASS32 1
 #define ELFCLASS64 2
 #define ELFDATA2LSB 1
 #define SHT_NULL 0
@@ -90,10 +104,33 @@
 #define R_AARCH64_ADR_GOT_PAGE 311
 #define R_AARCH64_LD64_GOT_LO12_NC 312
 
+/* ARM (armv7) — the numbers from TCC's elf.h, verified against the real
+ * objects the vendored backend emits (see the file header). PC24/THM_* are
+ * the branch pair, MOVW/MOVT the literal pair, TLS_LE32 the only TLS form
+ * a static link ever sees (THM_PC22 is the modern ABI's THM_CALL). */
+#define R_ARM_NONE 0
+#define R_ARM_PC24 1
+#define R_ARM_ABS32 2
+#define R_ARM_REL32 3
+#define R_ARM_THM_PC22 10
+#define R_ARM_CALL 28
+#define R_ARM_JUMP24 29
+#define R_ARM_THM_JUMP24 30
+#define R_ARM_TARGET1 38
+#define R_ARM_V4BX 40
+#define R_ARM_MOVW_ABS_NC 43
+#define R_ARM_MOVT_ABS 44
+#define R_ARM_THM_MOVW_ABS_NC 47
+#define R_ARM_THM_MOVT_ABS 48
+#define R_ARM_GOT_PREL 96
+#define R_ARM_TLS_LE32 108
+
 #if defined(__aarch64__)
 #define MP_WASM_ELF_HOST_EM EM_AARCH64
 #elif defined(__x86_64__)
 #define MP_WASM_ELF_HOST_EM EM_X86_64
+#elif defined(__arm__) && !defined(__aarch64__)
+#define MP_WASM_ELF_HOST_EM EM_ARM
 #else
 #define MP_WASM_ELF_HOST_EM 0
 #endif
@@ -152,6 +189,64 @@ _Static_assert(sizeof(Elf64_Shdr) == 64, "Elf64_Shdr size");
 _Static_assert(sizeof(Elf64_Sym) == 24, "Elf64_Sym size");
 _Static_assert(sizeof(Elf64_Rela) == 24, "Elf64_Rela size");
 
+/* ELF32 LE (arm) — same rule as the 64 structs: natural alignment matches
+ * the on-disk layout, so no packing. Only the fields the loader reads. */
+typedef struct {
+    uint8_t e_ident[EI_NIDENT];
+    uint16_t e_type;
+    uint16_t e_machine;
+    uint32_t e_version;
+    uint32_t e_entry;
+    uint32_t e_phoff;
+    uint32_t e_shoff;
+    uint32_t e_flags;
+    uint16_t e_ehsize;
+    uint16_t e_phentsize;
+    uint16_t e_phnum;
+    uint16_t e_shentsize;
+    uint16_t e_shnum;
+    uint16_t e_shstrndx;
+} Elf32_Ehdr;
+
+typedef struct {
+    uint32_t sh_name;
+    uint32_t sh_type;
+    uint32_t sh_flags;
+    uint32_t sh_addr;
+    uint32_t sh_offset;
+    uint32_t sh_size;
+    uint32_t sh_link;
+    uint32_t sh_info;
+    uint32_t sh_addralign;
+    uint32_t sh_entsize;
+} Elf32_Shdr;
+
+typedef struct {
+    uint32_t st_name;
+    uint32_t st_value;
+    uint32_t st_size;
+    uint8_t st_info;
+    uint8_t st_other;
+    uint16_t st_shndx;
+} Elf32_Sym;
+
+/* SHT_REL entry — the implicit-addend form: r_info packs sym<<8|type in
+ * ELF32 (not sym<<32 like ELF64). */
+typedef struct {
+    uint32_t r_offset;
+    uint32_t r_info;
+} Elf32_Rel;
+
+_Static_assert(sizeof(Elf32_Ehdr) == 52, "Elf32_Ehdr size");
+_Static_assert(sizeof(Elf32_Shdr) == 40, "Elf32_Shdr size");
+_Static_assert(sizeof(Elf32_Sym) == 16, "Elf32_Sym size");
+_Static_assert(sizeof(Elf32_Rel) == 8, "Elf32_Rel size");
+
+#define ELF32_ST_TYPE(i) ((i) & 0xf)
+#define ELF32_ST_BIND(i) ((i) >> 4)
+#define ELF32_R_SYM(i) ((i) >> 8)
+#define ELF32_R_TYPE(i) ((i) & 0xff)
+
 static void set_err(char *errbuf, size_t errbuf_len, const char *msg) {
     if (errbuf == NULL || errbuf_len == 0) {
         return;
@@ -174,6 +269,9 @@ static bool reloc_needs_got(uint16_t em, uint32_t typ) {
     }
     if (em == EM_AARCH64) {
         return typ == R_AARCH64_ADR_GOT_PAGE || typ == R_AARCH64_LD64_GOT_LO12_NC;
+    }
+    if (em == EM_ARM) {
+        return typ == R_ARM_GOT_PREL;
     }
     return false;
 }
@@ -273,14 +371,166 @@ static bool aarch64_patch_branch26(uint32_t *ins, int64_t byte_off, char *errbuf
     return true;
 }
 
+/* ---------------- ARM (armv7) patch helpers ----------------
+ * Same shape as the aarch64 helpers: patch one instruction in place, range
+ * check first, errbuf on refusal. The encodings are the 1997 ARM ABI ones
+ * TCC emits — externals/tcc/arm-link.c is the reference for the math. */
+
+/* BL / B (ARM state): imm24 = (S + A - (P + 8)) >> 2, sign 24 bits. The +8
+ * is the archaic ARM PC bias (an ARM-state instruction reads PC as its own
+ * address + 8); in TCC's form it rides inside A (the decoded imm24 already
+ * carries -8), so the patch below folds it in exactly like TCC's
+ * x += val - addr. A call to a thumb target would need BLX — TCC emits ARM
+ * state functions only, so a bit-0 target is a refuse, not a patch. */
+static bool arm_patch_branch24(uint32_t *ins, int64_t byte_off, char *errbuf, size_t errbuf_len) {
+    if ((byte_off & 3) != 0) {
+        set_err(errbuf, errbuf_len, "arm branch misaligned");
+        return false;
+    }
+    int64_t imm = byte_off >> 2;
+    if ((imm >> 23) != 0 && (imm >> 23) != -1) {
+        set_err(errbuf, errbuf_len, "arm branch out of range");
+        return false;
+    }
+    uint32_t i = *ins;
+    i = (i & 0xff000000u) | ((uint32_t)imm & 0x00ffffffu);
+    *ins = i;
+    return true;
+}
+
+/* Thumb BL / B.W (encoding pair, THM_PC22 / THM_JUMP24): byte_off is the
+ * S + A - P delta; imm24 = byte_off >> 1 packs across the two halfwords as
+ * S:I1:I2:imm10:imm11 with J1/J2 storing the inverted I1/I2 XOR S — the
+ * same forward rule TCC's relocate() walks backwards. Range ±16MiB like
+ * TCC (x in [-0x1000000, 0x1000000)). The thumb PC bias (P+4) rides in A
+ * exactly like the ARM one. */
+static bool arm_patch_thm_branch22(uint16_t *hw, int64_t byte_off, char *errbuf, size_t errbuf_len) {
+    if ((byte_off & 1) != 0) {
+        set_err(errbuf, errbuf_len, "thumb branch misaligned");
+        return false;
+    }
+    int64_t imm = byte_off >> 1;
+    if (imm < -(1 << 23) || imm >= (1 << 23)) {
+        set_err(errbuf, errbuf_len, "thumb branch out of range");
+        return false;
+    }
+    {
+        int64_t x = imm << 1;
+        if (x >= 0x1000000 || x < -0x1000000) {
+            set_err(errbuf, errbuf_len, "thumb branch out of range");
+            return false;
+        }
+    }
+    uint32_t s = (uint32_t)((imm >> 23) & 1);
+    uint32_t i1 = (uint32_t)((imm >> 22) & 1);
+    uint32_t i2 = (uint32_t)((imm >> 21) & 1);
+    uint32_t j1 = (s ^ (i1 ^ 1)) & 1;
+    uint32_t j2 = (s ^ (i2 ^ 1)) & 1;
+    uint32_t imm10 = (uint32_t)((imm >> 11) & 0x3ff);
+    uint32_t imm11 = (uint32_t)(imm & 0x7ff);
+    uint16_t hi = hw[0];
+    uint16_t lo = hw[1];
+    hi = (uint16_t)((hi & 0xf800u) | (s << 10) | imm10);
+    lo = (uint16_t)((lo & 0xd000u) | (j1 << 13) | (j2 << 11) | imm11);
+    hw[0] = hi;
+    hw[1] = lo;
+    return true;
+}
+
+/* MOVW / MOVT (A1 encoding, ARM state): imm16 = imm4 (bits 16-19) : imm12
+ * (bits 0-11) — the exact split TCC's relocate() writes ((imm4 << 12) |
+ * imm12). MOVW takes the low 16 bits, MOVT the high ones; emitted only at
+ * CONFIG_TCC_CPUVER >= 7 (the default 5 uses literal pools). */
+static void arm_patch_imm16_a1(uint32_t *ins, uint32_t imm16) {
+    uint32_t i = *ins;
+    i &= ~((0xfu << 16) | 0x0fffu);
+    i |= ((imm16 >> 12) & 0xfu) << 16;
+    i |= imm16 & 0x0fffu;
+    *ins = i;
+}
+
 /* One relocation, shared by the single- and multi-object loaders.
  * P: patch site (already base-adjusted). S: resolved symbol address.
  * got_base: image offset of the GOT. got_slot: this symbol's global GOT
  * slot index (only read for GOTPCREL-family and GOT32 relocs). Returns
- * false with errbuf set on overflow / unsupported / out-of-range. */
-static bool elf_apply_rela(uint8_t *P, uintptr_t S, int64_t A, uint32_t typ,
+ * false with errbuf set on overflow / unsupported / out-of-range.
+ * em: the object's e_machine — the apply switch dispatches on it first
+ * because ARM type numbers collide with x86_64's (R_ARM_PC24 == 1 ==
+ * R_X86_64_64), so typ alone cannot route. */
+static bool elf_apply_rela(uint16_t em, uint8_t *P, uintptr_t S, int64_t A, uint32_t typ,
     uint8_t *img_base, size_t got_base, uint32_t got_slot,
     char *errbuf, size_t errbuf_len) {
+    if (em == EM_ARM) {
+        switch (typ) {
+            case R_ARM_NONE:
+            case R_ARM_V4BX:
+                break;
+            case R_ARM_ABS32:
+            case R_ARM_TARGET1: {
+                uint64_t v = (uint64_t)(S + (uintptr_t)A);
+                if (v > 0xffffffffu) {
+                    set_err(errbuf, errbuf_len, "R_ARM_ABS32 overflow");
+                    return false;
+                }
+                *(uint32_t *)P = (uint32_t)v;
+                break;
+            }
+            case R_ARM_REL32: {
+                int64_t v = (int64_t)S + A - (int64_t)(uintptr_t)P;
+                *(int32_t *)P = (int32_t)v;
+                break;
+            }
+            case R_ARM_PC24:
+            case R_ARM_CALL:
+            case R_ARM_JUMP24: {
+                /* A is the decoded imm24 placeholder — for a BL site that is
+                 * -8 (the ARM PC bias), folded in exactly like TCC's
+                 * x += val - addr. No bias here: it rides in A. */
+                int64_t off = (int64_t)S + A - (int64_t)(uintptr_t)P;
+                if ((S & 1u) != 0u) {
+                    set_err(errbuf, errbuf_len, "arm branch to thumb target");
+                    return false;
+                }
+                if (!arm_patch_branch24((uint32_t *)P, off, errbuf, errbuf_len)) {
+                    return false;
+                }
+                break;
+            }
+            case R_ARM_THM_PC22:
+            case R_ARM_THM_JUMP24: {
+                /* Same rule as PC24: A is the decoded pair placeholder (the
+                 * thumb PC bias rides in it), the patch is S + A - P. */
+                int64_t off = (int64_t)S + A - (int64_t)(uintptr_t)P;
+                if (!arm_patch_thm_branch22((uint16_t *)P, off, errbuf, errbuf_len)) {
+                    return false;
+                }
+                break;
+            }
+            case R_ARM_MOVW_ABS_NC:
+            case R_ARM_THM_MOVW_ABS_NC:
+                arm_patch_imm16_a1((uint32_t *)P, (uint32_t)((S + (uintptr_t)A) & 0xffffu));
+                break;
+            case R_ARM_MOVT_ABS:
+            case R_ARM_THM_MOVT_ABS:
+                arm_patch_imm16_a1((uint32_t *)P, (uint32_t)(((S + (uintptr_t)A) >> 16) & 0xffffu));
+                break;
+            case R_ARM_TLS_LE32: {
+                /* value = TLS offset of the symbol in this image's block. S
+                 * was redirected into the materialized TLS block at resolve
+                 * time; the offset is what the r0-relative load computes. */
+                int64_t v = (int64_t)S - (int64_t)(uintptr_t)tls_img_block;
+                *(int32_t *)P = (int32_t)v;
+                break;
+            }
+            default: {
+                char msg[80];
+                snprintf(msg, sizeof(msg), "unsupported arm reloc %u", (unsigned)typ);
+                set_err(errbuf, errbuf_len, msg);
+                return false;
+            }
+        }
+        return true;
+    }
     switch (typ) {
         case R_X86_64_NONE: // also R_AARCH64_NONE
             break;
@@ -428,15 +678,43 @@ static bool parse_ehdr(const uint8_t *buf, uint32_t len, Elf64_Ehdr *eh, char *e
     return true;
 }
 
-static bool get_shdr(const uint8_t *buf, uint32_t len, const Elf64_Ehdr *eh, uint16_t i, Elf64_Shdr *sh) {
-    if (i >= eh->e_shnum) {
+/* ELF32 twins — same gates, same error strings (the seat cannot tell which
+ * class it loaded from a failure message, and should not have to). */
+static bool parse_ehdr32(const uint8_t *buf, uint32_t len, Elf32_Ehdr *eh, char *errbuf, size_t errbuf_len) {
+    if (buf == NULL || len < sizeof(Elf32_Ehdr)) {
+        set_err(errbuf, errbuf_len, "elf truncated");
         return false;
     }
-    uint64_t off = eh->e_shoff + (uint64_t)i * eh->e_shentsize;
-    if (off + sizeof(Elf64_Shdr) > len) {
+    if (buf[0] != 0x7f || buf[1] != 'E' || buf[2] != 'L' || buf[3] != 'F') {
+        set_err(errbuf, errbuf_len, "not ELF");
         return false;
     }
-    memcpy(sh, buf + off, sizeof(*sh));
+    if (buf[4] != ELFCLASS32 || buf[5] != ELFDATA2LSB) {
+        set_err(errbuf, errbuf_len, "need ELF32 LE");
+        return false;
+    }
+    memcpy(eh, buf, sizeof(*eh));
+    if (eh->e_type != ET_REL) {
+        set_err(errbuf, errbuf_len, "need ET_REL");
+        return false;
+    }
+    if (MP_WASM_ELF_HOST_EM == 0) {
+        set_err(errbuf, errbuf_len, "ELF host arch unsupported");
+        return false;
+    }
+    if (eh->e_machine != MP_WASM_ELF_HOST_EM) {
+        set_err(errbuf, errbuf_len, "ELF e_machine != host arch");
+        return false;
+    }
+    if (eh->e_shnum == 0 || eh->e_shentsize < sizeof(Elf32_Shdr)) {
+        set_err(errbuf, errbuf_len, "bad section headers");
+        return false;
+    }
+    uint64_t sh_end = (uint64_t)eh->e_shoff + (uint64_t)eh->e_shnum * eh->e_shentsize;
+    if (eh->e_shoff >= len || sh_end > len) {
+        set_err(errbuf, errbuf_len, "shdr out of range");
+        return false;
+    }
     return true;
 }
 
@@ -445,6 +723,191 @@ static uintptr_t align_up(uintptr_t v, uintptr_t a) {
         return v;
     }
     return (v + a - 1) & ~(a - 1);
+}
+
+/* ---------------- class-agnostic relocation reader ----------------
+ * One entry shape for both classes and both section forms, so the walk
+ * loops (single- and multi-object) never branch on class per entry:
+ *
+ *   SHT_RELA (any class): sym/type from r_info, addend = r_addend
+ *   SHT_REL  (any class): same extraction, addend = the word already at
+ *                   the patch site (implicit — TCC's arm backend is the
+ *                   emitter: PTR_SIZE==8 → RELA, else REL, tcc.h)
+ *
+ * The implicit addend is read from the copied image (target_base) and
+ * handed to elf_apply_rela exactly like an explicit one; the patch writes
+ * the result back over it. Partial-field relocs (branch immediates) carry
+ * their addend inside the immediate bits — decoded per type, the exact
+ * inverse of what externals/tcc/arm-link.c folds back in. */
+typedef struct {
+    uint32_t sym;
+    uint32_t typ;
+    uint64_t off;
+    int64_t addend;
+} elf_rel_ent_t;
+
+/* Bytes the patch writes at the site (0 = instruction-bits-only). Used by
+ * both walks to reject writes past the target section's end. Machine-paired
+ * like the apply switch: the ARM numbers collide with x86_64's, so the
+ * default-4 branch must not run on an EM_ARM object. */
+static size_t elf_reloc_write_size(uint16_t em, uint32_t typ) {
+    if (em == EM_ARM) {
+        switch (typ) {
+            case R_ARM_NONE:
+            case R_ARM_V4BX:
+                return 0;
+            case R_ARM_ABS32:
+            case R_ARM_TARGET1:
+            case R_ARM_REL32:
+            case R_ARM_TLS_LE32:
+                return 4;
+            default:
+                return 0;  /* branch/imm-field patches never widen the site */
+        }
+    }
+    switch (typ) {
+        case R_X86_64_NONE: // also R_AARCH64_NONE (0 on both)
+            return 0;
+        case R_X86_64_64:
+        case R_AARCH64_ABS64:
+        case R_X86_64_PC64:
+        case R_AARCH64_PREL64:
+            return 8;
+        default:
+            return 4;
+    }
+}
+
+static bool elf_read_rel(const uint8_t *buf, uint32_t len, uint32_t sec_type,
+    uint64_t sec_off, uint32_t ent_size, uint32_t r,
+    uint8_t *target_base, uint32_t target_size, elf_rel_ent_t *ent) {
+    uint64_t off = sec_off + (uint64_t)r * ent_size;
+    if (ent == NULL || ent_size == 0 || off > len) {
+        return false;
+    }
+    if (sec_type == SHT_RELA) {
+        if (ent_size >= 24) {
+            /* ELF64_Rela: r_offset, r_info (sym<<32|typ), r_addend. */
+            const Elf64_Rela *rela;
+            if (off + sizeof(Elf64_Rela) > len) {
+                return false;
+            }
+            rela = (const Elf64_Rela *)(buf + off);
+            ent->sym = (uint32_t)ELF64_R_SYM(rela->r_info);
+            ent->typ = (uint32_t)ELF64_R_TYPE(rela->r_info);
+            ent->off = rela->r_offset;
+            ent->addend = rela->r_addend;
+            return true;
+        }
+        {
+            /* ELF32_Rela: r_offset, r_info (sym<<8|typ), r_addend — 12
+             * bytes, natural alignment keeps the layout packed as written
+             * (no emitter in this tree produces one; read anyway). */
+            uint32_t w[3];
+            if (off + 12 > len) {
+                return false;
+            }
+            memcpy(w, buf + off, 12);
+            ent->off = w[0];
+            ent->sym = ELF32_R_SYM(w[1]);
+            ent->typ = ELF32_R_TYPE(w[1]);
+            ent->addend = (int32_t)w[2];
+            return true;
+        }
+    }
+    if (sec_type != SHT_REL) {
+        return false;
+    }
+    if (ent_size >= 16) {
+        /* ELF64_Rel (no emitter here either): sym<<32|typ, addend 0 — the
+         * ELF64 world pairs Rel with RELA-style explicit addends, so an
+         * ELF64 SHT_REL has no implicit addend to read. */
+        uint32_t w[2];
+        uint64_t info;
+        if (off + 16 > len) {
+            return false;
+        }
+        memcpy(w, buf + off, 8);
+        memcpy(&info, buf + off + 8, 8);
+        ent->off = ((uint64_t)w[1] << 32) | w[0];
+        ent->sym = (uint32_t)ELF64_R_SYM(info);
+        ent->typ = (uint32_t)ELF64_R_TYPE(info);
+        ent->addend = 0;
+        return true;
+    }
+    {
+        /* ELF32_Rel — the arm form this loader exists for. */
+        const Elf32_Rel *rel;
+        uint32_t word;
+        if (off + sizeof(Elf32_Rel) > len) {
+            return false;
+        }
+        rel = (const Elf32_Rel *)(buf + off);
+        ent->sym = ELF32_R_SYM(rel->r_info);
+        ent->typ = ELF32_R_TYPE(rel->r_info);
+        ent->off = rel->r_offset;
+        /* Implicit addend: the on-disk word at the patch site. Full-word
+         * relocs (ABS32/REL32/TLS_LE32) take it as-is. Partial-field
+         * relocs carry it in their immediate bits — decoded per type, the
+         * exact inverse of what arm-link.c's relocate() folds back in
+         * (PC24: imm24<<2 sign-26; THM pair: the S:J1:J2:imm10:imm11
+         * spread; MOVW/MOVT: the A1 imm4:imm12 split). */
+        if (target_base == NULL || ent->off > target_size
+            || target_size - ent->off < 4) {
+            return false;
+        }
+        memcpy(&word, target_base + ent->off, 4);
+        switch (ent->typ) {
+            case R_ARM_PC24:
+            case R_ARM_CALL:
+            case R_ARM_JUMP24: {
+                /* imm24<<2, sign-extended — the placeholder's own -8 (the
+                 * ARM PC bias) rides inside it, exactly TCC's decode. The
+                 * sign bit (imm24 bit 23) lands at bit 25 after <<2, so the
+                 * correction is 1<<26 — half that (0x02000000) is the thumb
+                 * pair's value and sign-mangles every backward BL. */
+                uint32_t x = word & 0x00ffffffu;
+                int32_t sx = (int32_t)(x << 2);
+                if (x & 0x00800000u) {
+                    sx -= 0x04000000;
+                }
+                ent->addend = sx;
+                break;
+            }
+            case R_ARM_THM_PC22:
+            case R_ARM_THM_JUMP24: {
+                uint16_t hi = (uint16_t)(word & 0xffffu);
+                uint16_t lo = (uint16_t)(word >> 16);
+                uint32_t s = (hi >> 10) & 1u;
+                uint32_t j1 = (lo >> 13) & 1u;
+                uint32_t j2 = (lo >> 11) & 1u;
+                uint32_t i1 = (j1 ^ s) ^ 1;
+                uint32_t i2 = (j2 ^ s) ^ 1;
+                int32_t x = (int32_t)((s << 24) | (i1 << 23) | (i2 << 22)
+                    | ((hi & 0x3ffu) << 12) | ((lo & 0x7ffu) << 1));
+                if (x & 0x01000000) {
+                    x -= 0x02000000;
+                }
+                ent->addend = x;
+                break;
+            }
+            case R_ARM_MOVW_ABS_NC:
+            case R_ARM_MOVT_ABS:
+            case R_ARM_THM_MOVW_ABS_NC:
+            case R_ARM_THM_MOVT_ABS: {
+                /* A1 encoding: imm16 = imm4<<12 | imm12 (bits 16-19, 0-11).
+                 * The placeholder carries 0; decode for completeness. */
+                uint32_t imm16 = ((word >> 4) & 0xf000u) | (word & 0x0fffu);
+                ent->addend = (int32_t)imm16;
+                break;
+            }
+            default:
+                /* Full-word relocs and anything the patch treats as one. */
+                ent->addend = (int32_t)word;
+                break;
+        }
+        return true;
+    }
 }
 
 static char elf_resolve_err[160];
@@ -485,6 +948,197 @@ void mp_wasm_elf_image_free(mp_wasm_elf_image_t *img) {
     MICROPY_WASM_FREE(img);
 }
 
+/* ---------------- class-normalized object view ----------------
+ * One view over an ELF64 or ELF32 ET_REL object: both load paths (single-
+ * and multi-object) consume this, so the class difference (Ehdr/Shdr/Sym
+ * layout, r_info packing, REL vs RELA) lives in exactly one place — these
+ * accessors. Fill with elf_obj_parse(); every field read goes through
+ * the elf_obj_* helpers, never through a raw Elf{32,64}_ struct again. */
+typedef struct {
+    const uint8_t *buf;
+    uint32_t len;
+    bool is32;
+    uint16_t machine;
+    uint16_t shnum;
+    uint16_t shentsize;
+    uint64_t shoff;
+    int symtab_i;
+    uint64_t sym_off;     /* symtab payload offset */
+    uint32_t sym_entsize; /* per-entry stride */
+    uint32_t nsym;
+    uint64_t str_off;     /* strtab payload offset */
+    uint32_t str_size;
+} elf_obj_t;
+
+typedef struct {
+    uint32_t name;
+    uint32_t type;
+    uint64_t flags;
+    uint64_t offset;
+    uint64_t size;
+    uint32_t link;
+    uint32_t info;
+    uint64_t addralign;
+    uint32_t entsize;
+} elf_obj_shdr_t;
+
+typedef struct {
+    uint32_t name;
+    uint64_t value;
+    uint64_t size;
+    uint8_t info;
+    uint16_t shndx;
+} elf_obj_sym_t;
+
+/* Read section header i (class-normalized). */
+static bool elf_obj_shdr(const elf_obj_t *o, uint16_t i, elf_obj_shdr_t *sh) {
+    uint64_t off;
+    if (sh == NULL || i >= o->shnum) {
+        return false;
+    }
+    off = o->shoff + (uint64_t)i * o->shentsize;
+    if (o->is32) {
+        Elf32_Shdr s;
+        if (off + sizeof(s) > o->len) {
+            return false;
+        }
+        memcpy(&s, o->buf + off, sizeof(s));
+        sh->name = s.sh_name;
+        sh->type = s.sh_type;
+        sh->flags = s.sh_flags;
+        sh->offset = s.sh_offset;
+        sh->size = s.sh_size;
+        sh->link = s.sh_link;
+        sh->info = s.sh_info;
+        sh->addralign = s.sh_addralign;
+        sh->entsize = s.sh_entsize;
+        return true;
+    }
+    {
+        Elf64_Shdr s;
+        if (off + sizeof(s) > o->len) {
+            return false;
+        }
+        memcpy(&s, o->buf + off, sizeof(s));
+        sh->name = s.sh_name;
+        sh->type = s.sh_type;
+        sh->flags = s.sh_flags;
+        sh->offset = s.sh_offset;
+        sh->size = s.sh_size;
+        sh->link = s.sh_link;
+        sh->info = s.sh_info;
+        sh->addralign = s.sh_addralign;
+        sh->entsize = (uint32_t)s.sh_entsize;
+        return true;
+    }
+}
+
+/* Parse ehdr + locate symtab/strtab. Both class parsers gate the same way
+ * (magic, class byte, ET_REL, host e_machine, shdr bounds) — the ONLY
+ * class difference is which struct they memcpy. */
+static bool elf_obj_parse(elf_obj_t *o, const uint8_t *buf, uint32_t len,
+    char *errbuf, size_t errbuf_len) {
+    uint16_t i;
+    memset(o, 0, sizeof(*o));
+    o->buf = buf;
+    o->len = len;
+    if (buf != NULL && len >= 5 && buf[4] == ELFCLASS32) {
+        Elf32_Ehdr eh;
+        if (!parse_ehdr32(buf, len, &eh, errbuf, errbuf_len)) {
+            return false;
+        }
+        o->is32 = true;
+        o->machine = eh.e_machine;
+        o->shnum = eh.e_shnum;
+        o->shentsize = eh.e_shentsize;
+        o->shoff = eh.e_shoff;
+    } else {
+        Elf64_Ehdr eh;
+        if (!parse_ehdr(buf, len, &eh, errbuf, errbuf_len)) {
+            return false;
+        }
+        o->is32 = false;
+        o->machine = eh.e_machine;
+        o->shnum = eh.e_shnum;
+        o->shentsize = eh.e_shentsize;
+        o->shoff = eh.e_shoff;
+    }
+    /* Locate the symtab and validate both halves. */
+    for (i = 0; i < o->shnum; ++i) {
+        elf_obj_shdr_t sh;
+        if (!elf_obj_shdr(o, i, &sh)) {
+            set_err(errbuf, errbuf_len, "bad shdr");
+            return false;
+        }
+        if (sh.type == SHT_SYMTAB) {
+            elf_obj_shdr_t strsh;
+            o->symtab_i = (int)i;
+            if (sh.link >= o->shnum || !elf_obj_shdr(o, (uint16_t)sh.link, &strsh)
+                || strsh.type != SHT_STRTAB
+                || sh.offset + sh.size > len
+                || strsh.offset + strsh.size > len
+                || sh.entsize < (o->is32 ? sizeof(Elf32_Sym) : sizeof(Elf64_Sym))) {
+                set_err(errbuf, errbuf_len, "bad symtab");
+                return false;
+            }
+            o->sym_off = sh.offset;
+            o->sym_entsize = (uint32_t)sh.entsize;
+            o->nsym = (uint32_t)(sh.size / sh.entsize);
+            o->str_off = strsh.offset;
+            o->str_size = (uint32_t)strsh.size;
+            return true;
+        }
+    }
+    set_err(errbuf, errbuf_len, "no symtab");
+    return false;
+}
+
+/* Read symbol k (class-normalized). */
+static bool elf_obj_sym(const elf_obj_t *o, uint32_t k, elf_obj_sym_t *s) {
+    uint64_t off;
+    if (s == NULL || k >= o->nsym) {
+        return false;
+    }
+    off = o->sym_off + (uint64_t)k * o->sym_entsize;
+    if (o->is32) {
+        Elf32_Sym e;
+        if (off + sizeof(e) > o->len) {
+            return false;
+        }
+        memcpy(&e, o->buf + off, sizeof(e));
+        s->name = e.st_name;
+        s->value = e.st_value;
+        s->size = e.st_size;
+        s->info = e.st_info;
+        s->shndx = e.st_shndx;
+        return true;
+    }
+    {
+        Elf64_Sym e;
+        if (off + sizeof(e) > o->len) {
+            return false;
+        }
+        memcpy(&e, o->buf + off, sizeof(e));
+        s->name = e.st_name;
+        s->value = e.st_value;
+        s->size = e.st_size;
+        s->info = e.st_info;
+        s->shndx = e.st_shndx;
+        return true;
+    }
+}
+
+/* Symbol name (in the object's strtab) or NULL. */
+static const char *elf_obj_sym_name(const elf_obj_t *o, const elf_obj_sym_t *s) {
+    if (s->name == 0 || s->name >= o->str_size) {
+        return NULL;
+    }
+    return (const char *)(o->buf + o->str_off + s->name);
+}
+
+#define ELF_OBJ_ST_TYPE(i) ((i) & 0xf)
+#define ELF_OBJ_ST_BIND(i) ((i) >> 4)
+
 bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     mp_wasm_elf_sym_resolve_t resolve, void *resolve_ctx,
     mp_wasm_elf_image_t **out, char *errbuf, size_t errbuf_len) {
@@ -493,102 +1147,74 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
         return false;
     }
     *out = NULL;
-    Elf64_Ehdr eh;
-    if (!parse_ehdr(elf, len, &eh, errbuf, errbuf_len)) {
+    elf_obj_t o;
+    if (!elf_obj_parse(&o, elf, len, errbuf, errbuf_len)) {
         return false;
     }
 
     // Layout ALLOC sections into a contiguous RWX image.
-    uintptr_t *sec_addr = MICROPY_WASM_MALLOC((size_t)eh.e_shnum * sizeof(uintptr_t));
+    uintptr_t *sec_addr = MICROPY_WASM_MALLOC((size_t)o.shnum * sizeof(uintptr_t));
     if (sec_addr == NULL) {
         set_err(errbuf, errbuf_len, "oom");
         return false;
     }
-    memset(sec_addr, 0, (size_t)eh.e_shnum * sizeof(uintptr_t));
+    memset(sec_addr, 0, (size_t)o.shnum * sizeof(uintptr_t));
 
     size_t image_size = 0;
-    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
-        Elf64_Shdr sh;
-        if (!get_shdr(elf, len, &eh, i, &sh)) {
+    for (uint16_t i = 0; i < o.shnum; ++i) {
+        elf_obj_shdr_t sh;
+        if (!elf_obj_shdr(&o, i, &sh)) {
             MICROPY_WASM_FREE(sec_addr);
             set_err(errbuf, errbuf_len, "bad shdr");
             return false;
         }
-        if (!(sh.sh_flags & SHF_ALLOC) || sh.sh_size == 0) {
+        if (!(sh.flags & SHF_ALLOC) || sh.size == 0) {
             continue;
         }
-        uintptr_t align = sh.sh_addralign ? (uintptr_t)sh.sh_addralign : 1;
+        uintptr_t align = sh.addralign ? (uintptr_t)sh.addralign : 1;
         image_size = align_up(image_size, align);
         sec_addr[i] = image_size;
-        image_size += (size_t)sh.sh_size;
+        image_size += (size_t)sh.size;
     }
     if (image_size == 0) {
         image_size = 4096;
     }
 
-    // Find symtab early (needed for GOT sizing + resolve).
-    int symtab_i = -1;
-    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
-        Elf64_Shdr sh;
-        get_shdr(elf, len, &eh, i, &sh);
-        if (sh.sh_type == SHT_SYMTAB) {
-            symtab_i = (int)i;
-            break;
-        }
-    }
-    if (symtab_i < 0) {
-        MICROPY_WASM_FREE(sec_addr);
-        set_err(errbuf, errbuf_len, "no symtab");
-        return false;
-    }
-    Elf64_Shdr symsh, strsh;
-    get_shdr(elf, len, &eh, (uint16_t)symtab_i, &symsh);
-    if (!get_shdr(elf, len, &eh, (uint16_t)symsh.sh_link, &strsh)
-        || strsh.sh_type != SHT_STRTAB
-        || symsh.sh_offset + symsh.sh_size > len
-        || strsh.sh_offset + strsh.sh_size > len
-        || symsh.sh_entsize < sizeof(Elf64_Sym)) {
-        MICROPY_WASM_FREE(sec_addr);
-        set_err(errbuf, errbuf_len, "bad symtab");
-        return false;
-    }
-    uint32_t nsym = (uint32_t)(symsh.sh_size / symsh.sh_entsize);
-    const Elf64_Sym *syms = (const Elf64_Sym *)(elf + symsh.sh_offset);
-    const char *strtab = (const char *)(elf + strsh.sh_offset);
-
     // GOT slots for GOTPCREL* / ADR_GOT (even -fPIC -fno-plt uses these for undefs).
-    uint32_t *got_off = MICROPY_WASM_MALLOC((size_t)nsym * sizeof(uint32_t));
+    uint32_t *got_off = MICROPY_WASM_MALLOC((size_t)o.nsym * sizeof(uint32_t));
     if (got_off == NULL) {
         MICROPY_WASM_FREE(sec_addr);
         set_err(errbuf, errbuf_len, "oom");
         return false;
     }
-    memset(got_off, 0xff, (size_t)nsym * sizeof(uint32_t)); // ~0u = no slot
+    memset(got_off, 0xff, (size_t)o.nsym * sizeof(uint32_t)); // ~0u = no slot
     uint32_t n_got = 0;
-    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
-        Elf64_Shdr sh;
-        get_shdr(elf, len, &eh, i, &sh);
-        if (sh.sh_type != SHT_RELA || sh.sh_entsize < sizeof(Elf64_Rela)
-            || sh.sh_offset + sh.sh_size > len
-            || sh.sh_info >= eh.e_shnum) {
+    for (uint16_t i = 0; i < o.shnum; ++i) {
+        elf_obj_shdr_t sh;
+        elf_obj_shdr(&o, i, &sh);
+        if ((sh.type != SHT_RELA && sh.type != SHT_REL) || sh.entsize == 0
+            || sh.offset + sh.size > len
+            || sh.info >= o.shnum) {
             continue;
         }
         // Ignore .rela.debug_* etc. — target is not mapped into the image.
-        Elf64_Shdr tgt;
-        if (!get_shdr(elf, len, &eh, sh.sh_info, &tgt) || !(tgt.sh_flags & SHF_ALLOC)) {
+        elf_obj_shdr_t tgt;
+        if (!elf_obj_shdr(&o, (uint16_t)sh.info, &tgt) || !(tgt.flags & SHF_ALLOC)) {
             continue;
         }
-        uint32_t nrel = (uint32_t)(sh.sh_size / sh.sh_entsize);
+        uint32_t nrel = (uint32_t)(sh.size / sh.entsize);
         for (uint32_t r = 0; r < nrel; ++r) {
-            const Elf64_Rela *rela = (const Elf64_Rela *)(elf + sh.sh_offset + (size_t)r * sh.sh_entsize);
-            uint32_t typ = (uint32_t)ELF64_R_TYPE(rela->r_info);
-            uint32_t sym_i = (uint32_t)ELF64_R_SYM(rela->r_info);
-            if (sym_i >= nsym) {
+            elf_rel_ent_t ent;
+            if (!elf_read_rel(o.buf, len, sh.type, sh.offset, (uint32_t)sh.entsize,
+                r, NULL, 0, &ent)) {
                 continue;
             }
-            if (reloc_needs_got(eh.e_machine, typ)) {
-                if (got_off[sym_i] == ~0u) {
-                    got_off[sym_i] = n_got++;
+            if (ent.sym >= o.nsym) {
+                continue;
+            }
+            if (reloc_needs_got(o.machine, ent.typ)) {
+                if (got_off[ent.sym] == ~0u) {
+                    got_off[ent.sym] = n_got++;
                 }
             }
         }
@@ -624,23 +1250,23 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     memset(map, 0, map_size);
     uint8_t *base = (uint8_t *)map;
 
-    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
-        Elf64_Shdr sh;
-        get_shdr(elf, len, &eh, i, &sh);
-        if (!(sh.sh_flags & SHF_ALLOC) || sh.sh_size == 0) {
+    for (uint16_t i = 0; i < o.shnum; ++i) {
+        elf_obj_shdr_t sh;
+        elf_obj_shdr(&o, i, &sh);
+        if (!(sh.flags & SHF_ALLOC) || sh.size == 0) {
             continue;
         }
-        if (sh.sh_type == SHT_NOBITS) {
+        if (sh.type == SHT_NOBITS) {
             continue; // already zeroed
         }
-        if (sh.sh_offset + sh.sh_size > len) {
+        if (sh.offset + sh.size > len) {
             munmap(map, map_size);
             MICROPY_WASM_FREE(sec_addr);
             MICROPY_WASM_FREE(got_off);
             set_err(errbuf, errbuf_len, "section data OOB");
             return false;
         }
-        memcpy(base + sec_addr[i], elf + sh.sh_offset, (size_t)sh.sh_size);
+        memcpy(base + sec_addr[i], elf + sh.offset, (size_t)sh.size);
     }
 
     // Materialize the TLS block (if the object has TLS sections) so STT_TLS
@@ -648,19 +1274,19 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     {
         size_t tdata_off = 0, tdata_size = 0, tbss_off = 0, tbss_size = 0;
         int has_tls = 0;
-        for (uint16_t i = 0; i < eh.e_shnum; ++i) {
-            Elf64_Shdr sh;
-            get_shdr(elf, len, &eh, i, &sh);
-            if ((sh.sh_flags & SHF_TLS) == 0 || sh.sh_size == 0) {
+        for (uint16_t i = 0; i < o.shnum; ++i) {
+            elf_obj_shdr_t sh;
+            elf_obj_shdr(&o, i, &sh);
+            if ((sh.flags & SHF_TLS) == 0 || sh.size == 0) {
                 continue;
             }
             has_tls = 1;
-            if (sh.sh_type == SHT_NOBITS) {
+            if (sh.type == SHT_NOBITS) {
                 tbss_off = sec_addr[i];
-                tbss_size = (size_t)sh.sh_size;
+                tbss_size = (size_t)sh.size;
             } else {
                 tdata_off = sec_addr[i];
-                tdata_size = (size_t)sh.sh_size;
+                tdata_size = (size_t)sh.size;
             }
         }
         if (has_tls) {
@@ -676,7 +1302,7 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
     }
 
     // Resolve symbol address: defined → image; undef → optional resolve callback.
-    uintptr_t *sym_addr = MICROPY_WASM_MALLOC((size_t)nsym * sizeof(uintptr_t));
+    uintptr_t *sym_addr = MICROPY_WASM_MALLOC((size_t)o.nsym * sizeof(uintptr_t));
     if (sym_addr == NULL) {
         munmap(map, map_size);
         MICROPY_WASM_FREE(sec_addr);
@@ -684,12 +1310,15 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
         set_err(errbuf, errbuf_len, "oom");
         return false;
     }
-    memset(sym_addr, 0, (size_t)nsym * sizeof(uintptr_t));
-    for (uint32_t i = 0; i < nsym; ++i) {
-        const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)i * symsh.sh_entsize);
-        if (s->st_shndx == SHN_UNDEF) {
-            if (s->st_name != 0 && s->st_name < strsh.sh_size) {
-                const char *nm = strtab + s->st_name;
+    memset(sym_addr, 0, (size_t)o.nsym * sizeof(uintptr_t));
+    for (uint32_t i = 0; i < o.nsym; ++i) {
+        elf_obj_sym_t s;
+        if (!elf_obj_sym(&o, i, &s)) {
+            continue;
+        }
+        if (s.shndx == SHN_UNDEF) {
+            const char *nm = elf_obj_sym_name(&o, &s);
+            if (nm != NULL) {
                 if (strcmp(nm, "_GLOBAL_OFFSET_TABLE_") == 0) {
                     sym_addr[i] = (uintptr_t)(base + got_base);
                     continue;
@@ -703,57 +1332,64 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             }
             continue;
         }
-        if (s->st_shndx == SHN_ABS) {
-            sym_addr[i] = (uintptr_t)s->st_value;
+        if (s.shndx == SHN_ABS) {
+            sym_addr[i] = (uintptr_t)s.value;
             continue;
         }
-        if (s->st_shndx == SHN_COMMON || s->st_shndx >= eh.e_shnum) {
+        if (s.shndx == SHN_COMMON || s.shndx >= o.shnum) {
             continue;
         }
-        sym_addr[i] = (uintptr_t)(base + sec_addr[s->st_shndx] + s->st_value);
+        sym_addr[i] = (uintptr_t)(base + sec_addr[s.shndx] + s.value);
         // STT_TLS: the value is an offset into the TLS segment, and the
         // real storage is the materialized block — redirect so TPOFF32
         // computes against it.
-        if (ELF64_ST_TYPE(s->st_info) == STT_TLS && tls_img_block != NULL) {
-            sym_addr[i] = (uintptr_t)tls_img_block + s->st_value;
+        if (ELF_OBJ_ST_TYPE(s.info) == STT_TLS && tls_img_block != NULL) {
+            sym_addr[i] = (uintptr_t)tls_img_block + s.value;
         }
     }
 
     // Fill GOT entries with resolved symbol addresses.
-    for (uint32_t i = 0; i < nsym; ++i) {
+    for (uint32_t i = 0; i < o.nsym; ++i) {
         if (got_off[i] == ~0u) {
             continue;
         }
         *(uint64_t *)(base + got_base + (size_t)got_off[i] * 8) = (uint64_t)sym_addr[i];
     }
 
-    // Apply RELA (ALLOC targets only — skip .rela.debug_* into unmapped secs).
-    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
-        Elf64_Shdr sh;
-        get_shdr(elf, len, &eh, i, &sh);
-        if (sh.sh_type != SHT_RELA) {
+    // Apply RELA/REL (ALLOC targets only — skip .rela.debug_* into unmapped secs).
+    for (uint16_t i = 0; i < o.shnum; ++i) {
+        elf_obj_shdr_t sh;
+        elf_obj_shdr(&o, i, &sh);
+        if (sh.type != SHT_RELA && sh.type != SHT_REL) {
             continue;
         }
-        if (sh.sh_info >= eh.e_shnum || sh.sh_entsize < sizeof(Elf64_Rela)
-            || sh.sh_offset + sh.sh_size > len) {
+        if (sh.info >= o.shnum || sh.entsize == 0
+            || sh.offset + sh.size > len) {
             munmap(map, map_size);
             MICROPY_WASM_FREE(sec_addr);
             MICROPY_WASM_FREE(got_off);
             MICROPY_WASM_FREE(sym_addr);
-            set_err(errbuf, errbuf_len, "bad rela");
+            set_err(errbuf, errbuf_len, "bad reloc section");
             return false;
         }
-        Elf64_Shdr tgt;
-        if (!get_shdr(elf, len, &eh, sh.sh_info, &tgt) || !(tgt.sh_flags & SHF_ALLOC)) {
+        elf_obj_shdr_t tgt;
+        if (!elf_obj_shdr(&o, (uint16_t)sh.info, &tgt) || !(tgt.flags & SHF_ALLOC)) {
             continue;
         }
-        uint32_t nrel = (uint32_t)(sh.sh_size / sh.sh_entsize);
-        uint8_t *target_base = base + sec_addr[sh.sh_info];
+        uint32_t nrel = (uint32_t)(sh.size / sh.entsize);
+        uint8_t *target_base = base + sec_addr[sh.info];
         for (uint32_t r = 0; r < nrel; ++r) {
-            const Elf64_Rela *rela = (const Elf64_Rela *)(elf + sh.sh_offset + (size_t)r * sh.sh_entsize);
-            uint32_t sym_i = (uint32_t)ELF64_R_SYM(rela->r_info);
-            uint32_t typ = (uint32_t)ELF64_R_TYPE(rela->r_info);
-            if (sym_i >= nsym) {
+            elf_rel_ent_t ent;
+            if (!elf_read_rel(o.buf, len, sh.type, sh.offset, (uint32_t)sh.entsize,
+                r, target_base, (uint32_t)tgt.size, &ent)) {
+                munmap(map, map_size);
+                MICROPY_WASM_FREE(sec_addr);
+                MICROPY_WASM_FREE(got_off);
+                MICROPY_WASM_FREE(sym_addr);
+                set_err(errbuf, errbuf_len, "bad reloc entry");
+                return false;
+            }
+            if (ent.sym >= o.nsym) {
                 munmap(map, map_size);
                 MICROPY_WASM_FREE(sec_addr);
                 MICROPY_WASM_FREE(got_off);
@@ -761,11 +1397,17 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
                 set_err(errbuf, errbuf_len, "rela sym OOB");
                 return false;
             }
-            uintptr_t S = sym_addr[sym_i];
-            if (S == 0 && typ != R_X86_64_NONE) {
-                const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)sym_i * symsh.sh_entsize);
-                const char *nm = (s->st_name < strsh.sh_size) ? (strtab + s->st_name) : "?";
+            uintptr_t S = sym_addr[ent.sym];
+            if (S == 0 && ent.typ != R_X86_64_NONE) {
+                elf_obj_sym_t s;
+                const char *nm = "?";
                 char msg[160];
+                if (elf_obj_sym(&o, ent.sym, &s)) {
+                    nm = elf_obj_sym_name(&o, &s);
+                    if (nm == NULL) {
+                        nm = "?";
+                    }
+                }
                 if (elf_resolve_err[0] != '\0') {
                     snprintf(msg, sizeof(msg), "%s", elf_resolve_err);
                     mp_wasm_elf_resolve_clear_err();
@@ -781,16 +1423,10 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             }
             // Reject writes past the target section (8-byte vs 4-byte by type).
             {
-                size_t need = 4;
-                if (typ == R_X86_64_NONE) {
-                    need = 0;
-                } else if (typ == R_X86_64_64 || typ == R_AARCH64_ABS64
-                    || typ == R_X86_64_PC64 || typ == R_AARCH64_PREL64) {
-                    need = 8;
-                }
+                size_t need = elf_reloc_write_size(o.machine, ent.typ);
                 if (need != 0
-                    && (rela->r_offset > tgt.sh_size
-                        || tgt.sh_size - rela->r_offset < need)) {
+                    && (ent.off > tgt.size
+                        || tgt.size - ent.off < need)) {
                     munmap(map, map_size);
                     MICROPY_WASM_FREE(sec_addr);
                     MICROPY_WASM_FREE(got_off);
@@ -799,10 +1435,9 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
                     return false;
                 }
             }
-            uint8_t *P = target_base + rela->r_offset;
-            int64_t A = rela->r_addend;
-            if (!elf_apply_rela(P, S, A, typ, base, got_base, got_off[sym_i],
-                errbuf, errbuf_len)) {
+            uint8_t *P = target_base + ent.off;
+            if (!elf_apply_rela(o.machine, P, S, ent.addend, ent.typ, base, got_base,
+                got_off[ent.sym], errbuf, errbuf_len)) {
                 munmap(map, map_size);
                 MICROPY_WASM_FREE(sec_addr);
                 MICROPY_WASM_FREE(got_off);
@@ -814,11 +1449,14 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
 
     // Publish global function symbols
     uint32_t n_pub = 0;
-    for (uint32_t i = 0; i < nsym; ++i) {
-        const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)i * symsh.sh_entsize);
-        uint8_t bind = ELF64_ST_BIND(s->st_info);
-        uint8_t typ = ELF64_ST_TYPE(s->st_info);
-        if (s->st_shndx == SHN_UNDEF || s->st_name == 0) {
+    for (uint32_t i = 0; i < o.nsym; ++i) {
+        elf_obj_sym_t s;
+        if (!elf_obj_sym(&o, i, &s)) {
+            continue;
+        }
+        uint8_t bind = ELF_OBJ_ST_BIND(s.info);
+        uint8_t typ = ELF_OBJ_ST_TYPE(s.info);
+        if (s.shndx == SHN_UNDEF || s.name == 0) {
             continue;
         }
         if (bind != STB_GLOBAL && bind != STB_WEAK) {
@@ -868,13 +1506,14 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             return false;
         }
         uint32_t w = 0;
-        // strtab now in file_copy
-        const char *str2 = (const char *)(img->file_copy + strsh.sh_offset);
-        for (uint32_t i = 0; i < nsym; ++i) {
-            const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)i * symsh.sh_entsize);
-            uint8_t bind = ELF64_ST_BIND(s->st_info);
-            uint8_t typ = ELF64_ST_TYPE(s->st_info);
-            if (s->st_shndx == SHN_UNDEF || s->st_name == 0) {
+        for (uint32_t i = 0; i < o.nsym; ++i) {
+            elf_obj_sym_t s;
+            if (!elf_obj_sym(&o, i, &s)) {
+                continue;
+            }
+            uint8_t bind = ELF_OBJ_ST_BIND(s.info);
+            uint8_t typ = ELF_OBJ_ST_TYPE(s.info);
+            if (s.shndx == SHN_UNDEF || s.name == 0) {
                 continue;
             }
             if (bind != STB_GLOBAL && bind != STB_WEAK) {
@@ -886,9 +1525,9 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
             if (sym_addr[i] == 0) {
                 continue;
             }
-            img->syms[w].name = str2 + s->st_name;
+            img->syms[w].name = (const char *)(img->file_copy + o.str_off + s.name);
             img->syms[w].addr = (void *)sym_addr[i];
-            img->syms[w].st_info = s->st_info;
+            img->syms[w].st_info = s.info;
             w++;
         }
     }
@@ -919,15 +1558,9 @@ bool mp_wasm_elf_image_load(const uint8_t *elf, uint32_t len,
  * elf_apply_rela; section bases are offset by image_base.
  */
 typedef struct {
-    const uint8_t *elf;
-    uint32_t len;
-    Elf64_Ehdr eh;
+    elf_obj_t obj;         /* class-normalized view (ELF64 or ELF32) */
     uintptr_t *sec_addr;   /* section offsets, image-relative (before image_base) */
     size_t image_base;     /* where this object's sections start in the image */
-    int symtab_i;
-    Elf64_Shdr symsh;
-    Elf64_Shdr strsh;
-    uint32_t nsym;
     uintptr_t *sym_addr;   /* resolved absolute addresses */
     uint32_t *got_off;     /* per-symbol GLOBAL GOT slot (uint32)-1 = none */
     uint32_t n_got;
@@ -992,40 +1625,15 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
 
     /* Parse every object, locate symtabs. */
     for (i = 0; i < n_objs; ++i) {
-        o[i].elf = objs[i];
-        o[i].len = lens[i];
-        if (!parse_ehdr(o[i].elf, o[i].len, &o[i].eh, errbuf, errbuf_len)) {
+        if (!elf_obj_parse(&o[i].obj, objs[i], lens[i], errbuf, errbuf_len)) {
             goto fail;
         }
-        o[i].sec_addr = MICROPY_WASM_MALLOC((size_t)o[i].eh.e_shnum * sizeof(uintptr_t));
+        o[i].sec_addr = MICROPY_WASM_MALLOC((size_t)o[i].obj.shnum * sizeof(uintptr_t));
         if (o[i].sec_addr == NULL) {
             set_err(errbuf, errbuf_len, "oom");
             goto fail;
         }
-        memset(o[i].sec_addr, 0, (size_t)o[i].eh.e_shnum * sizeof(uintptr_t));
-        o[i].symtab_i = -1;
-        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
-            Elf64_Shdr sh;
-            if (get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)
-                && sh.sh_type == SHT_SYMTAB) {
-                o[i].symtab_i = (int)s;
-                break;
-            }
-        }
-        if (o[i].symtab_i < 0) {
-            set_err(errbuf, errbuf_len, "no symtab");
-            goto fail;
-        }
-        if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, (uint16_t)o[i].symtab_i, &o[i].symsh)
-            || !get_shdr(o[i].elf, o[i].len, &o[i].eh, (uint16_t)o[i].symsh.sh_link, &o[i].strsh)
-            || o[i].strsh.sh_type != SHT_STRTAB
-            || o[i].symsh.sh_offset + o[i].symsh.sh_size > o[i].len
-            || o[i].strsh.sh_offset + o[i].strsh.sh_size > o[i].len
-            || o[i].symsh.sh_entsize < sizeof(Elf64_Sym)) {
-            set_err(errbuf, errbuf_len, "bad symtab");
-            goto fail;
-        }
-        o[i].nsym = (uint32_t)(o[i].symsh.sh_size / o[i].symsh.sh_entsize);
+        memset(o[i].sec_addr, 0, (size_t)o[i].obj.shnum * sizeof(uintptr_t));
     }
 
     /* Layout sections + count GOT slots per object (global slot indices). */
@@ -1033,54 +1641,56 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
     uint32_t total_got = 0;
     for (i = 0; i < n_objs; ++i) {
         o[i].image_base = image_size;
-        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
-            Elf64_Shdr sh;
-            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)) {
+        for (uint16_t s = 0; s < o[i].obj.shnum; ++s) {
+            elf_obj_shdr_t sh;
+            if (!elf_obj_shdr(&o[i].obj, s, &sh)) {
                 set_err(errbuf, errbuf_len, "bad shdr");
                 goto fail;
             }
-            if (!(sh.sh_flags & SHF_ALLOC) || sh.sh_size == 0) {
+            if (!(sh.flags & SHF_ALLOC) || sh.size == 0) {
                 continue;
             }
-            uintptr_t align = sh.sh_addralign ? (uintptr_t)sh.sh_addralign : 1;
+            uintptr_t align = sh.addralign ? (uintptr_t)sh.addralign : 1;
             image_size = align_up(image_size, align);
             o[i].sec_addr[s] = image_size - o[i].image_base;
-            image_size += (size_t)sh.sh_size;
+            image_size += (size_t)sh.size;
         }
-        o[i].got_off = MICROPY_WASM_MALLOC((size_t)o[i].nsym * sizeof(uint32_t));
+        o[i].got_off = MICROPY_WASM_MALLOC((size_t)o[i].obj.nsym * sizeof(uint32_t));
         if (o[i].got_off == NULL) {
             set_err(errbuf, errbuf_len, "oom");
             goto fail;
         }
-        memset(o[i].got_off, 0xff, (size_t)o[i].nsym * sizeof(uint32_t));
+        memset(o[i].got_off, 0xff, (size_t)o[i].obj.nsym * sizeof(uint32_t));
         o[i].n_got = 0;
         o[i].first_got = total_got;
-        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
-            Elf64_Shdr sh;
-            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)) {
+        for (uint16_t s = 0; s < o[i].obj.shnum; ++s) {
+            elf_obj_shdr_t sh;
+            if (!elf_obj_shdr(&o[i].obj, s, &sh)) {
                 continue;
             }
-            if (sh.sh_type != SHT_RELA || sh.sh_entsize < sizeof(Elf64_Rela)
-                || sh.sh_offset + sh.sh_size > o[i].len
-                || sh.sh_info >= o[i].eh.e_shnum) {
+            if ((sh.type != SHT_RELA && sh.type != SHT_REL) || sh.entsize == 0
+                || sh.offset + sh.size > o[i].obj.len
+                || sh.info >= o[i].obj.shnum) {
                 continue;
             }
-            Elf64_Shdr tgt;
-            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, sh.sh_info, &tgt)
-                || !(tgt.sh_flags & SHF_ALLOC)) {
+            elf_obj_shdr_t tgt;
+            if (!elf_obj_shdr(&o[i].obj, (uint16_t)sh.info, &tgt)
+                || !(tgt.flags & SHF_ALLOC)) {
                 continue;
             }
-            uint32_t nrel = (uint32_t)(sh.sh_size / sh.sh_entsize);
+            uint32_t nrel = (uint32_t)(sh.size / sh.entsize);
             for (uint32_t r = 0; r < nrel; ++r) {
-                const Elf64_Rela *rela = (const Elf64_Rela *)(o[i].elf + sh.sh_offset + (size_t)r * sh.sh_entsize);
-                uint32_t typ = (uint32_t)ELF64_R_TYPE(rela->r_info);
-                uint32_t sym_i = (uint32_t)ELF64_R_SYM(rela->r_info);
-                if (sym_i >= o[i].nsym) {
+                elf_rel_ent_t ent;
+                if (!elf_read_rel(o[i].obj.buf, o[i].obj.len, sh.type, sh.offset,
+                    (uint32_t)sh.entsize, r, NULL, 0, &ent)) {
                     continue;
                 }
-                if (reloc_needs_got(o[i].eh.e_machine, typ)
-                    && o[i].got_off[sym_i] == 0xffffffffu) {
-                    o[i].got_off[sym_i] = total_got++;
+                if (ent.sym >= o[i].obj.nsym) {
+                    continue;
+                }
+                if (reloc_needs_got(o[i].obj.machine, ent.typ)
+                    && o[i].got_off[ent.sym] == 0xffffffffu) {
+                    o[i].got_off[ent.sym] = total_got++;
                     o[i].n_got++;
                 }
             }
@@ -1118,28 +1728,28 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
 
     /* Copy ALLOC section data, rebased per object. */
     for (i = 0; i < n_objs; ++i) {
-        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
-            Elf64_Shdr sh;
-            get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh);
-            if (!(sh.sh_flags & SHF_ALLOC) || sh.sh_size == 0) {
+        for (uint16_t s = 0; s < o[i].obj.shnum; ++s) {
+            elf_obj_shdr_t sh;
+            elf_obj_shdr(&o[i].obj, s, &sh);
+            if (!(sh.flags & SHF_ALLOC) || sh.size == 0) {
                 continue;
             }
-            if (sh.sh_type == SHT_NOBITS) {
+            if (sh.type == SHT_NOBITS) {
                 continue;
             }
-            if (sh.sh_offset + sh.sh_size > o[i].len) {
+            if (sh.offset + sh.size > o[i].obj.len) {
                 set_err(errbuf, errbuf_len, "section data OOB");
                 goto fail;
             }
             memcpy(base + o[i].image_base + o[i].sec_addr[s],
-                o[i].elf + sh.sh_offset, (size_t)sh.sh_size);
+                o[i].obj.buf + sh.offset, (size_t)sh.size);
         }
     }
 
     /* Collect defined globals across objects (first in objs order wins). */
     uint32_t defs_cap = 0;
     for (i = 0; i < n_objs; ++i) {
-        defs_cap += o[i].nsym;
+        defs_cap += o[i].obj.nsym;
     }
     defs = MICROPY_WASM_MALLOC((size_t)defs_cap * sizeof(*defs));
     if (defs == NULL) {
@@ -1154,23 +1764,23 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
         size_t tdata_off = 0, tdata_size = 0, tbss_off = 0, tbss_size = 0;
         int has_tls = 0;
         for (i = 0; i < n_objs; ++i) {
-            for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
-                Elf64_Shdr sh;
-                if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)) {
+            for (uint16_t s = 0; s < o[i].obj.shnum; ++s) {
+                elf_obj_shdr_t sh;
+                if (!elf_obj_shdr(&o[i].obj, s, &sh)) {
                     continue;
                 }
-                if ((sh.sh_flags & SHF_TLS) == 0 || sh.sh_size == 0) {
+                if ((sh.flags & SHF_TLS) == 0 || sh.size == 0) {
                     continue;
                 }
                 has_tls = 1;
                 {
                     size_t off = o[i].image_base + o[i].sec_addr[s];
-                    if (sh.sh_type == SHT_NOBITS) {
+                    if (sh.type == SHT_NOBITS) {
                         tbss_off = off;
-                        tbss_size = (size_t)sh.sh_size;
+                        tbss_size = (size_t)sh.size;
                     } else {
                         tdata_off = off;
-                        tdata_size = (size_t)sh.sh_size;
+                        tdata_size = (size_t)sh.size;
                     }
                 }
             }
@@ -1185,27 +1795,29 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
     }
 
     for (i = 0; i < n_objs; ++i) {
-        const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
-        const char *strtab = (const char *)(o[i].elf + o[i].strsh.sh_offset);
-        for (uint32_t k = 0; k < o[i].nsym; ++k) {
-            const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)k * o[i].symsh.sh_entsize);
-            uint8_t bind = ELF64_ST_BIND(s->st_info);
-            if (s->st_name == 0 || s->st_name >= o[i].strsh.sh_size) {
+        for (uint32_t k = 0; k < o[i].obj.nsym; ++k) {
+            elf_obj_sym_t s;
+            if (!elf_obj_sym(&o[i].obj, k, &s)) {
+                continue;
+            }
+            uint8_t bind = ELF_OBJ_ST_BIND(s.info);
+            const char *nm = elf_obj_sym_name(&o[i].obj, &s);
+            if (nm == NULL) {
                 continue;
             }
             if (bind != STB_GLOBAL && bind != STB_WEAK) {
                 continue;
             }
-            if (s->st_shndx == SHN_UNDEF || s->st_shndx == SHN_ABS
-                || s->st_shndx == SHN_COMMON || s->st_shndx >= o[i].eh.e_shnum) {
+            if (s.shndx == SHN_UNDEF || s.shndx == SHN_ABS
+                || s.shndx == SHN_COMMON || s.shndx >= o[i].obj.shnum) {
                 continue;
             }
-            defs[n_def].name = strtab + s->st_name;
+            defs[n_def].name = nm;
             defs[n_def].addr = (uintptr_t)(base + o[i].image_base
-                + o[i].sec_addr[s->st_shndx] + s->st_value);
+                + o[i].sec_addr[s.shndx] + s.value);
             // cross-object TLS references go through the shared block too
-            if (ELF64_ST_TYPE(s->st_info) == STT_TLS && tls_img_block != NULL) {
-                defs[n_def].addr = (uintptr_t)tls_img_block + s->st_value;
+            if (ELF_OBJ_ST_TYPE(s.info) == STT_TLS && tls_img_block != NULL) {
+                defs[n_def].addr = (uintptr_t)tls_img_block + s.value;
             }
             n_def++;
         }
@@ -1214,21 +1826,22 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
     /* Resolve symbols per object: defined → image; undef → other objects,
      * then the resolve callback. Fill GOT entries. */
     for (i = 0; i < n_objs; ++i) {
-        const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
-        const char *strtab = (const char *)(o[i].elf + o[i].strsh.sh_offset);
-        o[i].sym_addr = MICROPY_WASM_MALLOC((size_t)o[i].nsym * sizeof(uintptr_t));
+        o[i].sym_addr = MICROPY_WASM_MALLOC((size_t)o[i].obj.nsym * sizeof(uintptr_t));
         if (o[i].sym_addr == NULL) {
             set_err(errbuf, errbuf_len, "oom");
             goto fail;
         }
-        memset(o[i].sym_addr, 0, (size_t)o[i].nsym * sizeof(uintptr_t));
-        for (uint32_t k = 0; k < o[i].nsym; ++k) {
-            const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)k * o[i].symsh.sh_entsize);
-            if (s->st_shndx == SHN_UNDEF) {
-                if (s->st_name == 0 || s->st_name >= o[i].strsh.sh_size) {
+        memset(o[i].sym_addr, 0, (size_t)o[i].obj.nsym * sizeof(uintptr_t));
+        for (uint32_t k = 0; k < o[i].obj.nsym; ++k) {
+            elf_obj_sym_t s;
+            if (!elf_obj_sym(&o[i].obj, k, &s)) {
+                continue;
+            }
+            if (s.shndx == SHN_UNDEF) {
+                const char *nm = elf_obj_sym_name(&o[i].obj, &s);
+                if (nm == NULL) {
                     continue;
                 }
-                const char *nm = strtab + s->st_name;
                 if (strcmp(nm, "_GLOBAL_OFFSET_TABLE_") == 0) {
                     o[i].sym_addr[k] = (uintptr_t)(base + got_base);
                     continue;
@@ -1244,21 +1857,21 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
                 }
                 continue;
             }
-            if (s->st_shndx == SHN_ABS) {
-                o[i].sym_addr[k] = (uintptr_t)s->st_value;
+            if (s.shndx == SHN_ABS) {
+                o[i].sym_addr[k] = (uintptr_t)s.value;
                 continue;
             }
-            if (s->st_shndx == SHN_COMMON || s->st_shndx >= o[i].eh.e_shnum) {
+            if (s.shndx == SHN_COMMON || s.shndx >= o[i].obj.shnum) {
                 continue;
             }
             o[i].sym_addr[k] = (uintptr_t)(base + o[i].image_base
-                + o[i].sec_addr[s->st_shndx] + s->st_value);
+                + o[i].sec_addr[s.shndx] + s.value);
             // STT_TLS: redirect into the materialized TLS block.
-            if (ELF64_ST_TYPE(s->st_info) == STT_TLS && tls_img_block != NULL) {
-                o[i].sym_addr[k] = (uintptr_t)tls_img_block + s->st_value;
+            if (ELF_OBJ_ST_TYPE(s.info) == STT_TLS && tls_img_block != NULL) {
+                o[i].sym_addr[k] = (uintptr_t)tls_img_block + s.value;
             }
         }
-        for (uint32_t k = 0; k < o[i].nsym; ++k) {
+        for (uint32_t k = 0; k < o[i].obj.nsym; ++k) {
             if (o[i].got_off[k] == 0xffffffffu) {
                 continue;
             }
@@ -1269,41 +1882,48 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
 
     /* Apply relocations per object (shared elf_apply_rela). */
     for (i = 0; i < n_objs; ++i) {
-        for (uint16_t s = 0; s < o[i].eh.e_shnum; ++s) {
-            Elf64_Shdr sh;
-            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, s, &sh)) {
+        for (uint16_t s = 0; s < o[i].obj.shnum; ++s) {
+            elf_obj_shdr_t sh;
+            if (!elf_obj_shdr(&o[i].obj, s, &sh)) {
                 continue;
             }
-            if (sh.sh_type != SHT_RELA) {
+            if (sh.type != SHT_RELA && sh.type != SHT_REL) {
                 continue;
             }
-            if (sh.sh_info >= o[i].eh.e_shnum || sh.sh_entsize < sizeof(Elf64_Rela)
-                || sh.sh_offset + sh.sh_size > o[i].len) {
-                set_err(errbuf, errbuf_len, "bad rela");
+            if (sh.info >= o[i].obj.shnum || sh.entsize == 0
+                || sh.offset + sh.size > o[i].obj.len) {
+                set_err(errbuf, errbuf_len, "bad reloc section");
                 goto fail;
             }
-            Elf64_Shdr tgt;
-            if (!get_shdr(o[i].elf, o[i].len, &o[i].eh, sh.sh_info, &tgt)
-                || !(tgt.sh_flags & SHF_ALLOC)) {
+            elf_obj_shdr_t tgt;
+            if (!elf_obj_shdr(&o[i].obj, (uint16_t)sh.info, &tgt)
+                || !(tgt.flags & SHF_ALLOC)) {
                 continue;
             }
-            uint32_t nrel = (uint32_t)(sh.sh_size / sh.sh_entsize);
-            uint8_t *target_base = base + o[i].image_base + o[i].sec_addr[sh.sh_info];
+            uint32_t nrel = (uint32_t)(sh.size / sh.entsize);
+            uint8_t *target_base = base + o[i].image_base + o[i].sec_addr[sh.info];
             for (uint32_t r = 0; r < nrel; ++r) {
-                const Elf64_Rela *rela = (const Elf64_Rela *)(o[i].elf + sh.sh_offset + (size_t)r * sh.sh_entsize);
-                uint32_t sym_i = (uint32_t)ELF64_R_SYM(rela->r_info);
-                uint32_t typ = (uint32_t)ELF64_R_TYPE(rela->r_info);
-                if (sym_i >= o[i].nsym) {
+                elf_rel_ent_t ent;
+                if (!elf_read_rel(o[i].obj.buf, o[i].obj.len, sh.type, sh.offset,
+                    (uint32_t)sh.entsize, r, target_base, (uint32_t)tgt.size, &ent)) {
+                    set_err(errbuf, errbuf_len, "bad reloc entry");
+                    goto fail;
+                }
+                if (ent.sym >= o[i].obj.nsym) {
                     set_err(errbuf, errbuf_len, "rela sym OOB");
                     goto fail;
                 }
-                uintptr_t S = o[i].sym_addr[sym_i];
-                if (S == 0 && typ != R_X86_64_NONE) {
-                    const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
-                    const char *strtab = (const char *)(o[i].elf + o[i].strsh.sh_offset);
-                    const Elf64_Sym *sm = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)sym_i * o[i].symsh.sh_entsize);
-                    const char *nm = (sm->st_name < o[i].strsh.sh_size) ? (strtab + sm->st_name) : "?";
+                uintptr_t S = o[i].sym_addr[ent.sym];
+                if (S == 0 && ent.typ != R_X86_64_NONE) {
+                    elf_obj_sym_t sm;
+                    const char *nm = "?";
                     char msg[160];
+                    if (elf_obj_sym(&o[i].obj, ent.sym, &sm)) {
+                        nm = elf_obj_sym_name(&o[i].obj, &sm);
+                        if (nm == NULL) {
+                            nm = "?";
+                        }
+                    }
                     if (elf_resolve_err[0] != '\0') {
                         snprintf(msg, sizeof(msg), "%s", elf_resolve_err);
                         mp_wasm_elf_resolve_clear_err();
@@ -1314,23 +1934,16 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
                     goto fail;
                 }
                 {
-                    size_t need = 4;
-                    if (typ == R_X86_64_NONE) {
-                        need = 0;
-                    } else if (typ == R_X86_64_64 || typ == R_AARCH64_ABS64
-                        || typ == R_X86_64_PC64 || typ == R_AARCH64_PREL64) {
-                        need = 8;
-                    }
+                    size_t need = elf_reloc_write_size(o[i].obj.machine, ent.typ);
                     if (need != 0
-                        && (rela->r_offset > tgt.sh_size
-                            || tgt.sh_size - rela->r_offset < need)) {
+                        && (ent.off > tgt.size || tgt.size - ent.off < need)) {
                         set_err(errbuf, errbuf_len, "rela offset OOB");
                         goto fail;
                     }
                 }
-                uint8_t *P = target_base + rela->r_offset;
-                if (!elf_apply_rela(P, S, rela->r_addend, typ, base, got_base,
-                    o[i].got_off[sym_i], errbuf, errbuf_len)) {
+                uint8_t *P = target_base + ent.off;
+                if (!elf_apply_rela(o[i].obj.machine, P, S, ent.addend, ent.typ,
+                    base, got_base, o[i].got_off[ent.sym], errbuf, errbuf_len)) {
                     goto fail;
                 }
             }
@@ -1343,7 +1956,7 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
     {
         size_t total_file = 0;
         for (i = 0; i < n_objs; ++i) {
-            total_file += o[i].len;
+            total_file += o[i].obj.len;
         }
         img = MICROPY_WASM_MALLOC(sizeof(*img));
         if (img == NULL) {
@@ -1365,17 +1978,19 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
         size_t off = 0;
         uint32_t n_pub = 0;
         for (i = 0; i < n_objs; ++i) {
-            memcpy(img->file_copy + off, o[i].elf, o[i].len);
-            off += o[i].len;
+            memcpy(img->file_copy + off, o[i].obj.buf, o[i].obj.len);
+            off += o[i].obj.len;
         }
         /* Count publishable symbols. */
         for (i = 0; i < n_objs; ++i) {
-            const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
-            for (uint32_t k = 0; k < o[i].nsym; ++k) {
-                const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)k * o[i].symsh.sh_entsize);
-                uint8_t bind = ELF64_ST_BIND(s->st_info);
-                uint8_t typ = ELF64_ST_TYPE(s->st_info);
-                if (s->st_shndx == SHN_UNDEF || s->st_name == 0) {
+            for (uint32_t k = 0; k < o[i].obj.nsym; ++k) {
+                elf_obj_sym_t s;
+                if (!elf_obj_sym(&o[i].obj, k, &s)) {
+                    continue;
+                }
+                uint8_t bind = ELF_OBJ_ST_BIND(s.info);
+                uint8_t typ = ELF_OBJ_ST_TYPE(s.info);
+                if (s.shndx == SHN_UNDEF || s.name == 0) {
                     continue;
                 }
                 if (bind != STB_GLOBAL && bind != STB_WEAK) {
@@ -1399,17 +2014,17 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
             }
             uint32_t w = 0;
             /* Object file copies are at cumulative offsets; each object's
-             * strtab lives at its own sh_offset within its slice. */
+             * strtab lives at its own str_off within its slice. */
             size_t curoff = 0;
             for (i = 0; i < n_objs; ++i) {
-                const uint8_t *cpy = img->file_copy + curoff;
-                const char *str2 = (const char *)(cpy + o[i].strsh.sh_offset);
-                const Elf64_Sym *syms = (const Elf64_Sym *)(o[i].elf + o[i].symsh.sh_offset);
-                for (uint32_t k = 0; k < o[i].nsym; ++k) {
-                    const Elf64_Sym *s = (const Elf64_Sym *)((const uint8_t *)syms + (size_t)k * o[i].symsh.sh_entsize);
-                    uint8_t bind = ELF64_ST_BIND(s->st_info);
-                    uint8_t typ = ELF64_ST_TYPE(s->st_info);
-                    if (s->st_shndx == SHN_UNDEF || s->st_name == 0) {
+                for (uint32_t k = 0; k < o[i].obj.nsym; ++k) {
+                    elf_obj_sym_t s;
+                    if (!elf_obj_sym(&o[i].obj, k, &s)) {
+                        continue;
+                    }
+                    uint8_t bind = ELF_OBJ_ST_BIND(s.info);
+                    uint8_t typ = ELF_OBJ_ST_TYPE(s.info);
+                    if (s.shndx == SHN_UNDEF || s.name == 0) {
                         continue;
                     }
                     if (bind != STB_GLOBAL && bind != STB_WEAK) {
@@ -1421,12 +2036,13 @@ bool mp_wasm_elf_image_load_multi(const uint8_t *const *objs, const uint32_t *le
                     if (o[i].sym_addr[k] == 0) {
                         continue;
                     }
-                    img->syms[w].name = str2 + s->st_name;
+                    img->syms[w].name = (const char *)(img->file_copy + curoff
+                        + o[i].obj.str_off + s.name);
                     img->syms[w].addr = (void *)o[i].sym_addr[k];
-                    img->syms[w].st_info = s->st_info;
+                    img->syms[w].st_info = s.info;
                     w++;
                 }
-                curoff += o[i].len;
+                curoff += o[i].obj.len;
             }
         }
     }
