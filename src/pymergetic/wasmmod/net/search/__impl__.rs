@@ -207,7 +207,7 @@ unsafe fn scan_string(p: *const u8, n: usize, i: usize, end: *mut usize) -> (usi
             return (0, 0);
         }
         if c == b'"' {
-            *end = at + 1;
+            unsafe { *end = at + 1 };
             return (start, at);
         }
         at += 1;
@@ -221,12 +221,11 @@ unsafe fn scan_string(p: *const u8, n: usize, i: usize, end: *mut usize) -> (usi
 unsafe fn scan_value(p: *const u8, n: usize, i: usize, end: *mut usize) -> (usize, usize) {
     let at = skip_ws(p, n, i);
     if at >= n {
-        *end = at;
+        unsafe { *end = at };
         return (at, at);
     }
     let c = unsafe { *p.add(at) };
     if c == b'"' {
-        let mut dummy: usize = 0;
         return scan_string(p, n, at, end);
     }
     if c == b'{' || c == b'[' {
@@ -325,7 +324,7 @@ unsafe fn obj_member(p: *const u8, n: usize, i: usize, key: *const u8, key_len: 
 
 /// Does one `packages` entry satisfy `kind` / `arch`? Looks across its
 /// top-level `artifacts` array, matching the µPy `filter` semantics.
-unsafe fn entry_matches(p: *const u8, n: usize, vstart: usize, vend_end: usize, q: *const Query) -> bool {
+unsafe fn entry_matches(p: *const u8, n: usize, vstart: usize, _vend_end: usize, q: *const Query) -> bool {
     if (*q).kind_len == 0 && (*q).arch_len == 0 {
         return true;
     }

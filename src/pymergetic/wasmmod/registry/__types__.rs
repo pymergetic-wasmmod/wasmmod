@@ -11,6 +11,11 @@
 //! `repr(C)` throughout; the C header is the ABI contract.
 
 #![allow(non_camel_case_types)]
+// These are C-ABI shapes: their consumers are the C faces that link against
+// the crate (and the card's own `__types__.h` twin), not other Rust code.
+// rustc only sees the Rust half, so "never used" fires on types the C side
+// consumes — dead_code is a false positive for every face here.
+#![allow(dead_code)]
 
 /// Which kind of artifact a module's exports live behind. `Resident`
 /// covers a statically-linked-in C/Rust module with no container at all —

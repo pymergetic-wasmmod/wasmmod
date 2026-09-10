@@ -16,6 +16,14 @@
 //! exactly like the dotted path it mirrors — no
 //! `pymergetic_wasmmod::pymergetic::` stutter.
 #![cfg_attr(not(any(test, feature = "gen")), no_std)]
+// This crate's whole muscle is C-ABI faces: `pub unsafe extern "C" fn pm_*`
+// over raw pointers, written in the pre-2024 `unsafe fn` style where the
+// body's raw-pointer work needs no inner blocks. Rust 2024 makes
+// unsafe-op-in-unsafe-fn a hard error-tier lint (~200 sites here); the
+// crate-wide allow keeps that deliberate style lint-clean instead of
+// sprinkling ~200 redundant inner `unsafe {}` blocks that carry no extra
+// safety information.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 // Unlike `core`, `alloc` isn't implicitly linked/path-resolvable even in
 // a 2018+-edition crate — it needs one explicit `extern crate alloc;`

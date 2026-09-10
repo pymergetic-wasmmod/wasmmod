@@ -64,7 +64,7 @@ pub unsafe extern "C" fn pm_wasmmod_api_connect(
             return -1;
         }
         let u = registry_types::fn_slot_t { raw: slot };
-        *out = unsafe { u.fnptr };
+        *out = u.fnptr;
     }
     0
 }

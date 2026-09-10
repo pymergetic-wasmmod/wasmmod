@@ -116,21 +116,6 @@ unsafe fn find_byte(s: *const u8, len: usize, c: u8) -> usize {
     usize::MAX
 }
 
-/// Find `needle` (length-aware) in the span; offset or usize::MAX.
-unsafe fn find_sub(s: *const u8, len: usize, needle: *const u8, needle_len: usize) -> usize {
-    if needle_len == 0 || needle_len > len {
-        return usize::MAX;
-    }
-    let mut i: usize = 0;
-    while i + needle_len <= len {
-        if unsafe { span_eq(s.add(i), needle_len, needle, needle_len) } {
-            return i;
-        }
-        i += 1;
-    }
-    usize::MAX
-}
-
 /* Ordering as i32: -1 less, 0 equal, 1 greater. */
 const ORD_LT: i32 = -1;
 const ORD_EQ: i32 = 0;
@@ -261,7 +246,7 @@ unsafe fn parse_semver(raw: *const u8, raw_len: usize, ok: *mut bool, out: *mut 
     let mut core_off: usize = 0;
     let mut core_len: usize = len;
     let mut pre: [u8; PRE_CAP] = [0; PRE_CAP];
-    let mut pre_len: usize = 0;
+    let pre_len: usize;
     let dash = unsafe { find_byte(s, len, b'-') };
     if dash != usize::MAX {
         core_len = dash;
@@ -304,7 +289,6 @@ unsafe fn parse_semver(raw: *const u8, raw_len: usize, ok: *mut bool, out: *mut 
         }
         got += 1;
         if dot == usize::MAX {
-            rest_off = core_len;
             rest_len = 0;
             break;
         }

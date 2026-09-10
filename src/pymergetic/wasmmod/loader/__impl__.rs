@@ -505,9 +505,9 @@ fn adapter_invoke(
     if nargs as usize > MAX_VALUES || nresults as usize > MAX_VALUES {
         return -1;
     }
-    let mut instance: wasm_module_inst_t = ptr::null_mut();
-    let mut exec_env: wasm_exec_env_t = ptr::null_mut();
-    let mut func: wasm_function_inst_t = ptr::null_mut();
+    let instance: wasm_module_inst_t;
+    let exec_env: wasm_exec_env_t;
+    let func: wasm_function_inst_t;
     unsafe {
         pm_util_lock_acquire(adapter_lock());
         let slots = adapter_slots();
@@ -657,18 +657,16 @@ unsafe extern "C" fn adapter_slot_7(
 /// subset lowers inside a function body — the static array-of-fn form
 /// would need taken addresses in a static initializer.
 unsafe fn adapter_fn_at(index: usize) -> *mut c_void {
-    unsafe {
-        match index {
-            0 => adapter_slot_0 as *mut c_void,
-            1 => adapter_slot_1 as *mut c_void,
-            2 => adapter_slot_2 as *mut c_void,
-            3 => adapter_slot_3 as *mut c_void,
-            4 => adapter_slot_4 as *mut c_void,
-            5 => adapter_slot_5 as *mut c_void,
-            6 => adapter_slot_6 as *mut c_void,
-            7 => adapter_slot_7 as *mut c_void,
-            _ => ptr::null_mut(),
-        }
+    match index {
+        0 => adapter_slot_0 as *mut c_void,
+        1 => adapter_slot_1 as *mut c_void,
+        2 => adapter_slot_2 as *mut c_void,
+        3 => adapter_slot_3 as *mut c_void,
+        4 => adapter_slot_4 as *mut c_void,
+        5 => adapter_slot_5 as *mut c_void,
+        6 => adapter_slot_6 as *mut c_void,
+        7 => adapter_slot_7 as *mut c_void,
+        _ => ptr::null_mut(),
     }
 }
 
@@ -1468,7 +1466,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
                      * loader_run_wasm_test (no trampoline pool). */
                     let mut name_len: usize = 0;
                     let q = export.name;
-                    while unsafe { *q.add(name_len) } != 0 && name_len < 256 {
+                    while *q.add(name_len) != 0 && name_len < 256 {
                         name_len += 1;
                     }
                     let mut matched: i64 = -1;

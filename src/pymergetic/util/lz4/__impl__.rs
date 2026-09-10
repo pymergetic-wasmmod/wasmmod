@@ -306,7 +306,7 @@ pub unsafe extern "C" fn pm_util_lz4_compress(
 ) -> i32 {
     // SAFETY: caller guarantees `src` points to >= src_len readable bytes
     // and `dst` to >= dst_cap writable bytes.
-    unsafe { lz4_compress_block(src, src_len as usize, dst, dst_cap as usize) }
+    lz4_compress_block(src, src_len as usize, dst, dst_cap as usize)
 }
 
 #[unsafe(no_mangle)]
@@ -318,7 +318,7 @@ pub unsafe extern "C" fn pm_util_lz4_decompress(
 ) -> i32 {
     // SAFETY: caller guarantees `src` points to >= src_len readable bytes
     // and `dst` to >= dst_len writable bytes.
-    unsafe { lz4_decompress_block(src, src_len as usize, dst, dst_len as usize) }
+    lz4_decompress_block(src, src_len as usize, dst, dst_len as usize)
 }
 
 /* Same table as PM_MOD_EXPORT_C — not a second registration system. */

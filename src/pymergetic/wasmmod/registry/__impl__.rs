@@ -349,13 +349,6 @@ unsafe fn span_put(dst: *mut u8, dst_cap: usize, src: *const u8, src_len: usize)
     src_len
 }
 
-/// ptr/len are already validated non-null by the callers; the registry
-/// never interprets the bytes (names are compared as bytes, not UTF-8
-/// text), so no utf8 validation gate on the hot path.
-unsafe fn raw_ok(p: *const u8, len: u32) -> bool {
-    !p.is_null() || len == 0
-}
-
 /// Record a refused registration into the loud-refusal ring (caller holds
 /// the table lock). The ring is deduplicated: a repeated refusal (the
 /// same fqn + name + reason) bumps `count` instead of consuming a row,
@@ -629,12 +622,12 @@ unsafe fn resolve_native(
         return core::ptr::null_mut();
     }
     let mut i = 0usize;
-    while i < (*e).n_exports as usize {
-        let x = (*e).exports.as_ptr().add(i);
-        if (*x).name_len as usize == name_len {
+    while i < unsafe { (*e).n_exports } as usize {
+        let x = unsafe { (*e).exports.as_ptr().add(i) };
+        if unsafe { (*x).name_len } as usize == name_len {
             let eq = unsafe { span_eq((*x).name.as_ptr(), name_len, name, name_len) };
             if eq {
-                return (*x).ptr;
+                return unsafe { (*x).ptr };
             }
         }
         i += 1;
@@ -918,15 +911,13 @@ pub unsafe extern "C" fn pm_wasmmod_registry_mod_export(
         if h.index == u32::MAX {
             /* module table full or fqn store failed — a loud refusal,
              * never a silent dark face */
-            unsafe {
-                refusal_record(
-                    fqn_ptr,
-                    fqn_len as usize,
-                    name_ptr,
-                    name_len as usize,
-                    REF_REASON_MODULES_FULL,
-                );
-            }
+            refusal_record(
+                fqn_ptr,
+                fqn_len as usize,
+                name_ptr,
+                name_len as usize,
+                REF_REASON_MODULES_FULL,
+            );
             pm_util_lock_release(lock());
             return 0;
         }
@@ -1250,9 +1241,9 @@ pub unsafe extern "C" fn pm_wasmmod_registry_call(
         // reinterpret goes through the fn_slot_t union (the value-level
         // twin of the C face's helper — a pointer-to-fn-pointer cast is a
         // load in disguise, and rsx has no transmute).
-        let mut slot = fn_slot_t { raw: p };
-        let f = unsafe { slot.fnptr };
-        unsafe { f(args, nargs, results, nresults) }
+        let slot = fn_slot_t { raw: p };
+        let f = slot.fnptr;
+        f(args, nargs, results, nresults)
     }
 }
 
@@ -1298,7 +1289,7 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_register(
     unsafe {
         pm_util_lock_acquire(lock());
         let t = table();
-        let h = ensure(
+        ensure(
             t,
             fqn_ptr,
             fqn_len as usize,
