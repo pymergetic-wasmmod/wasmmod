@@ -236,7 +236,7 @@ fn pyi_fallback_uses_python_attr_names() {
 }
 
 fn pyi_keyword_names_are_not_def() {
-    // await/yield are real exports (metal.async, wasmmod.io) but keywords can
+    // await/yield are real exports (metal.coop, wasmmod.io) but keywords can
     // never be a def name or an annotation target — the stub must expose them
     // through module __getattr__ with a Literal name instead.
     let text = emit_init_pyi_names("test.gen_kw", &["run", "await", "yield"]);

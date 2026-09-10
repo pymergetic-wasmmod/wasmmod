@@ -95,7 +95,7 @@ macro_rules! PM_MOD_TEST_RS {
 /// under `cfg(bench)`, so it never becomes a product export face.
 ///
 /// ```ignore
-/// PM_MOD_BENCH_RS!("pymergetic.metal.async", "ready_ring_task_switch", bench_task_switch);
+/// PM_MOD_BENCH_RS!("pymergetic.metal.coop", "ready_ring_task_switch", bench_task_switch);
 /// ```
 #[macro_export]
 macro_rules! PM_MOD_BENCH_RS {

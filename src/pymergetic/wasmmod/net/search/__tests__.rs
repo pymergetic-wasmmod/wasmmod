@@ -11,7 +11,7 @@ use super::*;
 
 /// NUL-terminated test index (the compiler's own `b"...\0"` + explicit-len
 /// discipline: rsx refuses `.len()`, so the byte count is walked once here).
-const INDEX: &[u8] = b"{\"schema\":1,\"channel\":\"lead\",\"generated\":\"2026-08-04T00:00:00Z\",\"packages\":{\n  \"zlib\":{\"version\":\"1.2.12\",\"artifacts\":[{\"kind\":\"wasm\",\"arch\":\"x86_64\",\"encoding\":\"zlib\"},{\"kind\":\"elf\",\"arch\":\"x86\",\"encoding\":\"zlib\"}]},\n  \"pymergetic.metal.async\":{\"version\":\"0.1.0\",\"artifacts\":[{\"kind\":\"elf\",\"arch\":\"aarch64\",\"encoding\":\"zlib\"}]},\n  \"hello\":{\"version\":\"0.2.1\",\"description\":\"sample\",\"artifacts\":[{\"kind\":\"aot\",\"arch\":\"x86_64\",\"encoding\":\"zlib\"}]},\n  \"WasmKit\":{\"version\":\"1.0.0\",\"artifacts\":[{\"kind\":\"wasm\",\"arch\":\"wasm32\",\"encoding\":\"direct\"}]}\n}}\n\0";
+const INDEX: &[u8] = b"{\"schema\":1,\"channel\":\"lead\",\"generated\":\"2026-08-04T00:00:00Z\",\"packages\":{\n  \"zlib\":{\"version\":\"1.2.12\",\"artifacts\":[{\"kind\":\"wasm\",\"arch\":\"x86_64\",\"encoding\":\"zlib\"},{\"kind\":\"elf\",\"arch\":\"x86\",\"encoding\":\"zlib\"}]},\n  \"pymergetic.metal.coop\":{\"version\":\"0.1.0\",\"artifacts\":[{\"kind\":\"elf\",\"arch\":\"aarch64\",\"encoding\":\"zlib\"}]},\n  \"hello\":{\"version\":\"0.2.1\",\"description\":\"sample\",\"artifacts\":[{\"kind\":\"aot\",\"arch\":\"x86_64\",\"encoding\":\"zlib\"}]},\n  \"WasmKit\":{\"version\":\"1.0.0\",\"artifacts\":[{\"kind\":\"wasm\",\"arch\":\"wasm32\",\"encoding\":\"direct\"}]}\n}}\n\0";
 
 /// strlen over a NUL-terminated byte span — the subset's length discipline.
 unsafe fn zlen(p: *const u8) -> usize {
@@ -47,14 +47,14 @@ unsafe extern "C" fn case_catalog_lists_every_pack_name_sorted_body() -> i32 {
     if n != 4 {
         return 1;
     }
-    /* byte-sorted: WasmKit < hello < pymergetic.metal.async < zlib */
+    /* byte-sorted: WasmKit < hello < pymergetic.metal.coop < zlib */
     if !name_is(b"WasmKit\0".as_ptr(), 7, 0) {
         return 1;
     }
     if !name_is(b"hello\0".as_ptr(), 5, 1) {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 22, 2) {
+    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 22, 2) {
         return 1;
     }
     if !name_is(b"zlib\0".as_ptr(), 4, 3) {
@@ -83,7 +83,7 @@ unsafe extern "C" fn case_search_matches_name_substring_ci_body() -> i32 {
     if n2 != 1 {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 22, 0) {
+    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 22, 0) {
         return 1;
     }
     0
@@ -100,7 +100,7 @@ unsafe extern "C" fn case_filter_by_prefix_body() -> i32 {
     if n != 1 {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 22, 0) {
+    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 22, 0) {
         return 1;
     }
     0
@@ -133,7 +133,7 @@ unsafe extern "C" fn case_filter_by_kind_and_arch_body() -> i32 {
     if n2 != 1 {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.async\0".as_ptr(), 22, 0) {
+    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 22, 0) {
         return 1;
     }
     /* Kind alone: anything with a wasm artifact. */

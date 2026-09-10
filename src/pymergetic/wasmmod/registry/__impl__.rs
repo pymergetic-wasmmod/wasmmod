@@ -141,7 +141,7 @@ pub type pm_wasmmod_registry_bench_fn_t = unsafe extern "C" fn(u64) -> i32;
 /// Per-seat monotonic clock fill for bench timing, in microseconds. `0` is
 /// meaningless as a delta, so a seat with no clock simply never registers
 /// one — `bench_run*` then report "no clock" instead of measuring garbage.
-/// Metal provides a strong fill reaching `pm_metal_async_mono_us`; each seat
+/// Metal provides a strong fill reaching `pm_metal_coop_mono_us`; each seat
 /// that can time provides its own (POSIX `clock_gettime` on unix, a
 /// `performance.now`-derived value on emcc, the firmware timer otherwise).
 pub type pm_wasmmod_registry_bench_clock_t = unsafe extern "C" fn() -> u64;
@@ -1673,7 +1673,7 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_run_all(fqn_ptr: *const u8, fq
 }
 
 /// Install the monotonic clock fill for bench timing (microseconds). A seat
-/// provides this once at boot; metal wires it to `pm_metal_async_mono_us`.
+/// provides this once at boot; metal wires it to `pm_metal_coop_mono_us`.
 /// Passing `None` clears the fill, which benches report as "no clock".
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pm_wasmmod_registry_set_bench_clock(
