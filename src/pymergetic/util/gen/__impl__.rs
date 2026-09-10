@@ -941,14 +941,19 @@ pub fn faces_for_fqn(fqn: &str, types_on_disk: bool) -> Option<Vec<(String, Stri
     if exports.is_empty() {
         return None;
     }
+    // The pyi face: provider-rich when the card ships one, else the
+    // export-derived face. Hoisted to a binding — a value-position match
+    // inside a vec! tuple element needs a type context the kernel's rsx
+    // infers at bindings, not at tuple slots.
+    let pyi = match pyi_via_provider(fqn) {
+        Some(rich) => rich,
+        None => emit_init_pyi_from_exports(fqn, &exports),
+    };
     #[allow(unused_mut)]
     let mut faces = alloc::vec![
         (String::from(FACE_EXPORTS_H), emit_exports_h(fqn, &exports, types_on_disk)),
         (String::from(FACE_EXPORTS_RS), emit_exports_rs(&exports)),
-        (String::from(FACE_INIT_PYI), match pyi_via_provider(fqn) {
-            Some(rich) => rich,
-            None => emit_init_pyi_from_exports(fqn, &exports),
-        }),
+        (String::from(FACE_INIT_PYI), pyi),
     ];
     #[cfg(feature = "gen")]
     if let Some(mut views) = view_faces_for_fqn(fqn) {
@@ -1021,12 +1026,28 @@ pub fn diff_against_included(
 }
 
 fn guard_name(fqn: &str, kind: &str) -> String {
-    let mid = fqn
-        .split('.')
-        .skip(1)
-        .map(|p| p.to_ascii_uppercase())
-        .collect::<Vec<_>>()
-        .join("_");
+    // PYMERGETIC_<MIDDLE>_<KIND>_H: middle = fqn segments past the
+    // first, upper-cased, joined by '_'. A for-loop over the split
+    // view with an explicit skip counter (the kernel's rsx subset
+    // idiom) instead of an iterator chain — collect/join stay
+    // host-side sugar.
+    let mut mid = String::new();
+    let mut idx = 0u32;
+    for p in fqn.split('.') {
+        if idx > 0 {
+            if mid.len() > 0 {
+                mid.push('_');
+            }
+            for ch in p.bytes() {
+                if ch >= b'a' && ch <= b'z' {
+                    mid.push((ch - b'a' + b'A') as char);
+                } else {
+                    mid.push(ch as char);
+                }
+            }
+        }
+        idx += 1;
+    }
     format!("PYMERGETIC_{mid}_{kind}_H")
 }
 
