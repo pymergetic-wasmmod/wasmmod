@@ -791,6 +791,246 @@ fn test_gc_visit_only_sees_live_obj_exports() {
     assert_eq!(unsafe { case_gc_visit_only_sees_live_obj_exports() }, 0);
 }
 
+/* ---- rows, not reserved slots -------------------------------------------
+ * An export / test / bench row is taken one at a time now — from the seat's
+ * heap where there is one, from the pre-heap pool where there is not — so a
+ * module holds what it registers instead of 64 reserved export rows (which
+ * was 3.6MB of .bss for exports nobody had registered). These are the
+ * invariants that shape stands on: no per-module ceiling, registration
+ * order preserved across an update, and every row given back on unpublish. */
+
+const WIDE_N: usize = 100;
+
+/// Names for the wide case, in static storage: a row borrows the bytes it is
+/// handed when the seat has no heap yet (a constructor's literal), so a test
+/// hands over bytes that outlive the table, never a stack buffer.
+struct WideNames(UnsafeCell<[u8; WIDE_N * 4]>);
+unsafe impl Sync for WideNames {}
+static WIDE_NAMES: WideNames = WideNames(UnsafeCell::new([0u8; WIDE_N * 4]));
+
+unsafe fn wide_name(i: usize) -> *const u8 {
+    unsafe {
+        let p = (WIDE_NAMES.0.get() as *mut u8).add(i * 4);
+        *p = b'x';
+        *p.add(1) = b'0' + (i / 100) as u8;
+        *p.add(2) = b'0' + ((i / 10) % 10) as u8;
+        *p.add(3) = b'0' + (i % 10) as u8;
+        p
+    }
+}
+
+fn a_module_holds_more_exports_than_a_row_ever_reserved() {
+    unsafe {
+        let fqn = b"test.rows.wide\0".as_ptr();
+        let handle = pm_wasmmod_registry_publish(
+            fqn,
+            14,
+            pm_wasmmod_registry_container_kind_t::Resident,
+        );
+        assert_ne!(handle.index, u32::MAX);
+        let mut i = 0usize;
+        while i < WIDE_N {
+            assert_eq!(
+                pm_wasmmod_registry_export_set(
+                    handle,
+                    wide_name(i),
+                    4,
+                    pm_wasmmod_registry_export_kind_t::Fn,
+                    core::ptr::dangling_mut::<c_void>(),
+                ),
+                1,
+                "a module takes more exports than a row used to reserve"
+            );
+            i += 1;
+        }
+        assert_eq!(pm_wasmmod_registry_export_count(fqn, 14), WIDE_N as u32);
+        /* the last one registered is the last one reported, and it resolves */
+        let mut name = [0u8; 32];
+        let mut name_len = 32u32;
+        let mut kind = pm_wasmmod_registry_export_kind_t::Obj;
+        let mut sig_len = 0u32;
+        assert_eq!(
+            pm_wasmmod_registry_export_at(
+                fqn,
+                14,
+                (WIDE_N - 1) as u32,
+                name.as_mut_ptr(),
+                &mut name_len,
+                &mut kind,
+                core::ptr::null_mut(),
+                &mut sig_len,
+            ),
+            1
+        );
+        assert_eq!(name_len, 4);
+        assert!(span_eq(wide_name(WIDE_N - 1), 4, name.as_ptr(), 4));
+        assert!(
+            !pm_wasmmod_registry_resolve_native(fqn, 14, wide_name(WIDE_N - 1), 4).is_null()
+        );
+        /* and every row goes back: the module is gone, rows and all */
+        assert_eq!(pm_wasmmod_registry_unpublish(handle), 1);
+        assert_eq!(pm_wasmmod_registry_has(fqn, 14), 0);
+        assert_eq!(pm_wasmmod_registry_export_count(fqn, 14), 0);
+    }
+}
+
+fn a_re_registration_keeps_its_place_and_its_sig() {
+    unsafe {
+        let fqn = b"test.rows.order\0".as_ptr();
+        let handle = pm_wasmmod_registry_publish(
+            fqn,
+            15,
+            pm_wasmmod_registry_container_kind_t::Resident,
+        );
+        assert_ne!(handle.index, u32::MAX);
+        let names: [*const u8; 3] = [
+            b"alpha\0".as_ptr(),
+            b"beta\0".as_ptr(),
+            b"gamma\0".as_ptr(),
+        ];
+        let lens: [u32; 3] = [5, 4, 5];
+        let mut i = 0usize;
+        while i < 3 {
+            assert_eq!(
+                pm_wasmmod_registry_export_set_sig(
+                    handle,
+                    names[i],
+                    lens[i],
+                    pm_wasmmod_registry_export_kind_t::Fn,
+                    core::ptr::dangling_mut::<c_void>(),
+                    b"int(void)\0".as_ptr(),
+                    9,
+                ),
+                1
+            );
+            i += 1;
+        }
+        /* the middle one again, with no sig: it keeps the sig it had and it
+         * keeps its place in the middle (a row is replaced where it sits,
+         * not appended). */
+        assert_eq!(
+            pm_wasmmod_registry_export_set(
+                handle,
+                names[1],
+                lens[1],
+                pm_wasmmod_registry_export_kind_t::Mem,
+                core::ptr::dangling_mut::<c_void>(),
+            ),
+            1
+        );
+        assert_eq!(pm_wasmmod_registry_export_count(fqn, 15), 3);
+        let mut at = 0u32;
+        while at < 3 {
+            let mut name = [0u8; 32];
+            let mut name_len = 32u32;
+            let mut kind = pm_wasmmod_registry_export_kind_t::Obj;
+            let mut sig = [0u8; 32];
+            let mut sig_len = 32u32;
+            assert_eq!(
+                pm_wasmmod_registry_export_at(
+                    fqn,
+                    15,
+                    at,
+                    name.as_mut_ptr(),
+                    &mut name_len,
+                    &mut kind,
+                    sig.as_mut_ptr(),
+                    &mut sig_len,
+                ),
+                1
+            );
+            assert!(
+                span_is(names[at as usize], name.as_ptr(), name_len),
+                "registration order survives an update"
+            );
+            assert!(span_is(b"int(void)\0".as_ptr(), sig.as_ptr(), sig_len));
+            if at == 1 {
+                assert_eq!(kind, pm_wasmmod_registry_export_kind_t::Mem);
+            }
+            at += 1;
+        }
+        /* a new sig does replace the old one */
+        assert_eq!(
+            pm_wasmmod_registry_export_set_sig(
+                handle,
+                names[1],
+                lens[1],
+                pm_wasmmod_registry_export_kind_t::Fn,
+                core::ptr::dangling_mut::<c_void>(),
+                b"void(int)\0".as_ptr(),
+                9,
+            ),
+            1
+        );
+        let mut name = [0u8; 32];
+        let mut name_len = 32u32;
+        let mut kind = pm_wasmmod_registry_export_kind_t::Obj;
+        let mut sig = [0u8; 32];
+        let mut sig_len = 32u32;
+        assert_eq!(
+            pm_wasmmod_registry_export_at(
+                fqn,
+                15,
+                1,
+                name.as_mut_ptr(),
+                &mut name_len,
+                &mut kind,
+                sig.as_mut_ptr(),
+                &mut sig_len,
+            ),
+            1
+        );
+        assert!(span_is(b"beta\0".as_ptr(), name.as_ptr(), name_len));
+        assert!(span_is(b"void(int)\0".as_ptr(), sig.as_ptr(), sig_len));
+        assert_eq!(pm_wasmmod_registry_unpublish(handle), 1);
+    }
+}
+
+fn the_row_knobs_are_on_the_seats_list() {
+    unsafe {
+        let names: [*const u8; 3] = [
+            b"wasmmod.registry.exports\0".as_ptr(),
+            b"wasmmod.registry.tests\0".as_ptr(),
+            b"wasmmod.registry.benches\0".as_ptr(),
+        ];
+        let dflts: [u32; 3] = [EXPORT_DEFAULT, TEST_DEFAULT, BENCH_DEFAULT];
+        let mut i = 0usize;
+        while i < 3 {
+            let at = crate::util::limits::pm_util_limits_find(names[i]);
+            assert!(at >= 0, "the card's knob is on the seat's list");
+            assert_eq!(crate::util::limits::pm_util_limits_default(at), dflts[i]);
+            assert_eq!(
+                crate::util::limits::pm_util_limits_counted(at),
+                1,
+                "a row knob reports what it holds"
+            );
+            i += 1;
+        }
+        /* the tree's own registrations are rows: the export knob counts them */
+        let at = crate::util::limits::pm_util_limits_find(names[0]);
+        assert!(crate::util::limits::pm_util_limits_used(at) > 0);
+    }
+}
+
+unsafe extern "C" fn case_rows_are_taken_not_reserved() -> i32 {
+    unsafe { crate::util::mod_test::case_rc(case_rows_are_taken_not_reserved_body) }
+}
+unsafe extern "C" fn case_rows_are_taken_not_reserved_body() -> i32 {
+    a_module_holds_more_exports_than_a_row_ever_reserved();
+    a_re_registration_keeps_its_place_and_its_sig();
+    the_row_knobs_are_on_the_seats_list();
+    0
+}
+crate::PM_MOD_TEST_RS!(
+    "pymergetic.wasmmod.registry",
+    "rows_are_taken_not_reserved",
+    case_rows_are_taken_not_reserved
+);
+#[test]
+fn test_rows_are_taken_not_reserved() {
+    assert_eq!(unsafe { case_rows_are_taken_not_reserved() }, 0);
+}
+
 /* ---- loud-refusal ring --------------------------------------------------
  * The dark-export audit: a face whose sig exceeds SIG_CAP used to vanish
  * silently (mod_export returned false, the ctor discarded it). Now every

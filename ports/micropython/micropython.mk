@@ -81,6 +81,7 @@ JSFLAGS += -s ASYNCIFY_STACK_SIZE=65536
 
 SRC_WASMMOD = \
 	$(WASMMOD_DIR)/src/pymergetic/util/mem/__impl__.c \
+	$(WASMMOD_DIR)/src/pymergetic/util/limits/__impl__.c \
 	$(WASMMOD_DIR)/third_party/tlsf/tlsf.c \
 	$(WASMMOD_DIR)/src/pymergetic/util/zlib/__impl__.c \
 	$(WASMMOD_DIR)/../../lib/uzlib/lz77.c \
@@ -142,12 +143,22 @@ WASMMOD_LOCK_SRC := $(WASMMOD_ABS)/ports/webassembly/fw_lock/lib.rs
 WASMMOD_LOCK_EXTRA :=
 WASMMOD_LOCK_ENV :=
 endif
+# The crate reaches its cards through `#[path]`, so the prerequisites above
+# name only the roots. rustc's own dep-info is what knows the rest — without
+# it this archive goes stale the moment a card changes, and the seat links
+# yesterday's card while every other seat has today's. rustc writes that file
+# against the crate's own output name (`libfw_lock.a`), not the path make
+# asked for, so the one line make can use is lifted out under the real path.
+WASMMOD_LOCK_D := $(WASMMOD_LOCK_A:.a=.d)
 $(WASMMOD_LOCK_A): $(WASMMOD_LOCK_SRC) $(WASMMOD_LOCK_EXTRA) | $(BUILD)
 	$(ECHO) "RUSTC loader wasm32"
 	$(Q)$(WASMMOD_LOCK_ENV) \
 	rustc --edition 2024 --crate-type staticlib --crate-name fw_lock \
 		--target wasm32-unknown-unknown -C panic=abort -C opt-level=s \
-		-o $@ $<
+		--emit=dep-info=$(WASMMOD_LOCK_D).raw,link=$@ $<
+	$(Q)sed -n 's|^libfw_lock\.a:|$@:|p' $(WASMMOD_LOCK_D).raw > $(WASMMOD_LOCK_D)
+
+-include $(WASMMOD_LOCK_D)
 
 WASMMOD_WAMR_A := $(BUILD)/libwasmmod_wamr_freestanding.a
 $(WASMMOD_WAMR_A): | $(BUILD)
@@ -209,6 +220,7 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/src/pymergetic/util/zlib/__impl__.c \
 	$(WASMMOD_DIR)/../../lib/uzlib/lz77.c \
 	$(WASMMOD_DIR)/src/pymergetic/types/__impl__.c \
+	$(WASMMOD_DIR)/src/pymergetic/util/limits/__impl__.c \
 	$(WASMMOD_DIR)/ports/micropython/modpymergetic.c \
 	$(WASMMOD_DIR)/ports/micropython/modwasmmod.c \
 	$(WASMMOD_DIR)/ports/micropython/modcdn.c \

@@ -19,6 +19,9 @@ pub mod lz4;
 #[path = "util/lock.rs"]
 pub mod lock;
 
+#[path = "util/limits.rs"]
+pub mod limits;
+
 #[path = "util/version.rs"]
 pub mod version;
 

@@ -8,6 +8,7 @@
  * PM_MOD_EXPORT_C. */
 #include "pymergetic/types/__exports__.h"
 #include "pymergetic/types/__types__.h"
+#include "pymergetic/util/limits/__types__.h"
 #include "pymergetic/util/mem.h"
 #include "pymergetic/wasmmod/guest.h"
 
@@ -489,6 +490,117 @@ static int32_t case_null_guards(void) {
     return 0;
 }
 
+/* A staged descriptor is a row taken when the scan announces it, as wide as
+ * the type the scan found — so a type with more fields than any reserved row
+ * ever held stages whole, how many may be staged at once is a knob a seat can
+ * move, and the registry's own run widens past the pool it boots with. */
+#define WIDE_FIELDS 80u
+/* Enough staged types to take the registry past the run it boots with. */
+#define WIDE_MANY 60u
+
+static int32_t case_stage_rows(void) {
+    const char *wide = "pymergetic.types.tests.Wide";
+    const pm_type_descriptor_t *d;
+    char name[8];
+    uint32_t i;
+    int32_t at_stage = pm_util_limits_find("types.stage");
+    int32_t at_reg = pm_util_limits_find("types.registry");
+    uint32_t types_before = pm_types_registry_count();
+    if (at_stage < 0 || at_reg < 0) {
+        return fail("the card's knobs are on the list");
+    }
+    if (pm_util_limits_counted(at_stage) != 1u
+            || pm_util_limits_counted(at_reg) != 1u) {
+        return fail("both knobs count what they hold");
+    }
+    if (pm_util_limits_used(at_reg) != types_before) {
+        return fail("registry used is the live count");
+    }
+    /* Over the 64 fields a staged row used to reserve, and the fields come
+     * back sorted by name_hash (the registry's contract). */
+    if (pm_types_registry_stage(wide, PM_TYPE_DESC_STRUCT, 0u, NULL,
+            (uint16_t)WIDE_FIELDS) != 0) {
+        return fail("stage wide");
+    }
+    if (pm_util_limits_used(at_stage) == 0u) {
+        return fail("a staged row is counted");
+    }
+    for (i = 0; i < WIDE_FIELDS; i++) {
+        snprintf(name, sizeof(name), "w%02u", i);
+        if (pm_types_registry_stage_field(wide, (uint16_t)i, name, i * 4u,
+                "pymergetic.types.i32") != 0) {
+            return fail("stage field");
+        }
+    }
+    if (pm_types_registry_stage_field(wide, (uint16_t)WIDE_FIELDS, "over", 0u,
+            NULL) != -1) {
+        return fail("a field past the row must refuse");
+    }
+    if (pm_types_registry_stage_commit(wide) != 0) {
+        return fail("stage commit");
+    }
+    d = pm_types_registry_find(wide);
+    if (d == NULL || d->field_count != WIDE_FIELDS) {
+        return fail("the staged type is in the registry whole");
+    }
+    for (i = 1; i < WIDE_FIELDS; i++) {
+        if (d->fields[i - 1u].name_hash >= d->fields[i].name_hash) {
+            return fail("staged fields sorted");
+        }
+    }
+    if (d->instance_size != (uint16_t)((WIDE_FIELDS - 1u) * 4u + 4u)) {
+        return fail("instance size from the highest cell");
+    }
+    if (pm_types_registry_count() != types_before + 1u
+            || pm_util_limits_used(at_reg) != types_before + 1u) {
+        return fail("the registry grew by one");
+    }
+    /* Past the run the registry boots with: the sorted run widens (staging
+     * registers each of these), and every descriptor already in it is still
+     * there, still in order, still found by name. */
+    for (i = 0; i < WIDE_MANY; i++) {
+        snprintf(name, sizeof(name), "W%02u", i);
+        if (pm_types_registry_stage(name, PM_TYPE_DESC_STRUCT, 4u, NULL, 0u) != 0) {
+            return fail("stage past the registry's own run");
+        }
+    }
+    for (i = 0; i < WIDE_MANY; i++) {
+        snprintf(name, sizeof(name), "W%02u", i);
+        if (pm_types_registry_find(name) == NULL) {
+            return fail("a widened registry keeps what it held");
+        }
+    }
+    if (pm_types_registry_count() != types_before + 1u + WIDE_MANY) {
+        return fail("the registry grew by each");
+    }
+    for (i = 1; i < pm_types_registry_count(); i++) {
+        if (strcmp(pm_types_registry_at(i - 1u)->fqn,
+                pm_types_registry_at(i)->fqn) >= 0) {
+            return fail("a widened registry stays sorted");
+        }
+    }
+    if (pm_types_registry_find(wide) != d) {
+        return fail("the wide type survived the widening");
+    }
+    /* Staging stops where the knob is, and starts again when it moves back. */
+    if (pm_util_limits_set("types.stage", pm_util_limits_used(at_stage)) != 0) {
+        return fail("shrink types.stage");
+    }
+    if (pm_types_registry_stage("pymergetic.types.tests.Over",
+            PM_TYPE_DESC_STRUCT, 4u, NULL, 1u) != -1) {
+        return fail("a row past the knob must refuse");
+    }
+    if (pm_util_limits_reset("types.stage") != 0
+            || pm_util_limits_soft(at_stage) != pm_util_limits_default(at_stage)) {
+        return fail("reset types.stage");
+    }
+    if (pm_types_registry_stage("pymergetic.types.tests.Over",
+            PM_TYPE_DESC_STRUCT, 4u, NULL, 0u) != 0) {
+        return fail("stage once the knob is back");
+    }
+    return 0;
+}
+
 /* the arena every case shares: created before any case runs. */
 static int32_t pm_types_tests(void) {
     int32_t rc;
@@ -511,6 +623,7 @@ static int32_t pm_types_tests(void) {
     if (rc == 0) rc = case_lock();
     if (rc == 0) rc = case_refcount();
     if (rc == 0) rc = case_null_guards();
+    if (rc == 0) rc = case_stage_rows();
     pm_util_mem_arena_destroy(s_arena);
     free(s_backing);
     return rc;

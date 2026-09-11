@@ -484,7 +484,7 @@ fn map_c_type_to_rust(c: &str) -> (String, bool, Option<String>) {
             "int" | "int32_t" | "pm_wasmmod_mem_cookie_t" | "pm_wasmmod_obj_handle_t" => "i32",
             "uint16_t" | "int16_t" => "u16",
             "int8_t" => "i8",
-            "uint32_t" | "unsigned" | "unsigned int" => "u32",
+            "uint32_t" | "unsigned" | "unsigned int" | "pm_mod_value_t" => "u32",
             "int64_t" => "i64",
             "uint64_t" => "u64",
             "size_t" => "usize",

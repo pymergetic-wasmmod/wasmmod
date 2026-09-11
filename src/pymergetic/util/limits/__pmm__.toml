@@ -1,0 +1,3 @@
+fqn = "pymergetic.util.limits"
+impl = "c"
+notes = "Named soft/hard knobs. The value lives in the card that grows against it; this one is where a seat reads and moves them."

@@ -47,14 +47,73 @@ struct pm_util_lock_t {
 unsafe extern "C" {
     fn pm_util_lock_acquire(l: *mut pm_util_lock_t);
     fn pm_util_lock_release(l: *mut pm_util_lock_t);
+    /* The seat's own allocator, which is where a row comes from once the
+     * seat has one: stdlib malloc on the µPy and host seats (the same
+     * MICROPY_WASM_MALLOC net.search takes its pack buffers from), the bump
+     * over the boot arena on firmware (port/upy/firmware_upy.c). A
+     * registration is a once-per-card / once-per-pack event and a row is
+     * one allocation, so nothing here is on a hot path. */
+    fn malloc(size: usize) -> *mut c_void;
+    fn free(ptr: *mut c_void);
+}
+
+/* pymergetic.util.limits — the seat's knobs. The struct is spelled here
+ * because this card owns three of them (the generated face
+ * util/limits/__exports__.rs has the knob opaque), same as the loader's
+ * image knob; `limits_attach` below is that face, not a second one. */
+#[repr(C)]
+struct pm_util_limit_t {
+    name: *const u8,
+    soft: u32,
+    hard: u32,
+    dflt: u32,
+    used: *const u32,
+    next: *mut pm_util_limit_t,
+    /// `int32_t (*apply)(pm_util_limit_t *)` on the C side, spelled here as
+    /// the opaque pointer it is on every target: only the owning card fills
+    /// it, for a knob whose new value has to be pushed somewhere, and these
+    /// three are read where they are used. Spelling the fn type would also
+    /// put its typedef ahead of this struct in the in-kernel compile (rsx
+    /// lowers a fn-pointer type in an earlier pass than the struct it
+    /// names), which is a card the kernel could not rebuild.
+    apply: *mut c_void,
+}
+
+unsafe fn limits_attach(knob: *mut pm_util_limit_t) -> i32 {
+    unsafe {
+        crate::util::limits::pm_util_limits_attach(
+            knob as *mut crate::util::limits::pm_util_limit_t,
+        )
+    }
 }
 
 /* ---- budgets ---- */
 
 const MOD_MAX: usize = 128;
-const EXP_MAX: usize = 64;
-const TST_MAX: usize = 32;
-const BNC_MAX: usize = 8;
+/* Export, test and bench rows are taken one at a time, so a module has no
+ * per-module ceiling any more: what a seat will hold is the knob
+ * (wasmmod.registry.exports / .tests / .benches), and a row taken while the
+ * seat has a heap comes from the heap.
+ *
+ * The pools below are the pre-heap floor, not a policy limit. A card's
+ * registrations arrive from its constructor, and on a board that is crt0 —
+ * a board's crt0.S calls pm_metal_elf_ctors_run before main, long before
+ * the boot arena and therefore before malloc answers — so those rows can
+ * only come out of .bss. A BIOS image is ~915 constructors all
+ * told (.init_array / 8 on its elf), and the fullest seat built here takes
+ * 731 export rows from its cards, so the floor is that with room to grow
+ * rather than the number that only just fits; each knob's `used` is the live
+ * row count, so a seat can read how much of its floor it takes. A hosted
+ * seat (unix, browser, the host tests) has an allocator from its first
+ * constructor and never touches the pools. */
+const EXPORT_POOL: usize = 1536;
+const TEST_POOL: usize = 384;
+const BENCH_POOL: usize = 64;
+/* The knob defaults are the pool sizes: what a seat hands out before it has
+ * a heap is also where a seat that never grows the knob stops. */
+const EXPORT_DEFAULT: u32 = 1536;
+const TEST_DEFAULT: u32 = 384;
+const BENCH_DEFAULT: u32 = 64;
 const FQN_CAP: usize = 64;
 const VER_CAP: usize = 32;
 /* SIG_CAP must hold the longest valid ABI signature in the tree. The
@@ -153,13 +212,23 @@ pub type pm_wasmmod_registry_bench_clock_t = unsafe extern "C" fn() -> u64;
 const BODY_NATIVE: u8 = 0;
 const BODY_WASM: u8 = 1;
 
+/* A row's string. The bytes are the row's own (copied into the tail of its
+ * allocation) when the row came from the heap, and the caller's when it
+ * came from the pre-heap pool: a pre-heap registration is by construction a
+ * constructor's literal, which outlives every table. Either way a reader
+ * sees one (ptr, len) — the same span discipline as every face here. */
+#[derive(Clone, Copy)]
+struct Span {
+    ptr: *const u8,
+    len: u32,
+}
+
 /* Clone/Copy: rows repeat inside `[row; N]` initializers (the rsx subset
  * has no Default, and a bare struct-lit const is not an accepted static
  * shape — asgi's Conn rows use the same derive). */
 #[derive(Clone, Copy)]
 struct Export {
-    name: [u8; NAME_CAP],
-    name_len: u32,
+    name: Span,
     kind: pm_wasmmod_registry_export_kind_t,
     /// `Fn`/`Mem`/`I64`/`F32`/`F64`/`BufPtr`: a real native pointer.
     /// `Obj`: an opaque token owned by whichever embedder eventually
@@ -168,28 +237,33 @@ struct Export {
     ptr: *mut c_void,
     /// Optional C prototype spelling for facegen (e.g. `int(void)`).
     /// len 0 = unset.
-    sig: [u8; SIG_CAP],
-    sig_len: u32,
+    sig: Span,
+    /// The module's next export, in registration order. Also the pool's
+    /// free-list link once the row is given back.
+    next: *mut Export,
+    /// Row from the seat's heap (one free gives it back) or from the
+    /// pre-heap pool (it goes on the free list).
+    heap: bool,
 }
 
 #[derive(Clone, Copy)]
 struct TestEntry {
-    name: [u8; NAME_CAP],
-    name_len: u32,
+    name: Span,
     body_kind: u8,
     native: Option<pm_wasmmod_registry_test_fn_t>,
-    export: [u8; NAME_CAP],
-    export_len: u32,
+    export: Span,
+    next: *mut TestEntry,
+    heap: bool,
 }
 
 #[derive(Clone, Copy)]
 struct BenchEntry {
-    name: [u8; NAME_CAP],
-    name_len: u32,
+    name: Span,
     body_kind: u8,
     native: Option<pm_wasmmod_registry_bench_fn_t>,
-    export: [u8; NAME_CAP],
-    export_len: u32,
+    export: Span,
+    next: *mut BenchEntry,
+    heap: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -203,11 +277,13 @@ struct ModEntry {
     container: pm_wasmmod_registry_container_kind_t,
     generation: u32,
     live: bool,
-    exports: [Export; EXP_MAX],
+    /// Head of the module's export chain; `n_exports` is its length, which
+    /// is what `export_count` has always reported.
+    exports: *mut Export,
     n_exports: u32,
-    tests: [TestEntry; TST_MAX],
+    tests: *mut TestEntry,
     n_tests: u32,
-    benches: [BenchEntry; BNC_MAX],
+    benches: *mut BenchEntry,
     n_benches: u32,
 }
 
@@ -233,10 +309,12 @@ struct Table {
     out_len: u32,
 }
 
-/* The one table. Sized in .bss: 128 modules * (64 exports + 32 tests +
- * 8 benches) of fixed rows. Nothing here allocates, so the two-phase
- * staging buffer the allocator-backed design needed is gone entirely —
- * a ctor-time registration is just a row write.
+/* The one table: 128 module rows, each holding the head of its export,
+ * test and bench chains (the rows themselves come from `export_take` and
+ * friends below — 128 * 64 fixed export rows was 3.6MB of a seat's .bss
+ * for exports nobody had registered). A ctor-time registration is still
+ * just a row write, so the two-phase staging buffer the old
+ * allocator-backed design needed stays gone.
  *
  * rsx shape discipline, two rules. (1) The static-initializer shape
  * check only accepts a *bare* STRUCT_LIT / ARRAY / LITERAL (or the
@@ -264,37 +342,112 @@ static TABLE: Mut<Table> = Mut(UnsafeCell::new(Table {
         container: pm_wasmmod_registry_container_kind_t::Wasm,
         generation: 0,
         live: false,
-        exports: [Export {
-            name: [0; NAME_CAP],
-            name_len: 0,
-            kind: pm_wasmmod_registry_export_kind_t::Fn,
-            ptr: ptr::null_mut(),
-            sig: [0; SIG_CAP],
-            sig_len: 0,
-        }; EXP_MAX],
+        exports: ptr::null_mut(),
         n_exports: 0,
-        tests: [TestEntry {
-            name: [0; NAME_CAP],
-            name_len: 0,
-            body_kind: BODY_NATIVE,
-            native: None,
-            export: [0; NAME_CAP],
-            export_len: 0,
-        }; TST_MAX],
+        tests: ptr::null_mut(),
         n_tests: 0,
-        benches: [BenchEntry {
-            name: [0; NAME_CAP],
-            name_len: 0,
-            body_kind: BODY_NATIVE,
-            native: None,
-            export: [0; NAME_CAP],
-            export_len: 0,
-        }; BNC_MAX],
+        benches: ptr::null_mut(),
         n_benches: 0,
     }; MOD_MAX],
     n_entries: 0,
     out: [0; OUT_CAP],
     out_len: 0,
+}));
+
+/* ---- row storage ----
+ *
+ * The pre-heap pools, their free lists (a pack that loads, unloads and
+ * loads again must not drain a pool), the live counts each knob reports as
+ * `used`, and the knobs themselves. Every one of these is zero at rest, so
+ * the pools ride .bss the same way the table does. */
+
+static EXPORT_ROWS: Mut<[Export; EXPORT_POOL]> = Mut(UnsafeCell::new([Export {
+    name: Span {
+        ptr: ptr::null(),
+        len: 0,
+    },
+    kind: pm_wasmmod_registry_export_kind_t::Fn,
+    ptr: ptr::null_mut(),
+    sig: Span {
+        ptr: ptr::null(),
+        len: 0,
+    },
+    next: ptr::null_mut(),
+    heap: false,
+}; EXPORT_POOL]));
+static EXPORT_TAKEN: Mut<u32> = Mut(UnsafeCell::new(0));
+static EXPORT_FREE: Mut<*mut Export> = Mut(UnsafeCell::new(ptr::null_mut()));
+static EXPORT_LIVE: Mut<u32> = Mut(UnsafeCell::new(0));
+
+static TEST_ROWS: Mut<[TestEntry; TEST_POOL]> = Mut(UnsafeCell::new([TestEntry {
+    name: Span {
+        ptr: ptr::null(),
+        len: 0,
+    },
+    body_kind: BODY_NATIVE,
+    native: None,
+    export: Span {
+        ptr: ptr::null(),
+        len: 0,
+    },
+    next: ptr::null_mut(),
+    heap: false,
+}; TEST_POOL]));
+static TEST_TAKEN: Mut<u32> = Mut(UnsafeCell::new(0));
+static TEST_FREE: Mut<*mut TestEntry> = Mut(UnsafeCell::new(ptr::null_mut()));
+static TEST_LIVE: Mut<u32> = Mut(UnsafeCell::new(0));
+
+static BENCH_ROWS: Mut<[BenchEntry; BENCH_POOL]> = Mut(UnsafeCell::new([BenchEntry {
+    name: Span {
+        ptr: ptr::null(),
+        len: 0,
+    },
+    body_kind: BODY_NATIVE,
+    native: None,
+    export: Span {
+        ptr: ptr::null(),
+        len: 0,
+    },
+    next: ptr::null_mut(),
+    heap: false,
+}; BENCH_POOL]));
+static BENCH_TAKEN: Mut<u32> = Mut(UnsafeCell::new(0));
+static BENCH_FREE: Mut<*mut BenchEntry> = Mut(UnsafeCell::new(ptr::null_mut()));
+static BENCH_LIVE: Mut<u32> = Mut(UnsafeCell::new(0));
+
+/// Set once any allocation on this seat has succeeded. Before that a row
+/// has to come out of a pool and borrow its caller's bytes; after it, a row
+/// that cannot be allocated is a loud refusal rather than a borrow of bytes
+/// that may not outlive the table.
+static HEAP_SEEN: Mut<u32> = Mut(UnsafeCell::new(0));
+static KNOBS_DONE: Mut<u32> = Mut(UnsafeCell::new(0));
+
+static EXPORTS_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t {
+    name: "wasmmod.registry.exports\0".as_ptr(),
+    soft: EXPORT_DEFAULT,
+    hard: 0,
+    dflt: EXPORT_DEFAULT,
+    used: ptr::null(),
+    next: ptr::null_mut(),
+    apply: ptr::null_mut(),
+}));
+static TESTS_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t {
+    name: "wasmmod.registry.tests\0".as_ptr(),
+    soft: TEST_DEFAULT,
+    hard: 0,
+    dflt: TEST_DEFAULT,
+    used: ptr::null(),
+    next: ptr::null_mut(),
+    apply: ptr::null_mut(),
+}));
+static BENCHES_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t {
+    name: "wasmmod.registry.benches\0".as_ptr(),
+    soft: BENCH_DEFAULT,
+    hard: 0,
+    dflt: BENCH_DEFAULT,
+    used: ptr::null(),
+    next: ptr::null_mut(),
+    apply: ptr::null_mut(),
 }));
 
 /* The loader hooks are single fn-pointer cells: one lock-free spin for
@@ -347,6 +500,570 @@ unsafe fn span_put(dst: *mut u8, dst_cap: usize, src: *const u8, src_len: usize)
         i += 1;
     }
     src_len
+}
+
+unsafe fn span_copy(dst: *mut u8, src: *const u8, n: usize) {
+    if n == 0 || dst.is_null() || src.is_null() {
+        return;
+    }
+    unsafe { core::ptr::copy_nonoverlapping(src, dst, n) };
+}
+
+/* ---- rows (all under the caller-held table lock) ---- */
+
+/// The card's knobs onto the seat's list, once. Reached from the first row
+/// take as well as from `init`: a registration arrives from a constructor
+/// long before any seat calls init, and a seat should be able to read what
+/// the registry will hold either way.
+unsafe fn knobs_attach() {
+    unsafe {
+        if *KNOBS_DONE.0.get() != 0 {
+            return;
+        }
+        *KNOBS_DONE.0.get() = 1;
+        (*EXPORTS_KNOB.0.get()).used = EXPORT_LIVE.0.get() as *const u32;
+        (*TESTS_KNOB.0.get()).used = TEST_LIVE.0.get() as *const u32;
+        (*BENCHES_KNOB.0.get()).used = BENCH_LIVE.0.get() as *const u32;
+        let _ = limits_attach(EXPORTS_KNOB.0.get());
+        let _ = limits_attach(TESTS_KNOB.0.get());
+        let _ = limits_attach(BENCHES_KNOB.0.get());
+    }
+}
+
+/// Room for one more row? A knob at zero never refuses, the same reading
+/// every other knob in the tree has.
+unsafe fn knob_room(knob: *mut pm_util_limit_t, live: u32) -> bool {
+    unsafe {
+        knobs_attach();
+        let soft = (*knob).soft;
+        soft == 0 || live < soft
+    }
+}
+
+/// A row's memory from the seat's allocator: the row struct, then room for
+/// its strings, in one allocation so one free gives it all back.
+unsafe fn heap_take(n: usize) -> *mut u8 {
+    unsafe {
+        let p = malloc(n) as *mut u8;
+        if !p.is_null() {
+            *HEAP_SEEN.0.get() = 1;
+        }
+        p
+    }
+}
+
+unsafe fn export_pool_take() -> *mut Export {
+    unsafe {
+        let freed = *EXPORT_FREE.0.get();
+        if !freed.is_null() {
+            *EXPORT_FREE.0.get() = (*freed).next;
+            return freed;
+        }
+        let taken = *EXPORT_TAKEN.0.get() as usize;
+        if taken >= EXPORT_POOL {
+            return core::ptr::null_mut();
+        }
+        *EXPORT_TAKEN.0.get() = (taken + 1) as u32;
+        (EXPORT_ROWS.0.get() as *mut Export).add(taken)
+    }
+}
+
+/// One export row carrying `name` and `sig`: from the heap when the seat
+/// has one, with both strings copied into the row's own tail, else from the
+/// pre-heap pool with the caller's literals borrowed. Null = refused.
+unsafe fn export_take(
+    name: *const u8,
+    name_len: usize,
+    sig: *const u8,
+    sig_len: usize,
+) -> *mut Export {
+    unsafe {
+        let mut x: *mut Export = core::ptr::null_mut();
+        let p = heap_take(core::mem::size_of::<Export>() + name_len + sig_len);
+        if !p.is_null() {
+            x = p as *mut Export;
+            let tail = p.add(core::mem::size_of::<Export>());
+            span_copy(tail, name, name_len);
+            span_copy(tail.add(name_len), sig, sig_len);
+            (*x).name = Span {
+                ptr: tail,
+                len: name_len as u32,
+            };
+            (*x).sig = Span {
+                ptr: tail.add(name_len),
+                len: sig_len as u32,
+            };
+            (*x).heap = true;
+        } else if *HEAP_SEEN.0.get() == 0 {
+            x = export_pool_take();
+            if !x.is_null() {
+                (*x).name = Span {
+                    ptr: name,
+                    len: name_len as u32,
+                };
+                (*x).sig = Span {
+                    ptr: sig,
+                    len: sig_len as u32,
+                };
+                (*x).heap = false;
+            }
+        }
+        if x.is_null() {
+            return core::ptr::null_mut();
+        }
+        (*x).kind = pm_wasmmod_registry_export_kind_t::Fn;
+        (*x).ptr = core::ptr::null_mut();
+        (*x).next = core::ptr::null_mut();
+        *EXPORT_LIVE.0.get() += 1;
+        x
+    }
+}
+
+unsafe fn export_give(x: *mut Export) {
+    if x.is_null() {
+        return;
+    }
+    unsafe {
+        let live = *EXPORT_LIVE.0.get();
+        if live > 0 {
+            *EXPORT_LIVE.0.get() = live - 1;
+        }
+        if (*x).heap {
+            free(x as *mut c_void);
+            return;
+        }
+        (*x).name = Span {
+            ptr: core::ptr::null(),
+            len: 0,
+        };
+        (*x).sig = Span {
+            ptr: core::ptr::null(),
+            len: 0,
+        };
+        (*x).ptr = core::ptr::null_mut();
+        (*x).next = *EXPORT_FREE.0.get();
+        *EXPORT_FREE.0.get() = x;
+    }
+}
+
+/// The module's export at `index`, or null: the chain is in registration
+/// order, which is the order `export_at` has always reported.
+unsafe fn export_at_ptr(e: *mut ModEntry, index: usize) -> *mut Export {
+    unsafe {
+        let mut x = (*e).exports;
+        let mut i = 0usize;
+        while !x.is_null() && i < index {
+            x = (*x).next;
+            i += 1;
+        }
+        x
+    }
+}
+
+unsafe fn export_find(e: *mut ModEntry, name: *const u8, name_len: usize) -> *mut Export {
+    unsafe {
+        let mut x = (*e).exports;
+        while !x.is_null() {
+            if (*x).name.len as usize == name_len
+                && span_eq((*x).name.ptr, name_len, name, name_len)
+            {
+                return x;
+            }
+            x = (*x).next;
+        }
+        core::ptr::null_mut()
+    }
+}
+
+unsafe fn export_append(e: *mut ModEntry, x: *mut Export) {
+    unsafe {
+        let head = (*e).exports;
+        if head.is_null() {
+            (*e).exports = x;
+        } else {
+            let mut last = head;
+            while !(*last).next.is_null() {
+                last = (*last).next;
+            }
+            (*last).next = x;
+        }
+        (*e).n_exports += 1;
+    }
+}
+
+/// Put `fresh` where `old` sits, so an updated export keeps its place in
+/// the chain, and give the old row back.
+unsafe fn export_replace(e: *mut ModEntry, old: *mut Export, fresh: *mut Export) {
+    unsafe {
+        (*fresh).next = (*old).next;
+        if (*e).exports == old {
+            (*e).exports = fresh;
+        } else {
+            let mut prev = (*e).exports;
+            while !prev.is_null() && (*prev).next != old {
+                prev = (*prev).next;
+            }
+            if !prev.is_null() {
+                (*prev).next = fresh;
+            }
+        }
+        export_give(old);
+    }
+}
+
+unsafe fn export_chain_give(e: *mut ModEntry) {
+    unsafe {
+        let mut x = (*e).exports;
+        while !x.is_null() {
+            let nx = (*x).next;
+            export_give(x);
+            x = nx;
+        }
+        (*e).exports = core::ptr::null_mut();
+        (*e).n_exports = 0;
+    }
+}
+
+unsafe fn test_pool_take() -> *mut TestEntry {
+    unsafe {
+        let freed = *TEST_FREE.0.get();
+        if !freed.is_null() {
+            *TEST_FREE.0.get() = (*freed).next;
+            return freed;
+        }
+        let taken = *TEST_TAKEN.0.get() as usize;
+        if taken >= TEST_POOL {
+            return core::ptr::null_mut();
+        }
+        *TEST_TAKEN.0.get() = (taken + 1) as u32;
+        (TEST_ROWS.0.get() as *mut TestEntry).add(taken)
+    }
+}
+
+/// One test row, same two sources as `export_take`. The second string is
+/// the guest export a wasm case runs through, empty for a native body.
+unsafe fn test_take(
+    name: *const u8,
+    name_len: usize,
+    export: *const u8,
+    export_len: usize,
+) -> *mut TestEntry {
+    unsafe {
+        let mut tr: *mut TestEntry = core::ptr::null_mut();
+        let p = heap_take(core::mem::size_of::<TestEntry>() + name_len + export_len);
+        if !p.is_null() {
+            tr = p as *mut TestEntry;
+            let tail = p.add(core::mem::size_of::<TestEntry>());
+            span_copy(tail, name, name_len);
+            span_copy(tail.add(name_len), export, export_len);
+            (*tr).name = Span {
+                ptr: tail,
+                len: name_len as u32,
+            };
+            (*tr).export = Span {
+                ptr: tail.add(name_len),
+                len: export_len as u32,
+            };
+            (*tr).heap = true;
+        } else if *HEAP_SEEN.0.get() == 0 {
+            tr = test_pool_take();
+            if !tr.is_null() {
+                (*tr).name = Span {
+                    ptr: name,
+                    len: name_len as u32,
+                };
+                (*tr).export = Span {
+                    ptr: export,
+                    len: export_len as u32,
+                };
+                (*tr).heap = false;
+            }
+        }
+        if tr.is_null() {
+            return core::ptr::null_mut();
+        }
+        (*tr).body_kind = BODY_NATIVE;
+        (*tr).native = None;
+        (*tr).next = core::ptr::null_mut();
+        *TEST_LIVE.0.get() += 1;
+        tr
+    }
+}
+
+unsafe fn test_give(tr: *mut TestEntry) {
+    if tr.is_null() {
+        return;
+    }
+    unsafe {
+        let live = *TEST_LIVE.0.get();
+        if live > 0 {
+            *TEST_LIVE.0.get() = live - 1;
+        }
+        if (*tr).heap {
+            free(tr as *mut c_void);
+            return;
+        }
+        (*tr).name = Span {
+            ptr: core::ptr::null(),
+            len: 0,
+        };
+        (*tr).export = Span {
+            ptr: core::ptr::null(),
+            len: 0,
+        };
+        (*tr).native = None;
+        (*tr).next = *TEST_FREE.0.get();
+        *TEST_FREE.0.get() = tr;
+    }
+}
+
+unsafe fn test_at_ptr(e: *mut ModEntry, index: usize) -> *mut TestEntry {
+    unsafe {
+        let mut tr = (*e).tests;
+        let mut i = 0usize;
+        while !tr.is_null() && i < index {
+            tr = (*tr).next;
+            i += 1;
+        }
+        tr
+    }
+}
+
+unsafe fn test_find(e: *mut ModEntry, name: *const u8, name_len: usize) -> *mut TestEntry {
+    unsafe {
+        let mut tr = (*e).tests;
+        while !tr.is_null() {
+            if (*tr).name.len as usize == name_len
+                && span_eq((*tr).name.ptr, name_len, name, name_len)
+            {
+                return tr;
+            }
+            tr = (*tr).next;
+        }
+        core::ptr::null_mut()
+    }
+}
+
+unsafe fn test_append(e: *mut ModEntry, tr: *mut TestEntry) {
+    unsafe {
+        let head = (*e).tests;
+        if head.is_null() {
+            (*e).tests = tr;
+        } else {
+            let mut last = head;
+            while !(*last).next.is_null() {
+                last = (*last).next;
+            }
+            (*last).next = tr;
+        }
+        (*e).n_tests += 1;
+    }
+}
+
+unsafe fn test_replace(e: *mut ModEntry, old: *mut TestEntry, fresh: *mut TestEntry) {
+    unsafe {
+        (*fresh).next = (*old).next;
+        if (*e).tests == old {
+            (*e).tests = fresh;
+        } else {
+            let mut prev = (*e).tests;
+            while !prev.is_null() && (*prev).next != old {
+                prev = (*prev).next;
+            }
+            if !prev.is_null() {
+                (*prev).next = fresh;
+            }
+        }
+        test_give(old);
+    }
+}
+
+unsafe fn test_chain_give(e: *mut ModEntry) {
+    unsafe {
+        let mut tr = (*e).tests;
+        while !tr.is_null() {
+            let nx = (*tr).next;
+            test_give(tr);
+            tr = nx;
+        }
+        (*e).tests = core::ptr::null_mut();
+        (*e).n_tests = 0;
+    }
+}
+
+unsafe fn bench_pool_take() -> *mut BenchEntry {
+    unsafe {
+        let freed = *BENCH_FREE.0.get();
+        if !freed.is_null() {
+            *BENCH_FREE.0.get() = (*freed).next;
+            return freed;
+        }
+        let taken = *BENCH_TAKEN.0.get() as usize;
+        if taken >= BENCH_POOL {
+            return core::ptr::null_mut();
+        }
+        *BENCH_TAKEN.0.get() = (taken + 1) as u32;
+        (BENCH_ROWS.0.get() as *mut BenchEntry).add(taken)
+    }
+}
+
+unsafe fn bench_take(
+    name: *const u8,
+    name_len: usize,
+    export: *const u8,
+    export_len: usize,
+) -> *mut BenchEntry {
+    unsafe {
+        let mut br: *mut BenchEntry = core::ptr::null_mut();
+        let p = heap_take(core::mem::size_of::<BenchEntry>() + name_len + export_len);
+        if !p.is_null() {
+            br = p as *mut BenchEntry;
+            let tail = p.add(core::mem::size_of::<BenchEntry>());
+            span_copy(tail, name, name_len);
+            span_copy(tail.add(name_len), export, export_len);
+            (*br).name = Span {
+                ptr: tail,
+                len: name_len as u32,
+            };
+            (*br).export = Span {
+                ptr: tail.add(name_len),
+                len: export_len as u32,
+            };
+            (*br).heap = true;
+        } else if *HEAP_SEEN.0.get() == 0 {
+            br = bench_pool_take();
+            if !br.is_null() {
+                (*br).name = Span {
+                    ptr: name,
+                    len: name_len as u32,
+                };
+                (*br).export = Span {
+                    ptr: export,
+                    len: export_len as u32,
+                };
+                (*br).heap = false;
+            }
+        }
+        if br.is_null() {
+            return core::ptr::null_mut();
+        }
+        (*br).body_kind = BODY_NATIVE;
+        (*br).native = None;
+        (*br).next = core::ptr::null_mut();
+        *BENCH_LIVE.0.get() += 1;
+        br
+    }
+}
+
+unsafe fn bench_give(br: *mut BenchEntry) {
+    if br.is_null() {
+        return;
+    }
+    unsafe {
+        let live = *BENCH_LIVE.0.get();
+        if live > 0 {
+            *BENCH_LIVE.0.get() = live - 1;
+        }
+        if (*br).heap {
+            free(br as *mut c_void);
+            return;
+        }
+        (*br).name = Span {
+            ptr: core::ptr::null(),
+            len: 0,
+        };
+        (*br).export = Span {
+            ptr: core::ptr::null(),
+            len: 0,
+        };
+        (*br).native = None;
+        (*br).next = *BENCH_FREE.0.get();
+        *BENCH_FREE.0.get() = br;
+    }
+}
+
+unsafe fn bench_at_ptr(e: *mut ModEntry, index: usize) -> *mut BenchEntry {
+    unsafe {
+        let mut br = (*e).benches;
+        let mut i = 0usize;
+        while !br.is_null() && i < index {
+            br = (*br).next;
+            i += 1;
+        }
+        br
+    }
+}
+
+unsafe fn bench_find(e: *mut ModEntry, name: *const u8, name_len: usize) -> *mut BenchEntry {
+    unsafe {
+        let mut br = (*e).benches;
+        while !br.is_null() {
+            if (*br).name.len as usize == name_len
+                && span_eq((*br).name.ptr, name_len, name, name_len)
+            {
+                return br;
+            }
+            br = (*br).next;
+        }
+        core::ptr::null_mut()
+    }
+}
+
+unsafe fn bench_append(e: *mut ModEntry, br: *mut BenchEntry) {
+    unsafe {
+        let head = (*e).benches;
+        if head.is_null() {
+            (*e).benches = br;
+        } else {
+            let mut last = head;
+            while !(*last).next.is_null() {
+                last = (*last).next;
+            }
+            (*last).next = br;
+        }
+        (*e).n_benches += 1;
+    }
+}
+
+unsafe fn bench_replace(e: *mut ModEntry, old: *mut BenchEntry, fresh: *mut BenchEntry) {
+    unsafe {
+        (*fresh).next = (*old).next;
+        if (*e).benches == old {
+            (*e).benches = fresh;
+        } else {
+            let mut prev = (*e).benches;
+            while !prev.is_null() && (*prev).next != old {
+                prev = (*prev).next;
+            }
+            if !prev.is_null() {
+                (*prev).next = fresh;
+            }
+        }
+        bench_give(old);
+    }
+}
+
+unsafe fn bench_chain_give(e: *mut ModEntry) {
+    unsafe {
+        let mut br = (*e).benches;
+        while !br.is_null() {
+            let nx = (*br).next;
+            bench_give(br);
+            br = nx;
+        }
+        (*e).benches = core::ptr::null_mut();
+        (*e).n_benches = 0;
+    }
+}
+
+/// Every row a module holds, back to its pool or its heap. A slot is only
+/// ever reused through here, so a dead row never keeps memory.
+unsafe fn entry_rows_give(e: *mut ModEntry) {
+    unsafe {
+        export_chain_give(e);
+        test_chain_give(e);
+        bench_chain_give(e);
+    }
 }
 
 /// Record a refused registration into the loud-refusal ring (caller holds
@@ -497,9 +1214,10 @@ unsafe fn publish(
     (*e).version_len = 0;
     (*e).container = container;
     (*e).live = true;
-    (*e).n_exports = 0;
-    (*e).n_tests = 0;
-    (*e).n_benches = 0;
+    /* A dead slot gave its rows back at unpublish, so this is a no-op
+     * there and on a fresh slot; it is here because a reused slot must
+     * start empty however it came to be free. */
+    unsafe { entry_rows_give(e) };
     pm_wasmmod_registry_handle_t {
         index: idx as u32,
         generation: (*e).generation,
@@ -555,24 +1273,37 @@ unsafe fn export_set_sig(
         }
         return false;
     }
-    let mut i = 0usize;
-    while i < (*e).n_exports as usize {
-        let x = (*e).exports.as_mut_ptr().add(i);
-        if (*x).name_len as usize == name_len {
-            let eq = unsafe { span_eq((*x).name.as_ptr(), name_len, name, name_len) };
-            if eq {
-                (*x).kind = kind;
-                (*x).ptr = ptr;
-                if sig_len > 0 {
-                    let _ = unsafe { span_put((*x).sig.as_mut_ptr(), SIG_CAP, sig, sig_len) };
-                    (*x).sig_len = sig_len as u32;
-                }
-                return true;
-            }
+    let old = unsafe { export_find(e, name, name_len) };
+    if !old.is_null() {
+        /* A re-registration keeps the row's place in the chain, and keeps
+         * the sig it already had when the new one brings none. The bytes it
+         * keeps are read out of the old row while that row is still alive:
+         * the fresh row copies them before the old one goes back. */
+        let mut keep = sig;
+        let mut keep_len = sig_len;
+        if sig_len == 0 {
+            keep = (*old).sig.ptr;
+            keep_len = (*old).sig.len as usize;
         }
-        i += 1;
+        let fresh = unsafe { export_take(name, name_len, keep, keep_len) };
+        if fresh.is_null() {
+            unsafe {
+                refusal_record(
+                    (*e).fqn.as_ptr(),
+                    (*e).fqn_len as usize,
+                    name,
+                    name_len,
+                    REF_REASON_STORE_FAIL,
+                );
+            }
+            return false;
+        }
+        (*fresh).kind = kind;
+        (*fresh).ptr = ptr;
+        unsafe { export_replace(e, old, fresh) };
+        return true;
     }
-    if (*e).n_exports as usize >= EXP_MAX {
+    if !unsafe { knob_room(EXPORTS_KNOB.0.get(), *EXPORT_LIVE.0.get()) } {
         unsafe {
             refusal_record(
                 (*e).fqn.as_ptr(),
@@ -584,9 +1315,10 @@ unsafe fn export_set_sig(
         }
         return false;
     }
-    let x = (*e).exports.as_mut_ptr().add((*e).n_exports as usize);
-    let stored = unsafe { span_put((*x).name.as_mut_ptr(), NAME_CAP, name, name_len) };
-    if stored == usize::MAX {
+    let x = unsafe { export_take(name, name_len, sig, sig_len) };
+    if x.is_null() {
+        /* No row: the pre-heap pool is dry, or the seat's allocator said
+         * no. Either way the registration is recorded, never dropped. */
         unsafe {
             refusal_record(
                 (*e).fqn.as_ptr(),
@@ -598,15 +1330,9 @@ unsafe fn export_set_sig(
         }
         return false;
     }
-    (*x).name_len = stored as u32;
     (*x).kind = kind;
     (*x).ptr = ptr;
-    (*x).sig_len = 0;
-    if sig_len > 0 {
-        let _ = unsafe { span_put((*x).sig.as_mut_ptr(), SIG_CAP, sig, sig_len) };
-        (*x).sig_len = sig_len as u32;
-    }
-    (*e).n_exports += 1;
+    unsafe { export_append(e, x) };
     true
 }
 
@@ -621,27 +1347,25 @@ unsafe fn resolve_native(
     if e.is_null() {
         return core::ptr::null_mut();
     }
-    let mut i = 0usize;
-    while i < unsafe { (*e).n_exports } as usize {
-        let x = unsafe { (*e).exports.as_ptr().add(i) };
-        if unsafe { (*x).name_len } as usize == name_len {
-            let eq = unsafe { span_eq((*x).name.as_ptr(), name_len, name, name_len) };
-            if eq {
-                return unsafe { (*x).ptr };
-            }
-        }
-        i += 1;
+    let x = unsafe { export_find(e, name, name_len) };
+    if x.is_null() {
+        return core::ptr::null_mut();
     }
-    core::ptr::null_mut()
+    unsafe { (*x).ptr }
 }
 
 /* ---- C ABI face ---- */
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pm_wasmmod_registry_init() {
-    // Nothing to do: TABLE's static zero-init is the whole init — the
-    // fixed-capacity design has no heap to bring up. Kept as an explicit
-    // entry point so callers don't need to know that.
+    // TABLE's static zero-init is still the whole init; what is left to do
+    // is the card's knobs, and only if no registration has arrived yet (a
+    // constructor attaches them itself, long before any seat calls here).
+    unsafe {
+        pm_util_lock_acquire(lock());
+        knobs_attach();
+        pm_util_lock_release(lock());
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -670,9 +1394,7 @@ pub unsafe extern "C" fn pm_wasmmod_registry_unpublish(handle: pm_wasmmod_regist
         let ok = !e.is_null();
         if ok {
             (*e).live = false;
-            (*e).n_exports = 0;
-            (*e).n_tests = 0;
-            (*e).n_benches = 0;
+            entry_rows_give(e);
             (*e).fqn_len = 0;
             (*e).version_len = 0;
         }
@@ -1042,18 +1764,22 @@ pub unsafe extern "C" fn pm_wasmmod_registry_export_at(
         pm_util_lock_acquire(lock());
         let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
         let mut rc = 0;
-        if !e.is_null() && index < (*e).n_exports {
-            let x = (*e).exports.as_ptr().add(index as usize);
-            rc = copy_span_to_buf((*x).name.as_ptr(), (*x).name_len as usize, name_buf, name_len_io);
+        let x = if e.is_null() || index >= (*e).n_exports {
+            core::ptr::null_mut()
+        } else {
+            export_at_ptr(e, index as usize)
+        };
+        if !x.is_null() {
+            rc = copy_span_to_buf((*x).name.ptr, (*x).name.len as usize, name_buf, name_len_io);
             if rc == 1 {
                 if !kind_out.is_null() {
                     *kind_out = (*x).kind;
                 }
                 if !sig_len_io.is_null() {
-                    if (*x).sig_len > 0 {
+                    if (*x).sig.len > 0 {
                         rc = copy_span_to_buf(
-                            (*x).sig.as_ptr(),
-                            (*x).sig_len as usize,
+                            (*x).sig.ptr,
+                            (*x).sig.len as usize,
                             sig_buf,
                             sig_len_io,
                         );
@@ -1257,15 +1983,14 @@ pub extern "C" fn pm_wasmmod_registry_gc_visit(
         let t = table();
         let mut i = 0usize;
         while i < (*t).n_entries as usize {
-            let e = (*t).entries.as_ptr().add(i);
+            let e = (*t).entries.as_mut_ptr().add(i);
             if (*e).live {
-                let mut j = 0usize;
-                while j < (*e).n_exports as usize {
-                    let x = (*e).exports.as_ptr().add(j);
+                let mut x = (*e).exports;
+                while !x.is_null() {
                     if (*x).kind == pm_wasmmod_registry_export_kind_t::Obj {
                         visit((*x).ptr, ctx);
                     }
-                    j += 1;
+                    x = (*x).next;
                 }
             }
             i += 1;
@@ -1353,41 +2078,36 @@ unsafe fn test_upsert(
         return false;
     }
     unsafe {
-        let mut i = 0usize;
-        while i < (*e).n_tests as usize {
-            let tr = (*e).tests.as_mut_ptr().add(i);
-            if (*tr).name_len as usize == name_len {
-                let eq = span_eq((*tr).name.as_ptr(), name_len, name, name_len);
-                if eq {
-                    (*tr).body_kind = body_kind;
-                    (*tr).native = native;
-                    (*tr).export_len = 0;
-                    if export_len > 0 {
-                        let _ = span_put((*tr).export.as_mut_ptr(), NAME_CAP, export, export_len);
-                        (*tr).export_len = export_len as u32;
-                    }
-                    return true;
-                }
+        let old = test_find(e, name, name_len);
+        if !old.is_null() {
+            /* Re-registration keeps the row's place, and keeps the export
+             * it already had when the new registration brings none — read
+             * out of the old row before it goes back. */
+            let mut keep = export;
+            let mut keep_len = export_len;
+            if export_len == 0 {
+                keep = (*old).export.ptr;
+                keep_len = (*old).export.len as usize;
             }
-            i += 1;
+            let fresh = test_take(name, name_len, keep, keep_len);
+            if fresh.is_null() {
+                return false;
+            }
+            (*fresh).body_kind = body_kind;
+            (*fresh).native = native;
+            test_replace(e, old, fresh);
+            return true;
         }
-        if (*e).n_tests as usize >= TST_MAX {
+        if !knob_room(TESTS_KNOB.0.get(), *TEST_LIVE.0.get()) {
             return false;
         }
-        let tr = (*e).tests.as_mut_ptr().add((*e).n_tests as usize);
-        let stored = span_put((*tr).name.as_mut_ptr(), NAME_CAP, name, name_len);
-        if stored == usize::MAX {
+        let tr = test_take(name, name_len, export, export_len);
+        if tr.is_null() {
             return false;
         }
-        (*tr).name_len = stored as u32;
         (*tr).body_kind = body_kind;
         (*tr).native = native;
-        (*tr).export_len = 0;
-        if export_len > 0 {
-            let _ = span_put((*tr).export.as_mut_ptr(), NAME_CAP, export, export_len);
-            (*tr).export_len = export_len as u32;
-        }
-        (*e).n_tests += 1;
+        test_append(e, tr);
         true
     }
 }
@@ -1406,41 +2126,33 @@ unsafe fn bench_upsert(
         return false;
     }
     unsafe {
-        let mut i = 0usize;
-        while i < (*e).n_benches as usize {
-            let br = (*e).benches.as_mut_ptr().add(i);
-            if (*br).name_len as usize == name_len {
-                let eq = span_eq((*br).name.as_ptr(), name_len, name, name_len);
-                if eq {
-                    (*br).body_kind = body_kind;
-                    (*br).native = native;
-                    (*br).export_len = 0;
-                    if export_len > 0 {
-                        let _ = span_put((*br).export.as_mut_ptr(), NAME_CAP, export, export_len);
-                        (*br).export_len = export_len as u32;
-                    }
-                    return true;
-                }
+        let old = bench_find(e, name, name_len);
+        if !old.is_null() {
+            let mut keep = export;
+            let mut keep_len = export_len;
+            if export_len == 0 {
+                keep = (*old).export.ptr;
+                keep_len = (*old).export.len as usize;
             }
-            i += 1;
+            let fresh = bench_take(name, name_len, keep, keep_len);
+            if fresh.is_null() {
+                return false;
+            }
+            (*fresh).body_kind = body_kind;
+            (*fresh).native = native;
+            bench_replace(e, old, fresh);
+            return true;
         }
-        if (*e).n_benches as usize >= BNC_MAX {
+        if !knob_room(BENCHES_KNOB.0.get(), *BENCH_LIVE.0.get()) {
             return false;
         }
-        let br = (*e).benches.as_mut_ptr().add((*e).n_benches as usize);
-        let stored = span_put((*br).name.as_mut_ptr(), NAME_CAP, name, name_len);
-        if stored == usize::MAX {
+        let br = bench_take(name, name_len, export, export_len);
+        if br.is_null() {
             return false;
         }
-        (*br).name_len = stored as u32;
         (*br).body_kind = body_kind;
         (*br).native = native;
-        (*br).export_len = 0;
-        if export_len > 0 {
-            let _ = span_put((*br).export.as_mut_ptr(), NAME_CAP, export, export_len);
-            (*br).export_len = export_len as u32;
-        }
-        (*e).n_benches += 1;
+        bench_append(e, br);
         true
     }
 }
@@ -1501,8 +2213,10 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_at(
         let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
         let mut rc = 0;
         if !e.is_null() && index < (*e).n_tests {
-            let tr = (*e).tests.as_ptr().add(index as usize);
-            rc = copy_span_to_buf((*tr).name.as_ptr(), (*tr).name_len as usize, buf, buf_len_io);
+            let tr = test_at_ptr(e, index as usize);
+            if !tr.is_null() {
+                rc = copy_span_to_buf((*tr).name.ptr, (*tr).name.len as usize, buf, buf_len_io);
+            }
         }
         if rc == 0 && !buf_len_io.is_null() {
             *buf_len_io = 0;
@@ -1580,27 +2294,19 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_run(
         let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
         let mut found = false;
         if !e.is_null() {
-            let mut i = 0usize;
-            while i < (*e).n_tests as usize {
-                let tr = (*e).tests.as_ptr().add(i);
-                if (*tr).name_len as usize == name_len as usize {
-                    let eq = span_eq((*tr).name.as_ptr(), name_len as usize, name_ptr, name_len as usize);
-                    if eq {
-                        body.body_kind = (*tr).body_kind;
-                        body.native = (*tr).native;
-                        body.export_len = (*tr).export_len;
-                        if (*tr).export_len > 0 {
-                            core::ptr::copy_nonoverlapping(
-                                (*tr).export.as_ptr(),
-                                body.export.as_mut_ptr(),
-                                (*tr).export_len as usize,
-                            );
-                        }
-                        found = true;
-                        break;
-                    }
+            let tr = test_find(e, name_ptr, name_len as usize);
+            if !tr.is_null() {
+                body.body_kind = (*tr).body_kind;
+                body.native = (*tr).native;
+                body.export_len = (*tr).export.len;
+                if (*tr).export.len > 0 && (*tr).export.len as usize <= NAME_CAP {
+                    core::ptr::copy_nonoverlapping(
+                        (*tr).export.ptr,
+                        body.export.as_mut_ptr(),
+                        (*tr).export.len as usize,
+                    );
                 }
-                i += 1;
+                found = true;
             }
         }
         if found {
@@ -1630,20 +2336,26 @@ pub unsafe extern "C" fn pm_wasmmod_registry_test_run_all(fqn_ptr: *const u8, fq
         let n = if e.is_null() { 0 } else { (*e).n_tests };
         let mut i = 0usize;
         while i < n as usize {
-            let tr = (*e).tests.as_ptr().add(i);
+            /* Walked from the head each lap on purpose: the lock is
+             * released to run the body, and the body may register into
+             * this very module. */
+            let tr = test_at_ptr(e, i);
+            if tr.is_null() {
+                break;
+            }
             let mut body = TestBody {
                 body_kind: (*tr).body_kind,
                 native: (*tr).native,
                 fqn: [0; FQN_CAP],
                 fqn_len: 0,
                 export: [0; NAME_CAP],
-                export_len: (*tr).export_len,
+                export_len: (*tr).export.len,
             };
-            if (*tr).export_len > 0 {
+            if (*tr).export.len > 0 && (*tr).export.len as usize <= NAME_CAP {
                 core::ptr::copy_nonoverlapping(
-                    (*tr).export.as_ptr(),
+                    (*tr).export.ptr,
                     body.export.as_mut_ptr(),
-                    (*tr).export_len as usize,
+                    (*tr).export.len as usize,
                 );
             }
             if fqn_len as usize <= FQN_CAP {
@@ -1775,8 +2487,10 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_at(
         let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
         let mut rc = 0;
         if !e.is_null() && index < (*e).n_benches {
-            let br = (*e).benches.as_ptr().add(index as usize);
-            rc = copy_span_to_buf((*br).name.as_ptr(), (*br).name_len as usize, buf, buf_len_io);
+            let br = bench_at_ptr(e, index as usize);
+            if !br.is_null() {
+                rc = copy_span_to_buf((*br).name.ptr, (*br).name.len as usize, buf, buf_len_io);
+            }
         }
         if rc == 0 && !buf_len_io.is_null() {
             *buf_len_io = 0;
@@ -1893,27 +2607,19 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_run(
         let e = entry_by_fqn(table(), fqn_ptr, fqn_len as usize);
         let mut found = false;
         if !e.is_null() {
-            let mut i = 0usize;
-            while i < (*e).n_benches as usize {
-                let br = (*e).benches.as_ptr().add(i);
-                if (*br).name_len as usize == name_len as usize {
-                    let eq = span_eq((*br).name.as_ptr(), name_len as usize, name_ptr, name_len as usize);
-                    if eq {
-                        body.body_kind = (*br).body_kind;
-                        body.native = (*br).native;
-                        body.export_len = (*br).export_len;
-                        if (*br).export_len > 0 {
-                            core::ptr::copy_nonoverlapping(
-                                (*br).export.as_ptr(),
-                                body.export.as_mut_ptr(),
-                                (*br).export_len as usize,
-                            );
-                        }
-                        found = true;
-                        break;
-                    }
+            let br = bench_find(e, name_ptr, name_len as usize);
+            if !br.is_null() {
+                body.body_kind = (*br).body_kind;
+                body.native = (*br).native;
+                body.export_len = (*br).export.len;
+                if (*br).export.len > 0 && (*br).export.len as usize <= NAME_CAP {
+                    core::ptr::copy_nonoverlapping(
+                        (*br).export.ptr,
+                        body.export.as_mut_ptr(),
+                        (*br).export.len as usize,
+                    );
                 }
-                i += 1;
+                found = true;
             }
         }
         if found {
@@ -2022,20 +2728,23 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_run_all(
         let n = (*e).n_benches;
         let mut i = 0usize;
         while i < n as usize {
-            let br = (*e).benches.as_ptr().add(i);
+            let br = bench_at_ptr(e, i);
+            if br.is_null() {
+                break;
+            }
             let mut body = BenchBody {
                 body_kind: (*br).body_kind,
                 native: (*br).native,
                 fqn: [0; FQN_CAP],
                 fqn_len: 0,
                 export: [0; NAME_CAP],
-                export_len: (*br).export_len,
+                export_len: (*br).export.len,
             };
-            if (*br).export_len > 0 {
+            if (*br).export.len > 0 && (*br).export.len as usize <= NAME_CAP {
                 core::ptr::copy_nonoverlapping(
-                    (*br).export.as_ptr(),
+                    (*br).export.ptr,
                     body.export.as_mut_ptr(),
-                    (*br).export_len as usize,
+                    (*br).export.len as usize,
                 );
             }
             if fqn_len as usize <= FQN_CAP {
@@ -2046,8 +2755,10 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_run_all(
             let ns = time_bench_ns(&body, iterations);
             pm_util_lock_acquire(lock());
             out_puts(t, b"* \0".as_ptr());
-            let br2 = (*e).benches.as_ptr().add(i);
-            out_put(t, (*br2).name.as_ptr(), (*br2).name_len as usize);
+            let br2 = bench_at_ptr(e, i);
+            if !br2.is_null() {
+                out_put(t, (*br2).name.ptr, (*br2).name.len as usize);
+            }
             if ns < 0 {
                 bad += 1;
                 if ns == BENCH_RC_NO_CLOCK {

@@ -52,6 +52,13 @@
 #include "registry/__types__.h" /* IWYU pragma: keep — PM_MOD_CONNECT */
 #include "boot/__types__.h"     /* IWYU pragma: keep — PM_MOD_BOOT_* */
 
+/* A number a face takes as the caller means it: a knob's value, an address.
+ * A uint32_t underneath, named because the border has to tell it from a byte
+ * count — `int32_t(const char *, uint32_t)` is "a string and the bytes in it"
+ * all over this tree and the language bridges dispatch on that spelling, so a
+ * face that wants a second argument from the caller says so. */
+typedef uint32_t pm_mod_value_t;
+
 /*
  * PM_MOD_EXPORT_C — C language face of host export registration.
  * RS language face: `PM_MOD_EXPORT_RS!` in guest.rs (same module, path == guest).

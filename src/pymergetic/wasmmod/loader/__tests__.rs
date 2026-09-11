@@ -15,7 +15,7 @@ use super::registry_types::{
 use super::{
     wasm_runtime_get_file_package_type, WASM_MODULE_AOT, WASM_MODULE_BYTECODE,
     pm_wasmmod_loader_init, pm_wasmmod_loader_load, pm_wasmmod_loader_unload,
-    BYTES_CAP, FQN_CAP,
+    FQN_CAP, IMAGE_DEFAULT, IMAGE_KNOB,
 };
 use crate::util::mod_test::case;
 
@@ -240,7 +240,10 @@ fn pack_hello_example() -> Vec<u8> {
 fn load_call_unload_roundtrips_through_real_pmm_pack() {
     init_once();
     let wasm_bytes = pack_hello_example();
-    assert!(wasm_bytes.len() <= BYTES_CAP, "pack must fit the loader's fixed row");
+    assert!(
+        wasm_bytes.len() <= IMAGE_DEFAULT as usize,
+        "pack must fit what the image knob takes by default"
+    );
     assert_eq!(
         unsafe { wasm_runtime_get_file_package_type(wasm_bytes.as_ptr(), wasm_bytes.len() as u32) },
         WASM_MODULE_BYTECODE
@@ -309,7 +312,10 @@ fn load_call_unload_roundtrips_through_real_aot() {
     // the rest of this test — if wamrc's own magic number ever
     // changes, better to fail loudly here than have the loader's
     // detection silently degrade to treating it as Wasm.
-    assert!(aot_bytes.len() <= BYTES_CAP, "aot fixture must fit the loader's fixed row");
+    assert!(
+        aot_bytes.len() <= IMAGE_DEFAULT as usize,
+        "aot fixture must fit what the image knob takes by default"
+    );
     assert_eq!(
         unsafe { wasm_runtime_get_file_package_type(aot_bytes.as_ptr(), aot_bytes.len() as u32) },
         WASM_MODULE_AOT
@@ -367,15 +373,37 @@ fn load_of_garbage_bytes_fails_cleanly_without_touching_the_registry() {
     assert_eq!(unsafe { pm_wasmmod_registry_has(fqn_p, fqn_len) }, 0);
 }
 
-/// Over-capacity binaries are refused loudly (never truncated): a
-/// fixture past BYTES_CAP gets the INVALID handle and leaves no
-/// registry trace.
+/// A binary past what this seat will take is refused loudly (never
+/// truncated): the INVALID handle and no registry trace.
 fn oversized_binary_is_refused_not_truncated() {
     init_once();
-    let big: Vec<u8> = vec![0u8; BYTES_CAP + 1];
+    let big: Vec<u8> = vec![0u8; IMAGE_DEFAULT as usize + 1];
     let (fqn_p, fqn_len) = zspan("test.loader.oversized");
     let handle = unsafe { pm_wasmmod_loader_load(fqn_p, fqn_len, big.as_ptr(), big.len() as u32) };
     assert_eq!(handle.index, u32::MAX);
+    assert_eq!(unsafe { pm_wasmmod_registry_has(fqn_p, fqn_len) }, 0);
+}
+
+/// What a seat will take is the knob, not the shape of a row: with it moved
+/// under a real pack the load refuses, and the same pack goes in once the
+/// knob is back. (The image is an allocation of the pack's own length now, so
+/// the knob is the only thing capping it.)
+fn the_image_knob_moves_what_a_load_will_take() {
+    init_once();
+    let wasm_bytes = pack_hello_example();
+    let (fqn_p, fqn_len) = zspan("test.loader.image_knob");
+
+    unsafe { (*IMAGE_KNOB.0.get()).soft = 1024 };
+    let refused =
+        unsafe { pm_wasmmod_loader_load(fqn_p, fqn_len, wasm_bytes.as_ptr(), wasm_bytes.len() as u32) };
+    assert_eq!(refused.index, u32::MAX, "a pack over the knob must refuse");
+    assert_eq!(unsafe { pm_wasmmod_registry_has(fqn_p, fqn_len) }, 0);
+
+    unsafe { (*IMAGE_KNOB.0.get()).soft = IMAGE_DEFAULT };
+    let handle =
+        unsafe { pm_wasmmod_loader_load(fqn_p, fqn_len, wasm_bytes.as_ptr(), wasm_bytes.len() as u32) };
+    assert_ne!(handle.index, u32::MAX, "the same pack loads once the knob is back");
+    assert_eq!(unsafe { pm_wasmmod_loader_unload(handle) }, 0);
     assert_eq!(unsafe { pm_wasmmod_registry_has(fqn_p, fqn_len) }, 0);
 }
 
@@ -432,6 +460,15 @@ crate::PM_MOD_TEST_RS!("pymergetic.wasmmod.loader", "oversized_binary_is_refused
 #[test]
 fn test_oversized_binary_is_refused_not_truncated() {
     assert_eq!(unsafe { case_oversized_binary_is_refused_not_truncated() }, 0);
+}
+
+unsafe extern "C" fn case_the_image_knob_moves_what_a_load_will_take() -> i32 {
+    case(|| the_image_knob_moves_what_a_load_will_take())
+}
+crate::PM_MOD_TEST_RS!("pymergetic.wasmmod.loader", "the_image_knob_moves_what_a_load_will_take", case_the_image_knob_moves_what_a_load_will_take);
+#[test]
+fn test_the_image_knob_moves_what_a_load_will_take() {
+    assert_eq!(unsafe { case_the_image_knob_moves_what_a_load_will_take() }, 0);
 }
 
 unsafe extern "C" fn case_oversized_fqn_is_refused_not_clipped() -> i32 {

@@ -5,6 +5,7 @@
  * are cross-language bookkeeping only). Consumer face is generated
  * __exports__.h. */
 #include "pymergetic/types/__types__.h"
+#include "pymergetic/util/limits/__types__.h"
 #include "pymergetic/wasmmod/guest.h"
 
 #include <stdarg.h>
@@ -908,10 +909,58 @@ int32_t pm_types_unlock(pm_type_value_t *v) {
  * write lock is needed (same single-threaded-ctor contract as
  * PM_MOD_EXPORT_C's .init_array).
  *--------------------------------------------------------------------*/
-#define PM_TYPE_REGISTRY_MAX 512u
+/* Descriptors register from .init_array, which on a board is crt0 — before
+ * the boot arena exists and therefore before malloc answers — so the first
+ * PM_TYPE_REGISTRY_POOL of them come out of .bss. A seat's linked cards
+ * define 13 (ten primitives, list, dict, and whoever else is in the image),
+ * so the pool is that with room, not the 512 the old ceiling reserved.
+ *
+ * The pool is the floor, not the policy: past it a seat with a heap moves the
+ * sorted run into one allocation that doubles, and types.registry is how far
+ * that goes — 512, which is where this card always stopped, and which the
+ * facegen scan needs because a staged descriptor registers here too. Binary
+ * search and the insert memmove want the run contiguous, hence one block
+ * rather than a chain. */
+#define PM_TYPE_REGISTRY_POOL 64u
+#define PM_TYPE_REGISTRY_DEFAULT 512u
 
-static const pm_type_descriptor_t *s_registry[PM_TYPE_REGISTRY_MAX];
+static const pm_type_descriptor_t *s_registry_pool[PM_TYPE_REGISTRY_POOL];
+static const pm_type_descriptor_t **s_registry = s_registry_pool;
+static uint32_t s_registry_cap = PM_TYPE_REGISTRY_POOL;
 static uint32_t s_registry_count;
+
+PM_UTIL_LIMIT_C(pm_types_limit_registry, "types.registry",
+    PM_TYPE_REGISTRY_DEFAULT, 0u, &s_registry_count);
+
+/* Room for one more descriptor, widening the run if that is what it takes.
+ * Zero when the knob or the allocator says no, leaving the run as it was. */
+static int32_t registry_room(void) {
+    const pm_type_descriptor_t **wider;
+    uint32_t want;
+    if (s_registry_count < s_registry_cap) {
+        return 1;
+    }
+    if (!PM_UTIL_LIMIT_ROOM(pm_types_limit_registry, s_registry_count)) {
+        return 0;
+    }
+    want = s_registry_cap * 2u;
+    if (pm_types_limit_registry.soft != 0u && want > pm_types_limit_registry.soft) {
+        want = pm_types_limit_registry.soft;
+    }
+    wider = (const pm_type_descriptor_t **)malloc((size_t)want * sizeof(*wider));
+    if (wider == NULL) {
+        return 0;
+    }
+    memcpy(wider, s_registry, (size_t)s_registry_count * sizeof(*wider));
+    memset(wider + s_registry_count, 0,
+        (size_t)(want - s_registry_count) * sizeof(*wider));
+    if (s_registry != s_registry_pool) {
+        free(s_registry);
+    }
+    s_registry = wider;
+    s_registry_cap = want;
+    return 1;
+}
 
 static int32_t registry_slot(const char *fqn, uint32_t *slot) {
     uint32_t lo = 0;
@@ -939,14 +988,14 @@ int32_t pm_types_registry_register(const pm_type_descriptor_t *desc) {
             || desc->fqn == NULL) {
         return -1;
     }
-    if (s_registry_count >= PM_TYPE_REGISTRY_MAX) {
-        return -8;
-    }
     if (registry_slot(desc->fqn, &slot) != 0) {
         if (s_registry[slot] == desc) {
             return 0; /* idempotent re-register (same pointer) */
         }
         return -9; /* different descriptor owns the fqn */
+    }
+    if (!registry_room()) {
+        return -8;
     }
     memmove(&s_registry[slot + 1u], &s_registry[slot],
         (size_t)(s_registry_count - slot) * sizeof(*s_registry));
@@ -1049,15 +1098,26 @@ int32_t pm_types_registry_field_at(uint32_t index, uint16_t field,
  * Facegen scans __impl__.c / __impl__.rs for PM_TYPE_DEFINE_* when the
  * card is not linked into the gen binary. Staged descriptors live in
  * the same registry (sorted, fqn-keyed) so the introspection path is
- * one code path. Staged fields are capped (staging is best-effort for
- * view emission; the linked binary remains the runtime truth).
+ * one code path (the linked binary remains the runtime truth).
  *
- * Staging is a host-tool-only path (wasmmod-gen); guests never scan.
+ * Staging is a host-tool-only path (wasmmod-gen); guests never scan. So a
+ * staged descriptor is one allocation, taken when the scan announces it and
+ * sized to the fields it announced: what a seat that never stages anything
+ * carries is this comment, not 96 rows x (64 fields + their strings). How
+ * many may be staged at once is types.stage, and a descriptor no longer has
+ * a field ceiling at all — the row is as wide as the type.
+ *
  * The field store must have pm_type_field_t's exact stride so the
  * descriptor's `fields` pointer walks real rows (the embedded-string
- * struct would give every field but the first a misaligned view).
+ * struct would give every field but the first a misaligned view), which is
+ * why the two runs sit one after the other in the block's tail rather than
+ * interleaved.
+ *
+ * Nothing is given back: pm_types_registry_register keeps `&s->desc` and
+ * the registry has no removal face, so a staged row lives as long as the
+ * process — the same contract as the arena the card's values come from.
  *--------------------------------------------------------------------*/
-#define PM_TYPES_STAGE_MAX_FIELDS 64u
+#define PM_TYPES_STAGE_DESCS_DEFAULT 96u
 
 typedef struct pm_types_stage_field {
     char name[32];
@@ -1067,35 +1127,62 @@ typedef struct pm_types_stage_field {
 typedef struct pm_types_stage_desc {
     pm_type_descriptor_t desc;
     char fqn[192];
-    pm_type_field_t fields[PM_TYPES_STAGE_MAX_FIELDS];
-    pm_types_stage_meta_t meta[PM_TYPES_STAGE_MAX_FIELDS];
+    struct pm_types_stage_desc *next;
+    /* Both into this block's tail, so one free would take the lot (there is
+     * no free path — see above). */
+    pm_type_field_t *fields;
+    pm_types_stage_meta_t *meta;
+    uint32_t field_cap;
 } pm_types_stage_desc_t;
 
-#define PM_TYPES_STAGE_MAX_DESCS 96u
-
-static pm_types_stage_desc_t s_stage[PM_TYPES_STAGE_MAX_DESCS];
+static pm_types_stage_desc_t *s_stage_head;
 static uint32_t s_stage_count;
 
-/* Staging arena: descriptors are heap-backed statics, so registration
- * accepts their addresses for the process lifetime. Field name/type
- * strings are copied into the staged block (scan passes transient
- * buffers — the same rule register_fn in gen applies). */
+PM_UTIL_LIMIT_C(pm_types_limit_stage, "types.stage",
+    PM_TYPES_STAGE_DESCS_DEFAULT, 0u, &s_stage_count);
+
+/* The staged descriptor for `fqn`, or NULL. Linear over a scan's worth of
+ * rows, same as the array it replaced. */
+static pm_types_stage_desc_t *stage_find(const char *fqn) {
+    pm_types_stage_desc_t *s = s_stage_head;
+    while (s != NULL) {
+        if (strcmp(s->fqn, fqn) == 0) {
+            return s;
+        }
+        s = s->next;
+    }
+    return NULL;
+}
+
+/* Field name/type strings are copied into the staged block (scan passes
+ * transient buffers — the same rule register_fn in gen applies). */
 int32_t pm_types_registry_stage(const char *fqn,
     uint16_t kind, uint16_t instance_size, const char *parent_fqn,
     uint16_t field_count) {
-    uint32_t i;
     pm_types_stage_desc_t *s;
-    if (fqn == NULL || s_stage_count >= PM_TYPES_STAGE_MAX_DESCS) {
+    size_t n = (size_t)field_count;
+    size_t bytes;
+    if (fqn == NULL || !PM_UTIL_LIMIT_ROOM(pm_types_limit_stage, s_stage_count)) {
         return -1;
     }
     /* Idempotent on same fqn (re-scans across roots in one gen run). */
-    for (i = 0; i < s_stage_count; i++) {
-        if (strcmp(s_stage[i].fqn, fqn) == 0) {
-            return 0;
-        }
+    if (stage_find(fqn) != NULL) {
+        return 0;
     }
-    s = &s_stage[s_stage_count++];
-    memset(s, 0, sizeof(*s));
+    bytes = sizeof(*s) + n * sizeof(pm_type_field_t) + n * sizeof(pm_types_stage_meta_t);
+    s = (pm_types_stage_desc_t *)malloc(bytes);
+    if (s == NULL) {
+        return -1;
+    }
+    memset(s, 0, bytes);
+    s->field_cap = field_count;
+    if (n != 0u) {
+        s->fields = (pm_type_field_t *)(void *)(s + 1);
+        s->meta = (pm_types_stage_meta_t *)(void *)(s->fields + n);
+    }
+    s->next = s_stage_head;
+    s_stage_head = s;
+    s_stage_count++;
     snprintf(s->fqn, sizeof(s->fqn), "%s", fqn);
     s->desc.magic = PM_TYPE_DESCRIPTOR_MAGIC;
     s->desc.kind = kind;
@@ -1117,17 +1204,14 @@ int32_t pm_types_registry_stage(const char *fqn,
 
 int32_t pm_types_registry_stage_field(const char *fqn, uint16_t field_index,
     const char *name, uint32_t offset, const char *type_fqn) {
-    uint32_t i;
     pm_types_stage_desc_t *s;
-    for (i = 0; i < s_stage_count; i++) {
-        if (strcmp(s_stage[i].fqn, fqn) == 0) {
-            break;
-        }
-    }
-    if (i >= s_stage_count || field_index >= PM_TYPES_STAGE_MAX_FIELDS) {
+    if (fqn == NULL) {
         return -1;
     }
-    s = &s_stage[i];
+    s = stage_find(fqn);
+    if (s == NULL || field_index >= s->field_cap) {
+        return -1;
+    }
     pm_type_field_t *f = &s->fields[field_index];
     pm_types_stage_meta_t *m = &s->meta[field_index];
     memset(f, 0, sizeof(*f));
@@ -1149,18 +1233,16 @@ int32_t pm_types_registry_stage_field(const char *fqn, uint16_t field_index,
 int32_t pm_types_registry_stage_commit(const char *fqn) {
     uint32_t i, j, n;
     pm_types_stage_desc_t *s;
-    for (i = 0; i < s_stage_count; i++) {
-        if (strcmp(s_stage[i].fqn, fqn) == 0) {
-            break;
-        }
-    }
-    if (i >= s_stage_count) {
+    if (fqn == NULL) {
         return -1;
     }
-    s = &s_stage[i];
+    s = stage_find(fqn);
+    if (s == NULL) {
+        return -1;
+    }
     n = s->desc.field_count;
-    if (n > PM_TYPES_STAGE_MAX_FIELDS) {
-        n = PM_TYPES_STAGE_MAX_FIELDS;
+    if (n > s->field_cap) {
+        n = s->field_cap;
     }
     for (i = 0; i + 1 < n; i++) {
         for (j = i + 1; j < n; j++) {

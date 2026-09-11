@@ -41,6 +41,7 @@ fn main() {
     // wasmmod-gen overwrites the stubs with the real faces in the same run.
     ensure_export_rs_stubs();
     build_util_mem();
+    build_util_limits();
     build_util_zlib();
     build_types();
     if bundle_mbedtls() {
@@ -55,6 +56,7 @@ fn main() {
 
 const EXPORT_RS_STUBS: &[&str] = &[
     "src/pymergetic/util/mem/__exports__.rs",
+    "src/pymergetic/util/limits/__exports__.rs",
     "src/pymergetic/util/zlib/__exports__.rs",
     "src/pymergetic/util/pysample/__exports__.rs",
     "src/pymergetic/types/__exports__.rs",
@@ -120,6 +122,39 @@ fn build_util_mem() {
     let out = std::env::var("OUT_DIR").expect("OUT_DIR");
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static:+whole-archive=pm_util_mem");
+}
+
+fn build_util_limits() {
+    let root = manifest_dir();
+    println!("cargo:rerun-if-changed=src/pymergetic/util/limits/__impl__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/util/limits/__tests__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/util/limits/__types__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/util/limits/__exports__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/util/limits.h");
+
+    // Knobs put themselves on this card's list from .init_array, so the same
+    // whole-archive posture as mem: a seat that never names a limits symbol
+    // must still keep the constructors that register every card's capacity.
+    // Tests include the umbrella (limits.h -> generated __exports__.h); skip
+    // them when faces are wiped so wasmmod-gen can recreate first.
+    let mut build = cc::Build::new();
+    build
+        .file("src/pymergetic/util/limits/__impl__.c")
+        .include(&root)
+        .include(format!("{root}/src"))
+        .define("PM_WASMMOD_GUEST", "0")
+        .warnings(true)
+        .cargo_metadata(false);
+    if exports_h_exists("src/pymergetic/util/limits/__exports__.h")
+        && exports_h_exists("src/pymergetic/util/mem/__exports__.h")
+    {
+        build.file("src/pymergetic/util/limits/__tests__.c");
+        build.define("PM_MOD_TESTS", "1");
+    }
+    build.compile("pm_util_limits");
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static:+whole-archive=pm_util_limits");
 }
 
 fn build_types() {

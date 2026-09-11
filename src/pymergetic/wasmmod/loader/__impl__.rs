@@ -181,6 +181,14 @@ unsafe extern "C" {
     pub fn wasm_runtime_init() -> bool;
     pub fn wasm_runtime_init_thread_env() -> bool;
 
+    /* The runtime's own allocator, which is where an image buffer comes from:
+     * every seat that can load a module has inited the runtime by definition
+     * (pm_wasmmod_loader_init below), and on a board that allocator is the
+     * seat's arena. A row used to carry the buffer as a fixed array instead —
+     * see LOADED. */
+    pub fn wasm_runtime_malloc(size: u32) -> *mut c_void;
+    pub fn wasm_runtime_free(ptr: *mut c_void);
+
     pub fn wasm_runtime_load(
         buf: *mut u8,
         size: u32,
@@ -679,7 +687,85 @@ unsafe fn adapter_fn_at(index: usize) -> *mut c_void {
 // ---------------------------------------------------------------------
 const MOD_MAX: usize = 128;
 const FQN_CAP: usize = 64;
-const BYTES_CAP: usize = 65536; // 64 * 1024
+
+/* ---- how big an image this seat will take ---------------------------
+ *
+ * A knob, owned here and read where the load happens, linked onto the seat's
+ * list only so a listing can find it. It used to be a reservation: the row
+ * carried the image as a fixed 65536-byte array, because WAMR mutates the
+ * buffer it is handed and keeps referencing it until unload, so the loader
+ * owns one copy. 128 rows of that was 8.4MB of a seat's bss standing empty on
+ * a seat that had loaded nothing at all.
+ *
+ * The row owns one allocation of exactly the image's length now, taken from
+ * the runtime's allocator when the image arrives and given back when the
+ * module unloads. The knob is what a seat will accept, and moving it is how a
+ * seat takes a pack larger than 64KB — which it simply could not before. Zero
+ * means it will take whatever the allocator gives.
+ */
+const IMAGE_DEFAULT: u32 = 65536; // 64 * 1024, what a row used to reserve
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct pm_util_limit_t {
+    name: *const u8,
+    soft: u32,
+    hard: u32,
+    dflt: u32,
+    used: *const u32,
+    next: *mut pm_util_limit_t,
+    /* `int32_t (*apply)(pm_util_limit_t *)` on the C side: the hook for a
+     * card whose storage has to be reshaped the moment the knob moves. This
+     * one reads the new soft at the next load, so it stays null — spelled as
+     * the opaque pointer it is on every target, because spelling the fn type
+     * puts its typedef ahead of this struct in the in-kernel compile (rsx
+     * lowers a fn-pointer type in an earlier pass than the struct it names)
+     * and a card the kernel cannot rebuild is not a card. */
+    apply: *mut c_void,
+}
+
+/* The card's face, not a second declaration of it: the crate already binds
+ * pm_util_limits_attach (util/limits/__exports__.rs, generated from the live
+ * registry), where the knob is an opaque pointer. This card is the one that
+ * owns the struct, so the layout is here and the pointer crosses as the face
+ * spells it. */
+unsafe fn limits_attach(knob: *mut pm_util_limit_t) -> i32 {
+    unsafe {
+        crate::util::limits::pm_util_limits_attach(
+            knob as *mut crate::util::limits::pm_util_limit_t,
+        )
+    }
+}
+
+static IMAGE_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t {
+    name: "wasmmod.loader.image\0".as_ptr(),
+    soft: IMAGE_DEFAULT,
+    hard: 0,
+    dflt: IMAGE_DEFAULT,
+    used: core::ptr::null(),
+    next: core::ptr::null_mut(),
+    apply: core::ptr::null_mut(),
+}));
+
+/// Room for an image of `n` bytes? A knob at zero never refuses; past that
+/// the allocator is the only other thing that can say no.
+unsafe fn image_room(n: u32) -> bool {
+    let soft = unsafe { (*IMAGE_KNOB.0.get()).soft };
+    soft == 0 || n <= soft
+}
+
+/// Give a row's image back: every way out of a load that does not end with
+/// the row owning it, and unload once WAMR has let go of the buffer.
+unsafe fn image_release(m: *mut LoadedModule) {
+    unsafe {
+        let p = (*m).bytes;
+        if !p.is_null() {
+            wasm_runtime_free(p as *mut c_void);
+        }
+        (*m).bytes = ptr::null_mut();
+        (*m).bytes_len = 0;
+    }
+}
 
 /* Copy: the static's `[row; MOD_MAX]` repeat (a const context) needs
  * the value copyable, same discipline as registry's ModEntry rows. */
@@ -694,8 +780,9 @@ struct LoadedModule {
     exec_env: wasm_exec_env_t,
     // WAMR requires the byte buffer passed to wasm_runtime_load to
     // remain referenceable (and possibly mutated in place) until
-    // wasm_runtime_unload — this row is that buffer's one owner.
-    bytes: [u8; BYTES_CAP],
+    // wasm_runtime_unload — this row is that buffer's one owner, and owning
+    // it is now holding the allocation rather than carrying a fixed array.
+    bytes: *mut u8,
     bytes_len: u32,
     slots: [usize; MAX_ADAPTER_SLOTS],
     n_slots: u32,
@@ -710,7 +797,7 @@ static LOADED: Mut<[LoadedModule; MOD_MAX]> = Mut(UnsafeCell::new([
         module: core::ptr::null_mut(),
         instance: core::ptr::null_mut(),
         exec_env: core::ptr::null_mut(),
-        bytes: [0; BYTES_CAP],
+        bytes: core::ptr::null_mut(),
         bytes_len: 0,
         slots: [0; MAX_ADAPTER_SLOTS],
         n_slots: 0,
@@ -872,6 +959,10 @@ unsafe extern "C" fn loader_run_wasm_test(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pm_wasmmod_loader_init() -> i32 {
     unsafe {
+        /* The card's own knob, onto the seat's list. Before the early return
+         * below: init is idempotent, and a seat should be able to read what it
+         * will take whether or not this is the first call. */
+        let _ = limits_attach(IMAGE_KNOB.0.get());
         pm_util_lock_acquire(heap_lock());
         let have = match *(SHARED_HEAP.0.get()) {
             Some(_) => true,
@@ -1297,9 +1388,10 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
     if fqn_ptr.is_null() || fqn_len == 0 || bytes_ptr.is_null() {
         return invalid_handle();
     }
-    if bytes_len as usize > BYTES_CAP {
-        /* Loud refusal, never a silent truncate — WAMR mutates the
-         * buffer it is handed, so the loader owns one full copy. */
+    if !unsafe { image_room(bytes_len) } {
+        /* Loud refusal, never a silent truncate — WAMR mutates the buffer it
+         * is handed, so the loader owns one full copy, and a seat says how
+         * large a copy it will take (wasmmod.loader.image). */
         return invalid_handle();
     }
     if fqn_len as usize > FQN_CAP {
@@ -1333,9 +1425,16 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
             return invalid_handle();
         }
         let m = table.add(idx);
-        /* Copy the bytes into the row that will own them for the
-         * module's lifetime (WAMR may mutate the buffer in place). */
-        ptr::copy_nonoverlapping(bytes_ptr, (*m).bytes.as_mut_ptr(), bytes_len as usize);
+        /* One allocation of exactly this image's length, owned by the row for
+         * the module's lifetime (WAMR may mutate the buffer in place and
+         * keeps referencing it until unload). */
+        let image = wasm_runtime_malloc(bytes_len) as *mut u8;
+        if image.is_null() {
+            pm_util_lock_release(loaded_lock());
+            return invalid_handle();
+        }
+        ptr::copy_nonoverlapping(bytes_ptr, image, bytes_len as usize);
+        (*m).bytes = image;
         (*m).bytes_len = bytes_len;
 
         // Real detection, not a hardcoded guess: `.aot` and `.wasm` are
@@ -1347,7 +1446,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
         // than a new failure mode — wasm_runtime_load's own validation is
         // still the real gatekeeper for genuinely malformed input.
         let container = if wasm_runtime_get_file_package_type(
-            (*m).bytes.as_ptr(),
+            (*m).bytes,
             (*m).bytes_len,
         ) == WASM_MODULE_AOT
         {
@@ -1358,12 +1457,13 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
 
         let mut error_buf: [u8; 256] = [0; 256];
         let module = wasm_runtime_load(
-            (*m).bytes.as_mut_ptr(),
+            (*m).bytes,
             (*m).bytes_len,
             error_buf.as_mut_ptr() as *mut i8,
             error_buf.len() as u32,
         );
         if module.is_null() {
+            image_release(m);
             pm_util_lock_release(loaded_lock());
             return invalid_handle();
         }
@@ -1377,12 +1477,14 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
         );
         if instance.is_null() {
             teardown(module, ptr::null_mut(), ptr::null_mut(), ptr::null(), 0);
+            image_release(m);
             pm_util_lock_release(loaded_lock());
             return invalid_handle();
         }
 
         if !wasm_runtime_attach_shared_heap(instance, heap) {
             teardown(module, instance, ptr::null_mut(), ptr::null(), 0);
+            image_release(m);
             pm_util_lock_release(loaded_lock());
             return invalid_handle();
         }
@@ -1390,6 +1492,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
         let exec_env = wasm_runtime_create_exec_env(instance, DEFAULT_STACK_SIZE);
         if exec_env.is_null() {
             teardown(module, instance, ptr::null_mut(), ptr::null(), 0);
+            image_release(m);
             pm_util_lock_release(loaded_lock());
             return invalid_handle();
         }
@@ -1397,6 +1500,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
         let handle = pm_wasmmod_registry_publish(fqn_ptr, fqn_len, container);
         if handle.index == INVALID_HANDLE_INDEX {
             teardown(module, instance, exec_env, ptr::null(), 0);
+            image_release(m);
             pm_util_lock_release(loaded_lock());
             return invalid_handle();
         }
@@ -1404,7 +1508,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
         let mut ver_start = 0usize;
         let mut ver_len = 0usize;
         if extract_pkg_version(
-            (*m).bytes.as_ptr(),
+            (*m).bytes,
             (*m).bytes_len as usize,
             &mut ver_start,
             &mut ver_len,
@@ -1412,7 +1516,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
             let _ = pm_wasmmod_registry_set_version(
                 fqn_ptr,
                 fqn_len,
-                (*m).bytes.as_ptr().add(ver_start),
+                (*m).bytes.add(ver_start),
                 ver_len as u32,
             );
         }
@@ -1428,7 +1532,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
             let mut sec_start = 0usize;
             let mut sec_len = 0usize;
             if find_custom_section(
-                (*m).bytes.as_ptr(),
+                (*m).bytes,
                 (*m).bytes_len as usize,
                 b"wasmmod.tests".as_ptr(),
                 13,
@@ -1436,7 +1540,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
                 &mut sec_len,
             ) {
                 n_tests = parse_mpte(
-                    (*m).bytes.as_ptr().add(sec_start),
+                    (*m).bytes.add(sec_start),
                     sec_len,
                     &mut pack_tests,
                 );
@@ -1538,6 +1642,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
         if load_failed {
             pm_wasmmod_registry_unpublish(handle);
             teardown(module, instance, exec_env, claimed_slots.as_ptr(), n_claimed);
+            image_release(m);
             pm_util_lock_release(loaded_lock());
             return invalid_handle();
         }
@@ -1553,14 +1658,18 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
                 (*row).module = module;
                 (*row).instance = instance;
                 (*row).exec_env = exec_env;
+                let image_len = (*m).bytes_len;
                 if idx2 != idx {
-                    ptr::copy_nonoverlapping(
-                        (*m).bytes.as_ptr(),
-                        (*row).bytes.as_mut_ptr(),
-                        (*m).bytes_len as usize,
-                    );
+                    /* The image moves by handing over the allocation: it must
+                     * not be copied anywhere, because WAMR is already holding
+                     * pointers into it (copying it is what the fixed arrays
+                     * used to do, leaving the live buffer in a row that read
+                     * as free). */
+                    (*row).bytes = (*m).bytes;
+                    (*m).bytes = ptr::null_mut();
+                    (*m).bytes_len = 0;
                 }
-                (*row).bytes_len = (*m).bytes_len;
+                (*row).bytes_len = image_len;
                 ptr::copy_nonoverlapping(
                     claimed_slots.as_ptr(),
                     (*row).slots.as_mut_ptr(),
@@ -1574,6 +1683,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
         if !stored {
             pm_wasmmod_registry_unpublish(handle);
             teardown(module, instance, exec_env, claimed_slots.as_ptr(), n_claimed);
+            image_release(m);
             pm_util_lock_release(loaded_lock());
             return invalid_handle();
         }
@@ -1595,6 +1705,11 @@ pub unsafe extern "C" fn pm_wasmmod_loader_unload(handle: pm_wasmmod_registry_ha
     let mut exec_env: wasm_exec_env_t = ptr::null_mut();
     let mut slots: [usize; MAX_ADAPTER_SLOTS] = [0; MAX_ADAPTER_SLOTS];
     let mut n_slots: u32 = 0;
+    /* The image outlives this block: WAMR is still holding pointers into it
+     * until teardown unloads the module, so the row lets go of it here and it
+     * is given back below, after. */
+    let mut image: *mut u8 = ptr::null_mut();
+    let mut image_len: u32 = 0;
     unsafe {
         pm_util_lock_acquire(loaded_lock());
         let table = loaded_table();
@@ -1605,6 +1720,10 @@ pub unsafe extern "C" fn pm_wasmmod_loader_unload(handle: pm_wasmmod_registry_ha
             exec_env = (*m).exec_env;
             ptr::copy_nonoverlapping((*m).slots.as_ptr(), slots.as_mut_ptr(), MAX_ADAPTER_SLOTS);
             n_slots = (*m).n_slots;
+            image = (*m).bytes;
+            image_len = (*m).bytes_len;
+            (*m).bytes = ptr::null_mut();
+            (*m).bytes_len = 0;
             (*m).live = false;
             taken = true;
         }
@@ -1622,6 +1741,8 @@ pub unsafe extern "C" fn pm_wasmmod_loader_unload(handle: pm_wasmmod_registry_ha
             pm_util_lock_acquire(loaded_lock());
             let table = loaded_table();
             let m = table.add(idx);
+            (*m).bytes = image;
+            (*m).bytes_len = image_len;
             (*m).live = true;
             pm_util_lock_release(loaded_lock());
         }
@@ -1629,6 +1750,10 @@ pub unsafe extern "C" fn pm_wasmmod_loader_unload(handle: pm_wasmmod_registry_ha
     }
 
     teardown(module, instance, exec_env, slots.as_ptr(), n_slots);
+    /* WAMR has let go of the buffer now. */
+    if !image.is_null() {
+        unsafe { wasm_runtime_free(image as *mut c_void) };
+    }
     0
 }
 
