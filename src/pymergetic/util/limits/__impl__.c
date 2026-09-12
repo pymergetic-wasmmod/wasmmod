@@ -65,6 +65,10 @@ int32_t pm_util_limits_attach(pm_util_limit_t *knob) {
     if (knob == NULL || knob->name == NULL || knob->next != NULL) {
         return -1;
     }
+    /* A knob without a module is a knob nobody can ask a card for. */
+    if (knob->module == NULL || knob->leaf == NULL) {
+        return -1;
+    }
     if (knob_named(knob->name) != NULL) {
         return -1; /* one card, one knob of that name */
     }
@@ -136,6 +140,100 @@ const char *pm_util_limits_name(int32_t i) {
     return k != NULL ? k->name : NULL;
 }
 
+const char *pm_util_limits_module(int32_t i) {
+    pm_util_limit_t *k = knob_at(i);
+    return k != NULL ? k->module : NULL;
+}
+
+const char *pm_util_limits_leaf(int32_t i) {
+    pm_util_limit_t *k = knob_at(i);
+    return k != NULL ? k->leaf : NULL;
+}
+
+/* Is this knob the module's own, or one from a card below it? `deep` is what
+ * separates "the knobs of net.ip" from "the knobs under drivers": the dot check
+ * is there so `drivers.net` never claims `drivers.network`. */
+static int32_t knob_in(const pm_util_limit_t *k, const char *module, int32_t deep) {
+    size_t n;
+    if (module == NULL || k->module == NULL) {
+        return 0;
+    }
+    n = strlen(module);
+    if (strncmp(k->module, module, n) != 0) {
+        return 0;
+    }
+    if (k->module[n] == '\0') {
+        return 1;
+    }
+    return (deep != 0 && k->module[n] == '.') ? 1 : 0;
+}
+
+static uint32_t count_in(const char *module, int32_t deep) {
+    pm_util_limit_t *k;
+    uint32_t n = 0;
+    for (k = s_head; k != NULL; k = k->next) {
+        if (knob_in(k, module, deep)) {
+            n++;
+        }
+    }
+    return n;
+}
+
+/* The nth knob of a module, answered as the index the readers take: the list is
+ * sorted by name, so a card's knobs come out in one run and in the same order
+ * on every boot. */
+static int32_t nth_in(const char *module, int32_t nth, int32_t deep) {
+    pm_util_limit_t *k;
+    int32_t i = 0;
+    int32_t seen = 0;
+    if (nth < 0) {
+        return -1;
+    }
+    for (k = s_head; k != NULL; k = k->next) {
+        if (knob_in(k, module, deep)) {
+            if (seen == nth) {
+                return i;
+            }
+            seen++;
+        }
+        i++;
+    }
+    return -1;
+}
+
+uint32_t pm_util_limits_count_of(const char *module) {
+    return count_in(module, 0);
+}
+
+int32_t pm_util_limits_nth_of(const char *module, int32_t nth) {
+    return nth_in(module, nth, 0);
+}
+
+uint32_t pm_util_limits_count_under(const char *module) {
+    return count_in(module, 1);
+}
+
+int32_t pm_util_limits_nth_under(const char *module, int32_t nth) {
+    return nth_in(module, nth, 1);
+}
+
+/* One knob of one card, asked for the way it was declared: the module and the
+ * leaf, not the two glued back together. */
+int32_t pm_util_limits_find_of(const char *module, const char *leaf) {
+    pm_util_limit_t *k;
+    int32_t i = 0;
+    if (module == NULL || leaf == NULL) {
+        return -1;
+    }
+    for (k = s_head; k != NULL; k = k->next) {
+        if (knob_in(k, module, 0) && k->leaf != NULL && strcmp(k->leaf, leaf) == 0) {
+            return i;
+        }
+        i++;
+    }
+    return -1;
+}
+
 uint32_t pm_util_limits_soft(int32_t i) {
     pm_util_limit_t *k = knob_at(i);
     return k != NULL ? k->soft : 0u;
@@ -175,8 +273,9 @@ static int32_t soft_moved(pm_util_limit_t *k, uint32_t was) {
     return 0;
 }
 
-int32_t pm_util_limits_set(const char *name, pm_mod_value_t soft) {
-    pm_util_limit_t *k = knob_named(name);
+/* The three moves, once, on a knob the caller already has. Whether it was found
+ * by name or by index changes nothing about what may happen to it. */
+static int32_t knob_set(pm_util_limit_t *k, uint32_t soft) {
     uint32_t was;
     if (k == NULL) {
         return -1;
@@ -190,8 +289,7 @@ int32_t pm_util_limits_set(const char *name, pm_mod_value_t soft) {
     return soft_moved(k, was);
 }
 
-int32_t pm_util_limits_tighten(const char *name, pm_mod_value_t hard) {
-    pm_util_limit_t *k = knob_named(name);
+static int32_t knob_tighten(pm_util_limit_t *k, uint32_t hard) {
     uint32_t was;
     if (k == NULL) {
         return -1;
@@ -210,8 +308,7 @@ int32_t pm_util_limits_tighten(const char *name, pm_mod_value_t hard) {
     return soft_moved(k, was);
 }
 
-int32_t pm_util_limits_reset(const char *name) {
-    pm_util_limit_t *k = knob_named(name);
+static int32_t knob_reset(pm_util_limit_t *k) {
     uint32_t was;
     if (k == NULL) {
         return -1;
@@ -221,6 +318,30 @@ int32_t pm_util_limits_reset(const char *name) {
     was = k->soft;
     k->soft = (k->hard != 0u && k->dflt > k->hard) ? k->hard : k->dflt;
     return soft_moved(k, was);
+}
+
+int32_t pm_util_limits_set(const char *name, pm_mod_value_t soft) {
+    return knob_set(knob_named(name), soft);
+}
+
+int32_t pm_util_limits_tighten(const char *name, pm_mod_value_t hard) {
+    return knob_tighten(knob_named(name), hard);
+}
+
+int32_t pm_util_limits_reset(const char *name) {
+    return knob_reset(knob_named(name));
+}
+
+int32_t pm_util_limits_set_at(int32_t i, pm_mod_value_t soft) {
+    return knob_set(knob_at(i), soft);
+}
+
+int32_t pm_util_limits_tighten_at(int32_t i, pm_mod_value_t hard) {
+    return knob_tighten(knob_at(i), hard);
+}
+
+int32_t pm_util_limits_reset_at(int32_t i) {
+    return knob_reset(knob_at(i));
 }
 
 /* Is there anything to ask about? The list is threaded through the knobs
@@ -274,6 +395,13 @@ PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_count, pm_util_limits_cou
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_next, pm_util_limits_next, const char *(const char *));
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_find, pm_util_limits_find, int32_t(const char *));
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_name, pm_util_limits_name, const char *(int32_t));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_module, pm_util_limits_module, const char *(int32_t));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_leaf, pm_util_limits_leaf, const char *(int32_t));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_count_of, pm_util_limits_count_of, uint32_t(const char *));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_nth_of, pm_util_limits_nth_of, int32_t(const char *, int32_t));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_count_under, pm_util_limits_count_under, uint32_t(const char *));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_nth_under, pm_util_limits_nth_under, int32_t(const char *, int32_t));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_find_of, pm_util_limits_find_of, int32_t(const char *, const char *));
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_soft, pm_util_limits_soft, uint32_t(int32_t));
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_hard, pm_util_limits_hard, uint32_t(int32_t));
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_default, pm_util_limits_default, uint32_t(int32_t));
@@ -282,5 +410,8 @@ PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_used, pm_util_limits_used
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_set, pm_util_limits_set, int32_t(const char *, pm_mod_value_t));
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_tighten, pm_util_limits_tighten, int32_t(const char *, pm_mod_value_t));
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_reset, pm_util_limits_reset, int32_t(const char *));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_set_at, pm_util_limits_set_at, int32_t(int32_t, pm_mod_value_t));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_tighten_at, pm_util_limits_tighten_at, int32_t(int32_t, pm_mod_value_t));
+PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_reset_at, pm_util_limits_reset_at, int32_t(int32_t));
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_ready, pm_util_limits_ready, uint32_t(void));
 PM_MOD_EXPORT_C(pymergetic.util.limits, pm_util_limits_grow, pm_util_limits_grow, void *(pm_util_mem_arena_t *, void *, uint32_t *, uint32_t, const pm_util_limit_t *));

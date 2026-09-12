@@ -709,6 +709,10 @@ const IMAGE_DEFAULT: u32 = 65536; // 64 * 1024, what a row used to reserve
 #[derive(Clone, Copy)]
 struct pm_util_limit_t {
     name: *const u8,
+    /// The card this knob is under, and what it counts there. `name` is the
+    /// two joined; a seat that asks a card for its knobs matches on `module`.
+    module: *const u8,
+    leaf: *const u8,
     soft: u32,
     hard: u32,
     dflt: u32,
@@ -738,7 +742,9 @@ unsafe fn limits_attach(knob: *mut pm_util_limit_t) -> i32 {
 }
 
 static IMAGE_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t {
-    name: "wasmmod.loader.image\0".as_ptr(),
+    name: "pymergetic.wasmmod.loader.image\0".as_ptr(),
+    module: "pymergetic.wasmmod.loader\0".as_ptr(),
+    leaf: "image\0".as_ptr(),
     soft: IMAGE_DEFAULT,
     hard: 0,
     dflt: IMAGE_DEFAULT,
@@ -1391,7 +1397,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
     if !unsafe { image_room(bytes_len) } {
         /* Loud refusal, never a silent truncate — WAMR mutates the buffer it
          * is handed, so the loader owns one full copy, and a seat says how
-         * large a copy it will take (wasmmod.loader.image). */
+         * large a copy it will take (the image knob). */
         return invalid_handle();
     }
     if fqn_len as usize > FQN_CAP {

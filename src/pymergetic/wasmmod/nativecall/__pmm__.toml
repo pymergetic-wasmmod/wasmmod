@@ -1,0 +1,2 @@
+fqn = "pymergetic.wasmmod.nativecall"
+impl = "c"

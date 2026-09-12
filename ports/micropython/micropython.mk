@@ -100,6 +100,7 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/ports/micropython/finder.c \
 	$(WASMMOD_DIR)/ports/micropython/packbind.c \
 	$(WASMMOD_DIR)/ports/micropython/nativecall.c \
+	$(WASMMOD_DIR)/src/pymergetic/wasmmod/nativecall/__impl__.c \
 	$(WASMMOD_DIR)/ports/micropython/objhandle.c \
 	$(WASMMOD_DIR)/ports/micropython/hostready.c \
 	$(WASMMOD_DIR)/src/pymergetic/wasmmod/pyexport/__impl__.c \
@@ -229,6 +230,7 @@ SRC_WASMMOD = \
 	$(WASMMOD_DIR)/ports/micropython/importhook.c \
 	$(WASMMOD_DIR)/ports/micropython/hostready.c \
 	$(WASMMOD_DIR)/ports/micropython/nativecall.c \
+	$(WASMMOD_DIR)/src/pymergetic/wasmmod/nativecall/__impl__.c \
 	$(WASMMOD_DIR)/ports/micropython/objhandle.c \
 	$(WASMMOD_DIR)/ports/micropython/finder.c \
 	$(WASMMOD_DIR)/ports/micropython/packbind.c \

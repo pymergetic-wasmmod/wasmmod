@@ -989,9 +989,9 @@ fn a_re_registration_keeps_its_place_and_its_sig() {
 fn the_row_knobs_are_on_the_seats_list() {
     unsafe {
         let names: [*const u8; 3] = [
-            b"wasmmod.registry.exports\0".as_ptr(),
-            b"wasmmod.registry.tests\0".as_ptr(),
-            b"wasmmod.registry.benches\0".as_ptr(),
+            b"pymergetic.wasmmod.registry.exports\0".as_ptr(),
+            b"pymergetic.wasmmod.registry.tests\0".as_ptr(),
+            b"pymergetic.wasmmod.registry.benches\0".as_ptr(),
         ];
         let dflts: [u32; 3] = [EXPORT_DEFAULT, TEST_DEFAULT, BENCH_DEFAULT];
         let mut i = 0usize;
@@ -1012,6 +1012,58 @@ fn the_row_knobs_are_on_the_seats_list() {
     }
 }
 
+/* A knob is a thing under a module, and a card whose muscle is Rust asks for
+ * its own the same way C, C++ and Python do: by module and leaf, never by
+ * taking a name apart. */
+fn the_card_can_ask_for_its_own_knobs() {
+    unsafe {
+        let m = b"pymergetic.wasmmod.registry\0".as_ptr();
+        let leaves: [*const u8; 3] = [
+            b"benches\0".as_ptr(),
+            b"exports\0".as_ptr(),
+            b"tests\0".as_ptr(),
+        ];
+        assert_eq!(
+            crate::util::limits::pm_util_limits_count_of(m),
+            3,
+            "this card has three knobs of its own"
+        );
+        let mut i = 0usize;
+        while i < 3 {
+            /* Listing order is by name, so the nth of this card is the nth
+             * leaf in that order. */
+            let at = crate::util::limits::pm_util_limits_nth_of(m, i as i32);
+            assert!(at >= 0);
+            assert_eq!(crate::util::limits::pm_util_limits_find_of(m, leaves[i]), at);
+            assert!(span_is(
+                m,
+                crate::util::limits::pm_util_limits_module(at),
+                27
+            ));
+            i += 1;
+        }
+        assert_eq!(crate::util::limits::pm_util_limits_nth_of(m, 3), -1);
+        assert_eq!(
+            crate::util::limits::pm_util_limits_find_of(m, b"nothing\0".as_ptr()),
+            -1
+        );
+        /* Everything under wasmmod is more than this card's three: the loader's
+         * image knob is down there too. */
+        assert!(
+            crate::util::limits::pm_util_limits_count_under(b"pymergetic.wasmmod\0".as_ptr())
+                > 3
+        );
+        /* And a knob this card found by module and leaf can be moved by index
+         * and put back. */
+        let at = crate::util::limits::pm_util_limits_find_of(m, leaves[1]);
+        let was = crate::util::limits::pm_util_limits_soft(at);
+        assert_eq!(crate::util::limits::pm_util_limits_set_at(at, was + 4), 0);
+        assert_eq!(crate::util::limits::pm_util_limits_soft(at), was + 4);
+        assert_eq!(crate::util::limits::pm_util_limits_reset_at(at), 0);
+        assert_eq!(crate::util::limits::pm_util_limits_soft(at), was);
+    }
+}
+
 unsafe extern "C" fn case_rows_are_taken_not_reserved() -> i32 {
     unsafe { crate::util::mod_test::case_rc(case_rows_are_taken_not_reserved_body) }
 }
@@ -1019,6 +1071,7 @@ unsafe extern "C" fn case_rows_are_taken_not_reserved_body() -> i32 {
     a_module_holds_more_exports_than_a_row_ever_reserved();
     a_re_registration_keeps_its_place_and_its_sig();
     the_row_knobs_are_on_the_seats_list();
+    the_card_can_ask_for_its_own_knobs();
     0
 }
 crate::PM_MOD_TEST_RS!(

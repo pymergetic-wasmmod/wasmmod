@@ -49,6 +49,7 @@ fn main() {
     }
     build_wasmmod_boot();
     build_wasmmod_io();
+    build_wasmmod_nativecall();
     build_wasmmod_net_cdn();
     build_wamr();
     build_wamrc();
@@ -413,6 +414,37 @@ fn build_wasmmod_io() {
     let out = std::env::var("OUT_DIR").expect("OUT_DIR");
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static:+whole-archive=pm_wasmmod_io");
+}
+
+fn build_wasmmod_nativecall() {
+    let root = manifest_dir();
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/nativecall/__impl__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/nativecall/__tests__.c");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/nativecall/__types__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/nativecall/__exports__.h");
+    println!("cargo:rerun-if-changed=src/pymergetic/wasmmod/nativecall.h");
+
+    // The rooms' knobs put themselves on util.limits' list from .init_array,
+    // so the same whole-archive posture as limits itself: a seat that never
+    // names a face here must still keep the constructors.
+    let mut build = cc::Build::new();
+    build
+        .file("src/pymergetic/wasmmod/nativecall/__impl__.c")
+        .include(&root)
+        .include(format!("{root}/src"))
+        .define("PM_WASMMOD_GUEST", "0")
+        .warnings(true)
+        .cargo_metadata(false);
+    if exports_h_exists("src/pymergetic/wasmmod/nativecall/__exports__.h")
+        && exports_h_exists("src/pymergetic/util/limits/__exports__.h")
+    {
+        build.file("src/pymergetic/wasmmod/nativecall/__tests__.c");
+        build.define("PM_MOD_TESTS", "1");
+    }
+    build.compile("pm_wasmmod_nativecall");
+    let out = std::env::var("OUT_DIR").expect("OUT_DIR");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static:+whole-archive=pm_wasmmod_nativecall");
 }
 
 fn build_wasmmod_net_cdn() {

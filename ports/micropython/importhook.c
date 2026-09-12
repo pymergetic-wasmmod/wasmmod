@@ -305,6 +305,13 @@ static void mp_wasm_ns_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     mp_obj_t cmod = mp_wasm_registry_module(child);
     if (cmod != MP_OBJ_NULL) {
         dest[0] = cmod;
+        return;
+    }
+    /* A branch's knobs are everything below it, the same word a card uses for
+     * its own: `m.drivers.limits.net.sim.device`. Asked after the registry, so
+     * the card of that name — pymergetic.util.limits — is never shadowed. */
+    if (alen == 6 && memcmp(an, "limits", 6) == 0) {
+        dest[0] = mp_wasm_limits_view(ns->name);
     }
 }
 
@@ -449,6 +456,13 @@ void mp_wasm_pymergetic_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     mod = mp_wasm_registry_module(child);
     if (mod != MP_OBJ_NULL) {
         dest[0] = mod;
+        return;
+    }
+    /* `m.limits` on a package whose dict is fixed: every knob under it, the same
+     * view a card and a namespace answer with. After the registry, so a card of
+     * that name still wins. */
+    if (llen == 6 && memcmp(leaf, "limits", 6) == 0) {
+        dest[0] = mp_wasm_limits_view(pkg_name);
     }
 }
 #endif

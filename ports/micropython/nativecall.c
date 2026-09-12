@@ -1,5 +1,7 @@
 #include "ports/micropython/nativecall.h"
 
+#include "pymergetic/wasmmod/nativecall.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -145,133 +147,32 @@ static void *build_artifact_lookup(const pm_metal_build_artifact_t *art,
  * A compile's workspace, a link's relocation tables, the window an AST dump is
  * written into: each of these was a static array, and together they were the
  * larger part of a seat's bss — a compiler's workspace carried by every seat,
- * including the ones that never compile anything. Each is a knob now, and the
- * span is taken from the seat's own memory when the work asks for it and given
- * back when the call is over. Moving a knob needs no reshaping: the next call
- * asks for the new size.
+ * including the ones that never compile anything.
  *
- * The memory is the seat's arena, reached the way this file reaches every
- * metal face — through the registry. Every arm that opens a room is a metal
- * card's work, so a seat without those cards refuses the call before it ever
- * asks for a room, exactly as it does today.
+ * How big each may be, where the memory comes from and how it is given back are
+ * pymergetic.wasmmod.nativecall's — a card, so a seat can ask about the sizes
+ * and move them, which glue could never offer. This file holds one room per
+ * kind of work (the upy flows are sequential, so one room at a time is the
+ * whole story) and opens it when a call needs it.
  *
- * One-shot compile scratch is shared by the build and jit.py compile bridges:
- * the upy flows are sequential (the card contract, same posture as the
- * artifact slot above), so one room at a time is the whole story. Sized for
- * the in-arena TCC compile: the tccpp token and symbol pools are 2 x 256KB and
- * every table rides the arena (jit.c's arena reallocator); firmware never
- * compiles C in-process (the jit cards' compile faces refuse or are unused
- * there), so its default is the small honest one.
+ * Every arm that opens a room is a metal card's work, so a seat without those
+ * cards refuses the call before it ever asks for a room.
  */
-#if defined(PM_METAL_FIRMWARE)
-#define PM_NATIVECALL_COMPILE_BACKING (2u * 1024u * 1024u)
-#else
-#define PM_NATIVECALL_COMPILE_BACKING (32u * 1024u * 1024u)
-#endif
 
-PM_UTIL_LIMIT_C(pm_upy_room_compile, "upy.compile.arena", PM_NATIVECALL_COMPILE_BACKING, 0u, NULL);
-
-typedef struct {
-    pm_util_mem_arena_t *arena;
-    void *span;
-    size_t len; /* the span's length: giving pages back needs it */
-} nativecall_room_t;
-
-/* `want` bytes of the seat's own memory, page-aligned because that is what an
- * arena asks of its base. metal.boot knows where a seat's memory comes from —
- * pages on a hosted seat, the memmap on a board — and this file asks for it
- * the way it asks for every metal face, through the registry. NULL when there
- * is no seat to ask or it cannot spare the room: the same refusal these arms
- * already answer with when the face they need is not on this seat. */
-static void *seat_take(size_t want) {
-    void *(*fn)(size_t);
-    if (want == 0) {
-        return NULL;
-    }
-    fn = (void *(*)(size_t))pm_wasmmod_registry_resolve_native(
-        (const uint8_t *)"pymergetic.metal.boot", 21u,
-        (const uint8_t *)"pm_metal_boot_span_take", 23u);
-    if (fn == NULL) {
-        return NULL;
-    }
-    return fn(want);
-}
-
-static void seat_give(void *span, size_t len) {
-    void (*fn)(void *, size_t);
-    if (span == NULL) {
-        return;
-    }
-    fn = (void (*)(void *, size_t))pm_wasmmod_registry_resolve_native(
-        (const uint8_t *)"pymergetic.metal.boot", 21u,
-        (const uint8_t *)"pm_metal_boot_span_give", 23u);
-    if (fn != NULL) {
-        fn(span, len);
-    }
-}
-
-static void room_close(nativecall_room_t *room) {
-    if (room->arena != NULL) {
-        pm_util_mem_arena_destroy(room->arena);
-        room->arena = NULL;
-    }
-    seat_give(room->span, room->len);
-    room->span = NULL;
-    room->len = 0;
-}
-
-/* Opening gives back the room first: these arms raise from the middle of a
- * flow (a bad argument, a card's own error) and a raise never returns here, so
- * the next caller is where a room left standing is taken down. The flows are
- * sequential, which is what makes one room per kind of work enough. */
-static pm_util_mem_arena_t *room_open(nativecall_room_t *room, size_t want) {
-    room_close(room);
-    room->span = seat_take(want);
-    if (room->span == NULL) {
-        return NULL;
-    }
-    room->len = want;
-    room->arena = pm_util_mem_arena_create(room->span, want);
-    if (room->arena == NULL) {
-        room_close(room);
-    }
-    return room->arena;
-}
-
-static nativecall_room_t s_compile_room;
+static pm_wasmmod_nativecall_room_t s_compile_room;
 
 #ifdef PM_WASMMOD_METAL_TYPES
 /* jit.cpp transpile-chain scratch: one arena lives as long as the chain
- * (lex -> parse -> lower), so it cannot share the one-shot compile backing
- * above — that one is destroyed per call. The feed uses 64MB for the card's
- * own source; the REPL chain stays up until the next lex(1) drops it.
- * Firmware never transpiles C++ in-process (the card is boot-only there),
- * so it carries the same small honest buffer. */
-#if defined(PM_METAL_FIRMWARE)
-#define PM_NATIVECALL_CPP_BACKING (2u * 1024u * 1024u)
-#else
-#define PM_NATIVECALL_CPP_BACKING (64u * 1024u * 1024u)
-#endif
-
-/* The rooms the metal cards' work asks this bridge for. The link's is the
- * largest because a link relocates a whole card at once; it is also the one
- * that was reserved on every seat whether or not that seat ever links. */
-PM_UTIL_LIMIT_C(pm_upy_room_cpp, "upy.cpp.arena", PM_NATIVECALL_CPP_BACKING, 0u, NULL);
-PM_UTIL_LIMIT_C(pm_upy_room_link, "upy.link.arena", 64u * 1024u * 1024u, 0u, NULL);
-PM_UTIL_LIMIT_C(pm_upy_room_dump, "upy.dump", 1024u * 1024u, 0u, NULL);
-/* metal.workspace: the paths a materialize builds, and the inflated tar an
- * extract streams through (sized for the prove's fixtures — a real 575 MB
- * tarball goes through the C build card's host-loaded path). */
-PM_UTIL_LIMIT_C(pm_upy_room_workspace, "upy.workspace.arena", 64u * 1024u, 0u, NULL);
-PM_UTIL_LIMIT_C(pm_upy_room_extract, "upy.workspace.extract.arena", 512u * 1024u, 0u, NULL);
-
-static nativecall_room_t s_cpp_room;
-static nativecall_room_t s_link_room;
-static nativecall_room_t s_workspace_room;
+ * (lex -> parse -> lower), so it cannot share the one-shot compile room above —
+ * that one is closed per call. The REPL chain stays up until the next lex(1)
+ * drops it. */
+static pm_wasmmod_nativecall_room_t s_cpp_room;
+static pm_wasmmod_nativecall_room_t s_link_room;
+static pm_wasmmod_nativecall_room_t s_workspace_room;
 
 static void cpp_chain_drop(void) {
     s_cpp_arena = NULL;
-    room_close(&s_cpp_room);
+    pm_wasmmod_nativecall_room_close(&s_cpp_room);
     memset(&s_cpp_toks, 0, sizeof(s_cpp_toks));
     s_cpp_unit = NULL;
 }
@@ -293,25 +194,25 @@ static size_t compile_arena_cap(void) {
         (const uint8_t *)"pymergetic.metal.process", 24u,
         (const uint8_t *)"pm_metal_process_current", 24u);
     if (cur_fn == NULL) {
-        return (size_t)pm_upy_room_compile.soft;
+        return (size_t)pm_wasmmod_nativecall_limit_compile.soft;
     }
     budget_fn = (int32_t (*)(int32_t))pm_wasmmod_registry_resolve_native(
         (const uint8_t *)"pymergetic.metal.process", 24u,
         (const uint8_t *)"pm_metal_process_budget", 23u);
     if (budget_fn == NULL) {
-        return (size_t)pm_upy_room_compile.soft;
+        return (size_t)pm_wasmmod_nativecall_limit_compile.soft;
     }
     pid = cur_fn();
     if (pid < 0) {
-        return (size_t)pm_upy_room_compile.soft;
+        return (size_t)pm_wasmmod_nativecall_limit_compile.soft;
     }
     pid_budget = budget_fn(pid);
     if (pid_budget <= 0) {
-        return (size_t)pm_upy_room_compile.soft;
+        return (size_t)pm_wasmmod_nativecall_limit_compile.soft;
     }
-    return ((size_t)pid_budget < (size_t)pm_upy_room_compile.soft)
+    return ((size_t)pid_budget < (size_t)pm_wasmmod_nativecall_limit_compile.soft)
         ? (size_t)pid_budget
-        : (size_t)pm_upy_room_compile.soft;
+        : (size_t)pm_wasmmod_nativecall_limit_compile.soft;
 }
 
 static int32_t call_registry_i32(const char *fqn, const char *export_name,
@@ -606,6 +507,34 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         return mp_obj_new_int(((int32_t (*)(const char *, uint32_t))p)(
             mp_obj_str_get_str(args[0]), (uint32_t)mp_obj_get_int_truncated(args[1])));
     }
+    /* A count asked about a name: how many knobs a module has. Unsigned, the
+     * same reading as the per-id counts above. */
+    if (strcmp(sig, "uint32_t(const char *)") == 0) {
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        return mp_obj_new_int_from_uint((mp_uint_t)
+            ((uint32_t (*)(const char *))p)(mp_obj_str_get_str(args[0])));
+    }
+    /* A name and an index: the nth knob of a module, answered as the index the
+     * readers take. */
+    if (strcmp(sig, "int32_t(const char *, int32_t)") == 0) {
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        return mp_obj_new_int(((int32_t (*)(const char *, int32_t))p)(
+            mp_obj_str_get_str(args[0]), (int32_t)mp_obj_get_int(args[1])));
+    }
+    /* An index and a number the caller means: moving a knob the caller already
+     * found, the by-index twin of the name-and-value face above. */
+    if (strcmp(sig, "int32_t(int32_t, pm_mod_value_t)") == 0) {
+        if (n_args != 2) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        return mp_obj_new_int(((int32_t (*)(int32_t, uint32_t))p)(
+            (int32_t)mp_obj_get_int(args[0]),
+            (uint32_t)mp_obj_get_int_truncated(args[1])));
+    }
     if (strcmp(sig, "int32_t(int32_t, const char *, uint32_t)") == 0) {
         size_t n = 0;
         const char *s;
@@ -684,7 +613,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         memset(&unit, 0, sizeof(unit));
         snprintf(unit.fqn, sizeof(unit.fqn), "%s", mp_obj_str_get_str(args[0]));
-        arena = room_open(&s_compile_room, compile_arena_cap());
+        arena = pm_wasmmod_nativecall_room_open(&s_compile_room, (uint32_t)compile_arena_cap());
         if (arena == NULL) {
             return mp_const_none;
         }
@@ -696,12 +625,12 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         /* The bytes are in the room, so they become a Python object while it
          * still stands. */
         if (rc != PM_METAL_BUILD_OK || obj == NULL) {
-            room_close(&s_compile_room);
+            pm_wasmmod_nativecall_room_close(&s_compile_room);
             return mp_const_none;
         }
         {
             mp_obj_t out = mp_obj_new_bytes(obj, obj_len);
-            room_close(&s_compile_room);
+            pm_wasmmod_nativecall_room_close(&s_compile_room);
             return out;
         }
     }
@@ -728,7 +657,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         memset(&unit, 0, sizeof(unit));
         snprintf(unit.fqn, sizeof(unit.fqn), "%s", mp_obj_str_get_str(args[0]));
         memset(err, 0, sizeof(err));
-        arena = room_open(&s_link_room, (size_t)pm_upy_room_link.soft);
+        arena = pm_wasmmod_nativecall_room_open(&s_link_room, (uint32_t)pm_wasmmod_nativecall_limit_link.soft);
         if (arena == NULL) {
             return mp_const_none;
         }
@@ -741,7 +670,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             uint8_t **, const size_t *, uint32_t, pm_metal_build_artifact_t *,
             char *, size_t))p)(arena, &unit, &obj, &obj_len, 1,
             &s_build_artifact, err, sizeof(err));
-        room_close(&s_link_room);
+        pm_wasmmod_nativecall_room_close(&s_link_room);
         {
             mp_obj_t pair[2];
             pair[0] = mp_obj_new_int(rc);
@@ -832,7 +761,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         src = mp_obj_str_get_str(args[0]);
         cpp_chain_drop();
-        s_cpp_arena = room_open(&s_cpp_room, (size_t)pm_upy_room_cpp.soft);
+        s_cpp_arena = pm_wasmmod_nativecall_room_open(&s_cpp_room, (uint32_t)pm_wasmmod_nativecall_limit_cpp.soft);
         if (s_cpp_arena == NULL) {
             return mp_const_none;
         }
@@ -892,7 +821,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
          * so the knob is the honest cap (a short window -> -1 -> refusal). The
          * window is taken for this call and given back with it. */
         char *dump;
-        size_t dump_len = (size_t)pm_upy_room_dump.soft;
+        size_t dump_len = (size_t)pm_wasmmod_nativecall_limit_dump.soft;
         int32_t rc;
         char err[256];
         if (n_args != 1) {
@@ -901,7 +830,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         if (s_cpp_unit == NULL) {
             mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("no parsed unit (parse first)"));
         }
-        dump = (char *)seat_take(dump_len);
+        dump = (char *)pm_wasmmod_nativecall_span_take((uint32_t)dump_len);
         if (dump == NULL) {
             return mp_const_none;
         }
@@ -909,12 +838,12 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         rc = ((int32_t (*)(const pm_jit_cpp_ast_t *, char *, size_t,
             char *, size_t))p)(s_cpp_unit, dump, dump_len, err, sizeof(err));
         if (rc < 0) {
-            seat_give(dump, dump_len);
+            pm_wasmmod_nativecall_span_give(dump, (uint32_t)dump_len);
             mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s"), err);
         }
         {
             mp_obj_t text = mp_obj_new_str(dump, (size_t)rc);
-            seat_give(dump, dump_len);
+            pm_wasmmod_nativecall_span_give(dump, (uint32_t)dump_len);
             return text;
         }
     }
@@ -936,7 +865,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             mp_raise_TypeError(MP_ERROR_TEXT("object_compile needs source, module_name"));
         }
         src_len = strlen(mp_obj_str_get_str(args[0]));
-        arena = room_open(&s_compile_room, compile_arena_cap());
+        arena = pm_wasmmod_nativecall_room_open(&s_compile_room, (uint32_t)compile_arena_cap());
         if (arena == NULL) {
             return mp_const_none;
         }
@@ -948,12 +877,12 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         /* The bytes are in the room, so they become a Python object while it
          * still stands. */
         if (rc != 0 || mpy == NULL) {
-            room_close(&s_compile_room);
+            pm_wasmmod_nativecall_room_close(&s_compile_room);
             return mp_const_none;
         }
         {
             mp_obj_t out = mp_obj_new_bytes(mpy, mpy_len);
-            room_close(&s_compile_room);
+            pm_wasmmod_nativecall_room_close(&s_compile_room);
             return out;
         }
     }
@@ -1012,7 +941,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
                 tincs[t_n_incs++] = PM_NATIVECALL_TCC_INC;
 #endif
                 {
-                    arena = room_open(&s_compile_room, compile_arena_cap());
+                    arena = pm_wasmmod_nativecall_room_open(&s_compile_room, (uint32_t)compile_arena_cap());
                 }
                 if (arena == NULL) {
                     return mp_const_none;
@@ -1024,13 +953,13 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
                     (int32_t)mp_obj_get_int(args[1]),
                     &obj, &obj_len, err, sizeof(err));
                 if (rc != 0 || obj == NULL) {
-                    room_close(&s_compile_room);
+                    pm_wasmmod_nativecall_room_close(&s_compile_room);
                     mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s"), err);
                 }
                 {
                     /* the bytes are in the room: a Python object first, then it goes back */
                     mp_obj_t out = mp_obj_new_bytes(obj, obj_len);
-                    room_close(&s_compile_room);
+                    pm_wasmmod_nativecall_room_close(&s_compile_room);
                     return out;
                 }
             }
@@ -1055,7 +984,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
                     (const uint8_t *)"pm_metal_jit_c_object_compile_opts", 34u);
             if (opts_fn == NULL) {
                 /* no _opts on this seat (unregistered card): the raw face */
-                arena = room_open(&s_compile_room, compile_arena_cap());
+                arena = pm_wasmmod_nativecall_room_open(&s_compile_room, (uint32_t)compile_arena_cap());
                 if (arena == NULL) {
                     return mp_const_none;
                 }
@@ -1065,13 +994,13 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
                     arena, mp_obj_str_get_str(args[0]), src_len,
                     &obj, &obj_len, err, sizeof(err));
                 if (rc != 0 || obj == NULL) {
-                    room_close(&s_compile_room);
+                    pm_wasmmod_nativecall_room_close(&s_compile_room);
                     mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s"), err);
                 }
                 {
                     /* the bytes are in the room: a Python object first, then it goes back */
                     mp_obj_t out = mp_obj_new_bytes(obj, obj_len);
-                    room_close(&s_compile_room);
+                    pm_wasmmod_nativecall_room_close(&s_compile_room);
                     return out;
                 }
             }
@@ -1082,7 +1011,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             incs[n_incs++] = PM_NATIVECALL_TCC_INC;
 #endif
             {
-                arena = room_open(&s_compile_room, compile_arena_cap());
+                arena = pm_wasmmod_nativecall_room_open(&s_compile_room, (uint32_t)compile_arena_cap());
             }
             if (arena == NULL) {
                 return mp_const_none;
@@ -1092,13 +1021,13 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
                 incs, (uint32_t)n_incs, NULL, 0,
                 &obj, &obj_len, err, sizeof(err));
             if (rc != 0 || obj == NULL) {
-                room_close(&s_compile_room);
+                pm_wasmmod_nativecall_room_close(&s_compile_room);
                 mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s"), err);
             }
             {
                 /* the bytes are in the room: a Python object first, then it goes back */
                 mp_obj_t out = mp_obj_new_bytes(obj, obj_len);
-                room_close(&s_compile_room);
+                pm_wasmmod_nativecall_room_close(&s_compile_room);
                 return out;
             }
         }
@@ -1132,7 +1061,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         incs[n_incs++] = PM_NATIVECALL_WASMMOD_ROOT;
         incs[n_incs++] = PM_NATIVECALL_TCC_INC;
 #endif
-        arena = room_open(&s_compile_room, compile_arena_cap());
+        arena = pm_wasmmod_nativecall_room_open(&s_compile_room, (uint32_t)compile_arena_cap());
         if (arena == NULL) {
             return mp_const_none;
         }
@@ -1144,13 +1073,13 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             incs, (uint32_t)n_incs, NULL, 0, (int32_t)target,
             &obj, &obj_len, err, sizeof(err));
         if (rc != 0 || obj == NULL) {
-            room_close(&s_compile_room);
+            pm_wasmmod_nativecall_room_close(&s_compile_room);
             mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s"), err);
         }
         {
             /* the bytes are in the room: a Python object first, then it goes back */
             mp_obj_t out = mp_obj_new_bytes(obj, obj_len);
-            room_close(&s_compile_room);
+            pm_wasmmod_nativecall_room_close(&s_compile_room);
             return out;
         }
     }
@@ -1196,7 +1125,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
                 defs[i] = mp_obj_str_get_str(items[i]);
             }
         }
-        arena = room_open(&s_compile_room, compile_arena_cap());
+        arena = pm_wasmmod_nativecall_room_open(&s_compile_room, (uint32_t)compile_arena_cap());
         if (arena == NULL) {
             return mp_const_none;
         }
@@ -1208,13 +1137,13 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             incs, (uint32_t)n_incs, defs, (uint32_t)n_defs,
             &obj, &obj_len, err, sizeof(err));
         if (rc != 0 || obj == NULL) {
-            room_close(&s_compile_room);
+            pm_wasmmod_nativecall_room_close(&s_compile_room);
             mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("%s"), err);
         }
         {
             /* the bytes are in the room: a Python object first, then it goes back */
             mp_obj_t out = mp_obj_new_bytes(obj, obj_len);
-            room_close(&s_compile_room);
+            pm_wasmmod_nativecall_room_close(&s_compile_room);
             return out;
         }
     }
@@ -1650,14 +1579,14 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         if (n_args != 0) {
             mp_raise_TypeError(MP_ERROR_TEXT("materialize takes no args"));
         }
-        arena = room_open(&s_workspace_room, (size_t)pm_upy_room_workspace.soft);
+        arena = pm_wasmmod_nativecall_room_open(&s_workspace_room, (uint32_t)pm_wasmmod_nativecall_limit_workspace.soft);
         if (arena == NULL) {
             return mp_const_none;
         }
         memset(err, 0, sizeof(err));
         rc = ((int32_t (*)(pm_util_mem_arena_t *, uint32_t *, char *, size_t))p)(
             arena, &n_files, err, sizeof(err));
-        room_close(&s_workspace_room);
+        pm_wasmmod_nativecall_room_close(&s_workspace_room);
         if (rc != 0) {
             mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT(
                 "materialize failed: %s"), err);
@@ -1683,7 +1612,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         name = mp_obj_str_get_str(args[0]);
         mp_get_buffer_raise(args[1], &bufinfo, MP_BUFFER_READ);
-        arena = room_open(&s_workspace_room, (size_t)pm_upy_room_extract.soft);
+        arena = pm_wasmmod_nativecall_room_open(&s_workspace_room, (uint32_t)pm_wasmmod_nativecall_limit_extract.soft);
         if (arena == NULL) {
             return mp_const_none;
         }
@@ -1692,7 +1621,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
             size_t, uint32_t *, char *, size_t))p)(
             arena, name, (const uint8_t *)bufinfo.buf, bufinfo.len,
             &n_files, err, sizeof(err));
-        room_close(&s_workspace_room);
+        pm_wasmmod_nativecall_room_close(&s_workspace_room);
         if (rc != 0) {
             return mp_const_none;
         }

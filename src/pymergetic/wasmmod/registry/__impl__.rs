@@ -64,6 +64,10 @@ unsafe extern "C" {
 #[repr(C)]
 struct pm_util_limit_t {
     name: *const u8,
+    /// The card this knob is under, and what it counts there. `name` is the
+    /// two joined; a seat that asks a card for its knobs matches on `module`.
+    module: *const u8,
+    leaf: *const u8,
     soft: u32,
     hard: u32,
     dflt: u32,
@@ -92,7 +96,7 @@ unsafe fn limits_attach(knob: *mut pm_util_limit_t) -> i32 {
 const MOD_MAX: usize = 128;
 /* Export, test and bench rows are taken one at a time, so a module has no
  * per-module ceiling any more: what a seat will hold is the knob
- * (wasmmod.registry.exports / .tests / .benches), and a row taken while the
+ * (the exports, tests and benches knobs), and a row taken while the
  * seat has a heap comes from the heap.
  *
  * The pools below are the pre-heap floor, not a policy limit. A card's
@@ -423,7 +427,9 @@ static HEAP_SEEN: Mut<u32> = Mut(UnsafeCell::new(0));
 static KNOBS_DONE: Mut<u32> = Mut(UnsafeCell::new(0));
 
 static EXPORTS_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t {
-    name: "wasmmod.registry.exports\0".as_ptr(),
+    name: "pymergetic.wasmmod.registry.exports\0".as_ptr(),
+    module: "pymergetic.wasmmod.registry\0".as_ptr(),
+    leaf: "exports\0".as_ptr(),
     soft: EXPORT_DEFAULT,
     hard: 0,
     dflt: EXPORT_DEFAULT,
@@ -432,7 +438,9 @@ static EXPORTS_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t 
     apply: ptr::null_mut(),
 }));
 static TESTS_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t {
-    name: "wasmmod.registry.tests\0".as_ptr(),
+    name: "pymergetic.wasmmod.registry.tests\0".as_ptr(),
+    module: "pymergetic.wasmmod.registry\0".as_ptr(),
+    leaf: "tests\0".as_ptr(),
     soft: TEST_DEFAULT,
     hard: 0,
     dflt: TEST_DEFAULT,
@@ -441,7 +449,9 @@ static TESTS_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t {
     apply: ptr::null_mut(),
 }));
 static BENCHES_KNOB: Mut<pm_util_limit_t> = Mut(UnsafeCell::new(pm_util_limit_t {
-    name: "wasmmod.registry.benches\0".as_ptr(),
+    name: "pymergetic.wasmmod.registry.benches\0".as_ptr(),
+    module: "pymergetic.wasmmod.registry\0".as_ptr(),
+    leaf: "benches\0".as_ptr(),
     soft: BENCH_DEFAULT,
     hard: 0,
     dflt: BENCH_DEFAULT,

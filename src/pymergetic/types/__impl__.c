@@ -916,7 +916,7 @@ int32_t pm_types_unlock(pm_type_value_t *v) {
  * so the pool is that with room, not the 512 the old ceiling reserved.
  *
  * The pool is the floor, not the policy: past it a seat with a heap moves the
- * sorted run into one allocation that doubles, and types.registry is how far
+ * sorted run into one allocation that doubles, and the registry knob is how far
  * that goes — 512, which is where this card always stopped, and which the
  * facegen scan needs because a staged descriptor registers here too. Binary
  * search and the insert memmove want the run contiguous, hence one block
@@ -929,7 +929,7 @@ static const pm_type_descriptor_t **s_registry = s_registry_pool;
 static uint32_t s_registry_cap = PM_TYPE_REGISTRY_POOL;
 static uint32_t s_registry_count;
 
-PM_UTIL_LIMIT_C(pm_types_limit_registry, "types.registry",
+PM_UTIL_LIMIT_C(pm_types_limit_registry, pymergetic.types, registry,
     PM_TYPE_REGISTRY_DEFAULT, 0u, &s_registry_count);
 
 /* Room for one more descriptor, widening the run if that is what it takes.
@@ -1104,7 +1104,7 @@ int32_t pm_types_registry_field_at(uint32_t index, uint16_t field,
  * staged descriptor is one allocation, taken when the scan announces it and
  * sized to the fields it announced: what a seat that never stages anything
  * carries is this comment, not 96 rows x (64 fields + their strings). How
- * many may be staged at once is types.stage, and a descriptor no longer has
+ * many may be staged at once is the stage knob, and a descriptor no longer has
  * a field ceiling at all — the row is as wide as the type.
  *
  * The field store must have pm_type_field_t's exact stride so the
@@ -1138,7 +1138,7 @@ typedef struct pm_types_stage_desc {
 static pm_types_stage_desc_t *s_stage_head;
 static uint32_t s_stage_count;
 
-PM_UTIL_LIMIT_C(pm_types_limit_stage, "types.stage",
+PM_UTIL_LIMIT_C(pm_types_limit_stage, pymergetic.types, stage,
     PM_TYPES_STAGE_DESCS_DEFAULT, 0u, &s_stage_count);
 
 /* The staged descriptor for `fqn`, or NULL. Linear over a scan's worth of

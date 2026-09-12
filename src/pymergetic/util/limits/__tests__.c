@@ -14,11 +14,13 @@ static int32_t fail(const char *why) {
 }
 
 static uint32_t s_probe_used;
-static pm_util_limit_t s_probe = { "zzz.prove.thing", 8u, 32u, 8u, &s_probe_used, NULL, NULL };
-static pm_util_limit_t s_open = { "zzz.prove.open", 4u, 0u, 4u, NULL, NULL, NULL };
+static pm_util_limit_t s_probe = { "zzz.prove.thing", "zzz.prove", "thing",
+    8u, 32u, 8u, &s_probe_used, NULL, NULL };
+static pm_util_limit_t s_open = { "zzz.prove.open", "zzz.prove", "open",
+    4u, 0u, 4u, NULL, NULL, NULL };
 
 static int32_t case_room(void) {
-    pm_util_limit_t k = { "zzz.room", 2u, 0u, 2u, NULL, NULL, NULL };
+    pm_util_limit_t k = { "zzz.room", "zzz", "room", 2u, 0u, 2u, NULL, NULL, NULL };
     if (!PM_UTIL_LIMIT_ROOM(k, 0u) || !PM_UTIL_LIMIT_ROOM(k, 1u)) {
         return fail("a knob refused below its own soft");
     }
@@ -125,6 +127,93 @@ static int32_t case_knob(void) {
     return 0;
 }
 
+/* A knob is a thing under a module: the card it belongs to can be asked for
+ * what it has, by module and by leaf, without anyone taking a name apart. */
+static int32_t case_module(void) {
+    int32_t i = pm_util_limits_find("zzz.prove.thing");
+    int32_t j;
+    const char *s;
+
+    if (i < 0) {
+        return fail("the scratch knob is not on the list");
+    }
+    /* The knob before us is where the last case left it; it is ours, so put it
+     * back to what it was declared with rather than reason about that. */
+    s_probe.hard = 32u;
+    s_probe.soft = 8u;
+    s = pm_util_limits_module(i);
+    if (s == NULL || strcmp(s, "zzz.prove") != 0) {
+        return fail("a knob does not name the module it is under");
+    }
+    s = pm_util_limits_leaf(i);
+    if (s == NULL || strcmp(s, "thing") != 0) {
+        return fail("a knob does not name what it counts");
+    }
+    s = pm_util_limits_name(i);
+    if (s == NULL || strcmp(s, "zzz.prove.thing") != 0) {
+        return fail("the name is not the module and the leaf joined");
+    }
+
+    /* The card's own knobs — both scratch knobs, and nothing from elsewhere. */
+    if (pm_util_limits_count_of("zzz.prove") != 2u) {
+        return fail("a module does not answer with its own knobs");
+    }
+    if (pm_util_limits_count_of("zzz") != 0u) {
+        return fail("a module claimed a knob that sits below it");
+    }
+    /* A branch answers as a branch, and a half-written name matches nothing:
+     * "zzz.pro" is not a module of "zzz.prove". */
+    if (pm_util_limits_count_under("zzz") != 2u
+        || pm_util_limits_count_under("zzz.pro") != 0u) {
+        return fail("a branch of the tree does not read as a branch");
+    }
+    /* The nth of a module is an index the readers take, in listing order. */
+    j = pm_util_limits_nth_of("zzz.prove", 0);
+    if (j < 0 || strcmp(pm_util_limits_leaf(j), "open") != 0) {
+        return fail("the first knob of a module is not the first by name");
+    }
+    j = pm_util_limits_nth_of("zzz.prove", 1);
+    if (j < 0 || strcmp(pm_util_limits_leaf(j), "thing") != 0) {
+        return fail("the second knob of a module is not the second by name");
+    }
+    if (pm_util_limits_nth_of("zzz.prove", 2) != -1
+        || pm_util_limits_nth_of("zzz.prove", -1) != -1) {
+        return fail("a module answered past its own knobs");
+    }
+    if (pm_util_limits_nth_under("zzz", 1) != pm_util_limits_nth_of("zzz.prove", 1)) {
+        return fail("the branch and the module disagree about the same knob");
+    }
+
+    /* One knob of one card, asked for as the two names it was declared with. */
+    if (pm_util_limits_find_of("zzz.prove", "thing") != i) {
+        return fail("a card cannot find its own knob by leaf");
+    }
+    if (pm_util_limits_find_of("zzz.prove", "nothing") != -1
+        || pm_util_limits_find_of("zzz", "thing") != -1) {
+        return fail("a leaf was found under a module that does not have it");
+    }
+
+    /* The writers by index do what the writers by name do. */
+    if (pm_util_limits_set_at(i, 20u) != 0 || pm_util_limits_soft(i) != 20u) {
+        return fail("set by index");
+    }
+    if (pm_util_limits_set_at(i, 33u) != -2 || pm_util_limits_soft(i) != 20u) {
+        return fail("set by index went past the hard");
+    }
+    if (pm_util_limits_set_at(-1, 4u) != -1
+        || pm_util_limits_set_at((int32_t)pm_util_limits_count(), 4u) != -1) {
+        return fail("an index nobody has was accepted");
+    }
+    if (pm_util_limits_tighten_at(i, 12u) != 0 || pm_util_limits_hard(i) != 12u
+        || pm_util_limits_soft(i) != 12u) {
+        return fail("tighten by index");
+    }
+    if (pm_util_limits_reset_at(i) != 0 || pm_util_limits_soft(i) != 8u) {
+        return fail("reset by index");
+    }
+    return 0;
+}
+
 /* The apply hook: a card whose storage has to be reshaped when the knob moves
  * is told, in the context of whoever moved it, and gets to refuse. */
 static uint32_t s_applied;
@@ -138,7 +227,8 @@ static int32_t probe_apply(pm_util_limit_t *knob) {
 }
 
 static int32_t case_apply(void) {
-    static pm_util_limit_t hooked = { "zzz.prove.hooked", 8u, 64u, 8u, NULL, NULL, probe_apply };
+    static pm_util_limit_t hooked = { "zzz.prove.hooked", "zzz.prove", "hooked",
+        8u, 64u, 8u, NULL, NULL, probe_apply };
     int32_t i;
     if (pm_util_limits_attach(&hooked) != 0) {
         return fail("attach the hooked knob");
@@ -179,6 +269,9 @@ static int32_t pm_util_limits_tests(void) {
     uint32_t before = pm_util_limits_count();
     if (st == 0) {
         st = case_knob();
+    }
+    if (st == 0) {
+        st = case_module();
     }
     if (st == 0) {
         st = case_apply();

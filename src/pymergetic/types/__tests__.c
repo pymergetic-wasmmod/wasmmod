@@ -503,8 +503,8 @@ static int32_t case_stage_rows(void) {
     const pm_type_descriptor_t *d;
     char name[8];
     uint32_t i;
-    int32_t at_stage = pm_util_limits_find("types.stage");
-    int32_t at_reg = pm_util_limits_find("types.registry");
+    int32_t at_stage = pm_util_limits_find("pymergetic.types.stage");
+    int32_t at_reg = pm_util_limits_find("pymergetic.types.registry");
     uint32_t types_before = pm_types_registry_count();
     if (at_stage < 0 || at_reg < 0) {
         return fail("the card's knobs are on the list");
@@ -583,16 +583,16 @@ static int32_t case_stage_rows(void) {
         return fail("the wide type survived the widening");
     }
     /* Staging stops where the knob is, and starts again when it moves back. */
-    if (pm_util_limits_set("types.stage", pm_util_limits_used(at_stage)) != 0) {
-        return fail("shrink types.stage");
+    if (pm_util_limits_set("pymergetic.types.stage", pm_util_limits_used(at_stage)) != 0) {
+        return fail("shrink the stage knob");
     }
     if (pm_types_registry_stage("pymergetic.types.tests.Over",
             PM_TYPE_DESC_STRUCT, 4u, NULL, 1u) != -1) {
         return fail("a row past the knob must refuse");
     }
-    if (pm_util_limits_reset("types.stage") != 0
+    if (pm_util_limits_reset("pymergetic.types.stage") != 0
             || pm_util_limits_soft(at_stage) != pm_util_limits_default(at_stage)) {
-        return fail("reset types.stage");
+        return fail("reset the stage knob");
     }
     if (pm_types_registry_stage("pymergetic.types.tests.Over",
             PM_TYPE_DESC_STRUCT, 4u, NULL, 0u) != 0) {
