@@ -31,11 +31,25 @@ struct pm_util_mem_arena {
     _Atomic size_t spare;      /* extra TLSF pools outside [base, end); atomic */
     tlsf_t tlsf;               /* NULL until the first pool is seeded */
     pm_util_lock_t map_lock;   /* protects map_brk bump/unmap */
-    pm_util_lock_t heap_lock;  /* protects tlsf ops + heap_brk grow + spare */
+    pm_util_lock_t heap_lock;  /* protects tlsf ops + heap_brk grow + spare + pools[] */
+    uint32_t pool_count;
+    struct { pool_t pool; void *base; size_t size; } pools[8];
 };
 
 static size_t align_up(size_t x, size_t a) {
     return (x + (a - 1u)) & ~(a - 1u);
+}
+
+/* Register a pool in the arena's diagnostic tracking table. Caller holds
+ * heap_lock. Soft-fails when the table is full — walk/check are diagnostic
+ * only and the arena keeps working. */
+static void pool_note(pm_util_mem_arena_t *arena, pool_t pool, void *base, size_t size) {
+    if (arena->pool_count < 8u) {
+        arena->pools[arena->pool_count].pool = pool;
+        arena->pools[arena->pool_count].base = base;
+        arena->pools[arena->pool_count].size = size;
+        arena->pool_count++;
+    }
 }
 
 static size_t align_down(size_t x, size_t a) {
@@ -120,10 +134,12 @@ pm_util_mem_arena_t *pm_util_mem_arena_create(void *base, size_t size) {
     atomic_init(&arena->map_brk, (uintptr_t)usable);
     atomic_init(&arena->heap_brk, (uintptr_t)(arena->end - want));
     atomic_init(&arena->spare, (size_t)0);
+    arena->pool_count = 0u;
     arena->tlsf = tlsf_create_with_pool(arena->end - want, want);
     if (arena->tlsf == NULL) {
         return NULL;
     }
+    pool_note(arena, tlsf_get_pool(arena->tlsf), (void *)(arena->end - want), want);
     pm_util_lock_init(&arena->map_lock);
     pm_util_lock_init(&arena->heap_lock);
     return arena;
@@ -157,13 +173,16 @@ static int heap_grow_pool(pm_util_mem_arena_t *arena, size_t need) {
     if (grow > hole) {
         grow = align_down(hole, PM_UTIL_MEM_PAGE_SIZE);
     }
+    pool_t pt;
     if (grow < tlsf_pool_overhead() + 64u) {
         return -1;
     }
     unsigned char *pool = (unsigned char *)(heap_b - grow);
-    if (tlsf_add_pool(arena->tlsf, pool, grow) == NULL) {
+    pt = tlsf_add_pool(arena->tlsf, pool, grow);
+    if (pt == NULL) {
         return -1;
     }
+    pool_note(arena, pt, pool, grow);
     atomic_store_explicit(&arena->heap_brk, (uintptr_t)pool, memory_order_relaxed);
     return 0;
 }
@@ -299,14 +318,46 @@ int32_t pm_util_mem_arena_add_pool(pm_util_mem_arena_t *arena, void *base, size_
         return -1;
     }
     pm_util_lock_acquire(&arena->heap_lock);
-    if (tlsf_add_pool(arena->tlsf, (void *)lo, n) == NULL) {
+    pool_t pt = tlsf_add_pool(arena->tlsf, (void *)lo, n);
+    if (pt == NULL) {
         pm_util_lock_release(&arena->heap_lock);
         return -1;
     }
     sp = atomic_load_explicit(&arena->spare, memory_order_relaxed) + n;
+    pool_note(arena, pt, (void *)lo, n);
     atomic_store_explicit(&arena->spare, sp, memory_order_relaxed);
     pm_util_lock_release(&arena->heap_lock);
     return 0;
+}
+
+void pm_util_mem_arena_walk(const pm_util_mem_arena_t *arena, pm_util_mem_walk_fn fn, void *user) {
+    uint32_t i;
+    if (arena == NULL || fn == NULL) {
+        return;
+    }
+    pm_util_lock_acquire((pm_util_lock_t *)&arena->heap_lock);
+    for (i = 0; i < arena->pool_count; i++) {
+        tlsf_walk_pool(arena->pools[i].pool, fn, user);
+    }
+    pm_util_lock_release((pm_util_lock_t *)&arena->heap_lock);
+}
+
+int32_t pm_util_mem_arena_check(const pm_util_mem_arena_t *arena) {
+    uint32_t i;
+    int32_t st;
+    if (arena == NULL) {
+        return -1;
+    }
+    pm_util_lock_acquire((pm_util_lock_t *)&arena->heap_lock);
+    for (i = 0; i < arena->pool_count; i++) {
+        if (tlsf_check_pool(arena->pools[i].pool) != 0) {
+            pm_util_lock_release((pm_util_lock_t *)&arena->heap_lock);
+            return 1;
+        }
+    }
+    st = tlsf_check(arena->tlsf);
+    pm_util_lock_release((pm_util_lock_t *)&arena->heap_lock);
+    return st;
 }
 
 size_t pm_util_mem_arena_hole(const pm_util_mem_arena_t *arena) {
@@ -342,3 +393,5 @@ PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_spare, pm_util_mem_arena_
 PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_hole, pm_util_mem_arena_hole, size_t(const pm_util_mem_arena_t *));
 PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_overhead, pm_util_mem_arena_overhead, size_t(void));
 PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_add_pool, pm_util_mem_arena_add_pool, int32_t(pm_util_mem_arena_t *, void *, size_t));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_walk, pm_util_mem_arena_walk, void(const pm_util_mem_arena_t *, void(*)(void *, size_t, int, void *), void *));
+PM_MOD_EXPORT_C(pymergetic.util.mem, pm_util_mem_arena_check, pm_util_mem_arena_check, int32_t(const pm_util_mem_arena_t *));

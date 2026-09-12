@@ -921,7 +921,9 @@ int32_t pm_types_unlock(pm_type_value_t *v) {
  * facegen scan needs because a staged descriptor registers here too. Binary
  * search and the insert memmove want the run contiguous, hence one block
  * rather than a chain. */
+#ifndef PM_TYPE_REGISTRY_POOL
 #define PM_TYPE_REGISTRY_POOL 64u
+#endif
 #define PM_TYPE_REGISTRY_DEFAULT 512u
 
 static const pm_type_descriptor_t *s_registry_pool[PM_TYPE_REGISTRY_POOL];
