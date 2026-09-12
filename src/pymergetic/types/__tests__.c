@@ -185,6 +185,31 @@ static int32_t case_registry(void) {
             || pm_types_name_hash("created") != 0x0A3Du) {
         return fail("name hash values");
     }
+    /* remove: a removed descriptor is no longer findable, count drops by 1,
+     * remove on a non-existent fqn returns -1 */
+    {
+        uint32_t before = pm_types_registry_count();
+        if (pm_types_registry_remove("/no/such/type") != -1) {
+            return fail("remove miss refused");
+        }
+        if (pm_types_registry_remove(NULL) != -1) {
+            return fail("remove NULL refused");
+        }
+        /* Remove our Point descriptor (it was registered above) */
+        if (pm_types_registry_remove("pymergetic.types.Point") != 0) {
+            return fail("remove Point");
+        }
+        if (pm_types_registry_find("pymergetic.types.Point") != NULL) {
+            return fail("find after remove");
+        }
+        if (pm_types_registry_count() != before - 1u) {
+            return fail("count after remove");
+        }
+        /* Double-remove refuses */
+        if (pm_types_registry_remove("pymergetic.types.Point") != -1) {
+            return fail("double remove refused");
+        }
+    }
     return 0;
 }
 

@@ -203,7 +203,7 @@ static int mp_wasm_resident_muscle(const char *name) {
     for (i = 0; i < n; i++) {
         uint8_t ename[128];
         uint32_t elen = sizeof(ename);
-        uint8_t sig[160];
+        uint8_t sig[256];
         uint32_t slen = sizeof(sig);
         pm_wasmmod_registry_export_kind_t kind = PM_WASMMOD_REGISTRY_EXPORT_FN;
         if (!pm_wasmmod_registry_export_at((const uint8_t *)name, (uint32_t)nlen, i,

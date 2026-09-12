@@ -235,7 +235,7 @@ static int fetch_sig(const char *fqn, const char *export_name, char *sig, size_t
     for (uint32_t i = 0; i < n; ++i) {
         uint8_t name[128];
         uint32_t name_len = sizeof(name);
-        uint8_t sbuf[160];
+        uint8_t sbuf[256];
         uint32_t slen = sizeof(sbuf);
         pm_wasmmod_registry_export_kind_t kind = PM_WASMMOD_REGISTRY_EXPORT_FN;
         if (!pm_wasmmod_registry_export_at((const uint8_t *)fqn, (uint32_t)flen, i,
@@ -275,7 +275,7 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         mp_raise_msg(&mp_type_LookupError, MP_ERROR_TEXT("resolve miss"));
     }
 
-    char sig[160];
+    char sig[256];
     (void)fetch_sig(fqn, export_name, sig, sizeof(sig));
 
     if (sig[0] == '\0' || strcmp(sig, "int32_t(void)") == 0

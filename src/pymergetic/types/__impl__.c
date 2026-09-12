@@ -1004,6 +1004,17 @@ int32_t pm_types_registry_register(const pm_type_descriptor_t *desc) {
     return 0;
 }
 
+int32_t pm_types_registry_remove(const char *fqn) {
+    uint32_t slot;
+    if (fqn == NULL || registry_slot(fqn, &slot) == 0) {
+        return -1;
+    }
+    memmove(&s_registry[slot], &s_registry[slot + 1u],
+        (size_t)(s_registry_count - slot - 1u) * sizeof(*s_registry));
+    s_registry_count--;
+    return 0;
+}
+
 const pm_type_descriptor_t *pm_types_registry_find(const char *fqn) {
     uint32_t slot;
     if (fqn == NULL || registry_slot(fqn, &slot) == 0) {
@@ -1363,6 +1374,7 @@ PM_MOD_EXPORT_C(pymergetic.types, pm_types_field_set_i32, pm_types_field_set_i32
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_field_set_f64, pm_types_field_set_f64, int32_t(pm_type_value_t *, uint16_t, double));
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_find, pm_types_registry_find, const pm_type_descriptor_t *(const char *));
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_register, pm_types_registry_register, int32_t(const pm_type_descriptor_t *));
+PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_remove, pm_types_registry_remove, int32_t(const char *));
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_count, pm_types_registry_count, uint32_t(void));
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_type_at, pm_types_registry_type_at, int32_t(uint32_t, char *, uint32_t, uint16_t *, uint16_t *, char *, uint32_t, uint16_t *));
 PM_MOD_EXPORT_C(pymergetic.types, pm_types_registry_field_at, pm_types_registry_field_at, int32_t(uint32_t, uint16_t, char *, uint32_t, uint16_t *, uint32_t *, char *, uint32_t));

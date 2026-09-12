@@ -27,6 +27,7 @@
 
 #if MICROPY_PY_WASM_ELF
 #include "pymergetic/wasmmod/pack/format/elf/load.h"
+#include <stdbool.h>
 #endif
 
 /* ---- export funobj: calls registry by pack FQN + export name ---- */
@@ -564,6 +565,7 @@ typedef struct {
     pm_wasmmod_registry_handle_t h;
     mp_wasm_elf_image_t *img;
     const mp_pack_manifest_t *info;
+    bool partial; /* true when an adapter slot was exhausted — reject the whole load */
 } elf_pub_ctx_t;
 
 static uint8_t sig_for_export_name(const mp_pack_manifest_t *info, const char *name) {
@@ -588,6 +590,10 @@ static void elf_export_cb(const char *name, void *addr, void *ctx_in) {
     uint8_t sig = sig_for_export_name(ctx->info, name);
     int slot = claim_elf_adapter(addr, sig, ctx->img);
     if (slot < 0) {
+        /* Exhausted: mark the publish as partial. Nothing has been rolled
+         * back here — the symbols registered so far stay in the registry
+         * until the whole publish unwinds below. */
+        ctx->partial = true;
         return;
     }
     (void)pm_wasmmod_registry_export_set(ctx->h, (const uint8_t *)name, (uint32_t)strlen(name),
@@ -634,9 +640,22 @@ pm_wasmmod_registry_handle_t mp_wasm_elf_publish(const char *pack_name, const ui
     bool have = mp_pack_manifest_find_section(bytes, len, &payload, &payload_len)
         && mp_pack_manifest_parse(payload, payload_len, &info);
 
-    elf_pub_ctx_t ctx = { .h = h, .img = img, .info = have ? &info : NULL };
+    elf_pub_ctx_t ctx = { .h = h, .img = img, .info = have ? &info : NULL, .partial = false };
     mp_wasm_elf_foreach_func(img, elf_export_cb, &ctx);
     mp_pack_manifest_free(&info);
+
+    if (ctx.partial) {
+        /* Adapter pool exhausted — at least one symbol was silently dropped.
+         * Roll back the entire publish so the caller gets a clean refusal
+         * rather than a partial export set, matching the wasm loader's
+         * posture in loader/__impl__.rs. */
+        (void)pm_wasmmod_registry_unpublish(h);
+        mp_wasm_elf_image_free(img);
+        if (err && err_len) {
+            snprintf(err, err_len, "ELF adapter pool exhausted");
+        }
+        return bad;
+    }
 
     if (img_out) {
         *img_out = img;

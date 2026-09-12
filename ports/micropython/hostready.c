@@ -276,7 +276,7 @@ static void attach_registry_exports(const char *fqn, mp_obj_t module) {
     for (uint32_t i = 0; i < n; ++i) {
         uint8_t name[128];
         uint32_t name_len = sizeof(name);
-        uint8_t sig[160];
+        uint8_t sig[256];
         uint32_t sig_len = sizeof(sig);
         pm_wasmmod_registry_export_kind_t kind = PM_WASMMOD_REGISTRY_EXPORT_FN;
         if (!pm_wasmmod_registry_export_at((const uint8_t *)fqn, (uint32_t)flen, i,

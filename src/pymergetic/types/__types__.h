@@ -270,6 +270,11 @@ int32_t  pm_types_registry_register(const pm_type_descriptor_t *desc);
 /* Find by fqn. Binary search, NULL on miss. */
 const pm_type_descriptor_t *pm_types_registry_find(const char *fqn);
 
+/* Remove a descriptor by fqn from the sorted registry.
+ * The descriptor memory is not freed (monotonic contract in live seats).
+ * Returns 0 on success, -1 if not found or fqn is NULL. */
+int32_t  pm_types_registry_remove(const char *fqn);
+
 /* Count / at — module enumeration (all registered types, index order). */
 uint32_t pm_types_registry_count(void);
 const pm_type_descriptor_t *pm_types_registry_at(uint32_t index);
