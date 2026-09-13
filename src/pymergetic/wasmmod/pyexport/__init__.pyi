@@ -1,0 +1,1 @@
+"""pymergetic.wasmmod.pyexport — Python export table for WASM guest modules."""

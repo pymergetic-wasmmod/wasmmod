@@ -1,0 +1,4 @@
+[card]
+name = "verify"
+fqn = "pymergetic.wasmmod.verify"
+impl = "c"
