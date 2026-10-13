@@ -180,6 +180,8 @@ pub struct SharedHeapInitArgs {
 unsafe extern "C" {
     pub fn wasm_runtime_init() -> bool;
     pub fn wasm_runtime_init_thread_env() -> bool;
+    pub fn wasm_runtime_destroy_thread_env();
+    pub fn wasm_runtime_thread_env_inited() -> bool;
 
     /* The runtime's own allocator, which is where an image buffer comes from:
      * every seat that can load a module has inited the runtime by definition
@@ -538,7 +540,9 @@ fn adapter_invoke(
     // side (a thread-local bool short-circuits a second call), so an
     // unconditional call here — on every call, not just the first per
     // thread — costs one cheap check, not a real re-init.
-    let _ = unsafe { wasm_runtime_init_thread_env() };
+    if !unsafe { wasm_runtime_init_thread_env() } {
+        return -1;
+    }
 
     let mut wasm_args: [wasm_val_t; MAX_VALUES] = [wasm_val_t {
         kind: 0,
@@ -940,7 +944,9 @@ unsafe extern "C" fn loader_run_wasm_test(
     if func.is_null() {
         return -1;
     }
-    let _ = unsafe { wasm_runtime_init_thread_env() };
+    if !unsafe { wasm_runtime_init_thread_env() } {
+        return -1;
+    }
     let mut wasm_results: [wasm_val_t; 1] = [wasm_val_t {
         kind: 0,
         of: wasm_val_of_t { i64: 0 },
@@ -1576,7 +1582,7 @@ pub unsafe extern "C" fn pm_wasmmod_loader_load(
                      * loader_run_wasm_test (no trampoline pool). */
                     let mut name_len: usize = 0;
                     let q = export.name;
-                    while *q.add(name_len) != 0 && name_len < 256 {
+                    while name_len < 256 && *q.add(name_len) != 0 {
                         name_len += 1;
                     }
                     let mut matched: i64 = -1;

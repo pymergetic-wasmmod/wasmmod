@@ -289,7 +289,7 @@ fn call_roundtrips_through_the_fn_t_convention() {
             1,
         );
         assert_eq!(status, 0);
-        assert_eq!(unsafe { result.of.i32 }, 42);
+        assert_eq!(result.of.i32, 42);
     }
 }
 
@@ -392,12 +392,10 @@ unsafe extern "C" fn fake_clock_us() -> u64 {
 
 /// One op: must be called exactly `iterations` times across warmup + measure.
 unsafe extern "C" fn case_bench_add(iterations: u64) -> i32 {
-    unsafe {
-        let mut i = 0u64;
-        while i < iterations {
-            core::hint::black_box(1u64.wrapping_add(1));
-            i += 1;
-        }
+    let mut i = 0u64;
+    while i < iterations {
+        core::hint::black_box(1u64.wrapping_add(1));
+        i += 1;
     }
     0
 }
@@ -1213,10 +1211,8 @@ unsafe extern "C" fn case_refusal_ring_is_loud_and_introspectable() -> i32 {
     unsafe { crate::util::mod_test::case_rc(case_refusal_ring_is_loud_and_introspectable_body) }
 }
 unsafe extern "C" fn case_refusal_ring_is_loud_and_introspectable_body() -> i32 {
-    unsafe {
-        refusal_ring_records_a_sig_over_cap();
-        long_valid_sig_registers_within_cap();
-    }
+    refusal_ring_records_a_sig_over_cap();
+    long_valid_sig_registers_within_cap();
     0
 }
 crate::PM_MOD_TEST_RS!(

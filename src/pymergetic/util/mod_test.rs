@@ -17,9 +17,23 @@ use crate::wasmmod::registry::{
 /// Serializes module test cases across cargo's thread pool.
 pub static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+/// WAMR installs guard pages and an alternate signal stack on each caller-created
+/// thread. Rust's test runner reuses stack addresses across short-lived threads;
+/// leaving that setup behind can fault in WAMR's next stack-page probe.
+struct ThreadEnvCleanup;
+
+impl Drop for ThreadEnvCleanup {
+    fn drop(&mut self) {
+        if unsafe { crate::wasmmod::loader::wasm_runtime_thread_env_inited() } {
+            unsafe { crate::wasmmod::loader::wasm_runtime_destroy_thread_env() };
+        }
+    }
+}
+
 /// Run `f`; map panic → fail (`1`), success → `0`. For wrapping assert!-heavy cases.
 pub fn case(f: impl FnOnce()) -> i32 {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _thread_env = ThreadEnvCleanup;
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(()) => 0,
         Err(_) => 1,
@@ -34,6 +48,7 @@ pub fn case(f: impl FnOnce()) -> i32 {
 /// whole test binary.
 pub unsafe fn case_rc(f: unsafe extern "C" fn() -> i32) -> i32 {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _thread_env = ThreadEnvCleanup;
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { f() })) {
         Ok(rc) => rc,
         Err(_) => 1,

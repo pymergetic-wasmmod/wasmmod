@@ -9,7 +9,7 @@
 //! no-closure rule; panics stay contained by `catch_unwind`.)
 
 use super::registry_types::{
-    pm_wasmmod_registry_handle_t, pm_wasmmod_registry_valkind_t,
+    pm_wasmmod_registry_valkind_t,
     pm_wasmmod_registry_value_of_t, pm_wasmmod_registry_value_t,
 };
 use super::{

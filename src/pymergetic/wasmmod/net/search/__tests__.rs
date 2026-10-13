@@ -54,7 +54,7 @@ unsafe extern "C" fn case_catalog_lists_every_pack_name_sorted_body() -> i32 {
     if !name_is(b"hello\0".as_ptr(), 5, 1) {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 22, 2) {
+    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 21, 2) {
         return 1;
     }
     if !name_is(b"zlib\0".as_ptr(), 4, 3) {
@@ -83,7 +83,7 @@ unsafe extern "C" fn case_search_matches_name_substring_ci_body() -> i32 {
     if n2 != 1 {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 22, 0) {
+    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 21, 0) {
         return 1;
     }
     0
@@ -100,7 +100,7 @@ unsafe extern "C" fn case_filter_by_prefix_body() -> i32 {
     if n != 1 {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 22, 0) {
+    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 21, 0) {
         return 1;
     }
     0
@@ -133,7 +133,7 @@ unsafe extern "C" fn case_filter_by_kind_and_arch_body() -> i32 {
     if n2 != 1 {
         return 1;
     }
-    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 22, 0) {
+    if !name_is(b"pymergetic.metal.coop\0".as_ptr(), 21, 0) {
         return 1;
     }
     /* Kind alone: anything with a wasm artifact. */

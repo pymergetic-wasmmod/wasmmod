@@ -250,7 +250,7 @@ macro_rules! PM_TYPE_DEFINE_RS {
                 fqn: concat!($fqn, "\0").as_ptr(),
                 parent: core::ptr::null(),
                 field_count: __PM_TYPE_FIELD_SPEC.len() as u16,
-                fields: unsafe { core::ptr::addr_of!(__PM_TYPE_FIELDS) as *const $crate::wasmmod::guest::pm_types_field_rs },
+                fields: core::ptr::addr_of!(__PM_TYPE_FIELDS) as *const $crate::wasmmod::guest::pm_types_field_rs,
                 method_count: 0,
                 methods: core::ptr::null(),
             };

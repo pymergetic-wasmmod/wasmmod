@@ -1144,55 +1144,66 @@ unsafe fn refusal_record(
 /// First dead slot, or -1 — publish reuses holes so every other live
 /// handle's index keeps meaning the same thing (see REGISTRY.md).
 unsafe fn find_dead(t: *mut Table) -> i32 {
-    let mut i = 0usize;
-    while i < (*t).n_entries as usize {
-        if !(*t).entries[i].live {
-            return i as i32;
+    // SAFETY: the caller holds the table lock and passes the live TABLE pointer;
+    // n_entries is bounded by MOD_MAX, including when a new slot is reserved.
+    unsafe {
+        let mut i = 0usize;
+        while i < (*t).n_entries as usize {
+            if !(*t).entries[i].live {
+                return i as i32;
+            }
+            i += 1;
         }
-        i += 1;
+        if (*t).n_entries as usize >= MOD_MAX {
+            return -1;
+        }
+        let idx = (*t).n_entries as usize;
+        (*t).n_entries += 1;
+        idx as i32
     }
-    if (*t).n_entries as usize >= MOD_MAX {
-        return -1;
-    }
-    let idx = (*t).n_entries as usize;
-    (*t).n_entries += 1;
-    idx as i32
 }
 
 unsafe fn entry_by_handle(
     t: *mut Table,
     handle: pm_wasmmod_registry_handle_t,
 ) -> *mut ModEntry {
-    let i = handle.index as usize;
-    if i >= (*t).n_entries as usize || i >= MOD_MAX {
-        return core::ptr::null_mut();
+    // SAFETY: the caller holds the table lock and passes TABLE; the index is
+    // checked against both the initialized count and the fixed array capacity.
+    unsafe {
+        let i = handle.index as usize;
+        if i >= (*t).n_entries as usize || i >= MOD_MAX {
+            return core::ptr::null_mut();
+        }
+        let e = (*t).entries.as_mut_ptr().add(i);
+        if !(*e).live || (*e).generation != handle.generation {
+            return core::ptr::null_mut();
+        }
+        e
     }
-    let e = (*t).entries.as_mut_ptr().add(i);
-    if !(*e).live || (*e).generation != handle.generation {
-        return core::ptr::null_mut();
-    }
-    e
 }
 
 unsafe fn entry_by_fqn(t: *mut Table, fqn: *const u8, fqn_len: usize) -> *mut ModEntry {
-    let mut i = 0usize;
-    while i < (*t).n_entries as usize {
-        let e = (*t).entries.as_mut_ptr().add(i);
-        if (*e).live && (*e).fqn_len as usize == fqn_len {
-            let eq = unsafe {
-                span_eq((*e).fqn.as_ptr(), (*e).fqn_len as usize, fqn, fqn_len)
-            };
-            if eq {
-                return e;
+    // SAFETY: the caller holds the table lock, passes TABLE and a readable
+    // fqn span; each row index stays within n_entries (at most MOD_MAX).
+    unsafe {
+        let mut i = 0usize;
+        while i < (*t).n_entries as usize {
+            let e = (*t).entries.as_mut_ptr().add(i);
+            if (*e).live && (*e).fqn_len as usize == fqn_len {
+                if span_eq((*e).fqn.as_ptr(), (*e).fqn_len as usize, fqn, fqn_len) {
+                    return e;
+                }
             }
+            i += 1;
         }
-        i += 1;
+        core::ptr::null_mut()
     }
-    core::ptr::null_mut()
 }
 
 unsafe fn entry_index(e: *mut ModEntry, t: *mut Table) -> u32 {
-    let base = (*t).entries.as_mut_ptr();
+    // SAFETY: callers pass TABLE under its lock; e is either null or a row
+    // returned from that table. The arithmetic below does not dereference e.
+    let base = unsafe { (*t).entries.as_mut_ptr() };
     if base.is_null() || e.is_null() {
         return u32::MAX;
     }
@@ -1212,25 +1223,30 @@ unsafe fn publish(
     if idx < 0 {
         return invalid_handle();
     }
-    let e = (*t).entries.as_mut_ptr().add(idx as usize);
-    let stored = unsafe { span_put((*e).fqn.as_mut_ptr(), FQN_CAP, fqn, fqn_len) };
-    if stored == usize::MAX {
-        return invalid_handle();
-    }
-    /* A reused slot bumps its generation so every stale handle to the
-     * dead occupant keeps being detectably stale (see REGISTRY.md). */
-    (*e).generation = (*e).generation.wrapping_add(1);
-    (*e).fqn_len = stored as u32;
-    (*e).version_len = 0;
-    (*e).container = container;
-    (*e).live = true;
-    /* A dead slot gave its rows back at unpublish, so this is a no-op
-     * there and on a fresh slot; it is here because a reused slot must
-     * start empty however it came to be free. */
-    unsafe { entry_rows_give(e) };
-    pm_wasmmod_registry_handle_t {
-        index: idx as u32,
-        generation: (*e).generation,
+    // SAFETY: find_dead reserved an index in TABLE below MOD_MAX; the caller
+    // holds its lock and supplies a readable fqn span. The row remains live
+    // through initialization and its previous chains are returned once.
+    unsafe {
+        let e = (*t).entries.as_mut_ptr().add(idx as usize);
+        let stored = span_put((*e).fqn.as_mut_ptr(), FQN_CAP, fqn, fqn_len);
+        if stored == usize::MAX {
+            return invalid_handle();
+        }
+        /* A reused slot bumps its generation so every stale handle to the
+         * dead occupant keeps being detectably stale (see REGISTRY.md). */
+        (*e).generation = (*e).generation.wrapping_add(1);
+        (*e).fqn_len = stored as u32;
+        (*e).version_len = 0;
+        (*e).container = container;
+        (*e).live = true;
+        /* A dead slot gave its rows back at unpublish, so this is a no-op
+         * there and on a fresh slot; it is here because a reused slot must
+         * start empty however it came to be free. */
+        entry_rows_give(e);
+        pm_wasmmod_registry_handle_t {
+            index: idx as u32,
+            generation: (*e).generation,
+        }
     }
 }
 
@@ -1246,7 +1262,8 @@ unsafe fn ensure(
         let idx = unsafe { entry_index(e, t) };
         return pm_wasmmod_registry_handle_t {
             index: idx,
-            generation: (*e).generation,
+            // SAFETY: entry_by_fqn returned a live row of the locked table.
+            generation: unsafe { (*e).generation },
         };
     }
     unsafe { publish(t, fqn, fqn_len, container) }
@@ -1292,8 +1309,12 @@ unsafe fn export_set_sig(
         let mut keep = sig;
         let mut keep_len = sig_len;
         if sig_len == 0 {
-            keep = (*old).sig.ptr;
-            keep_len = (*old).sig.len as usize;
+            // SAFETY: export_find found a live row; keep its signature until
+            // export_take copies the bytes, before export_replace frees it.
+            unsafe {
+                keep = (*old).sig.ptr;
+                keep_len = (*old).sig.len as usize;
+            }
         }
         let fresh = unsafe { export_take(name, name_len, keep, keep_len) };
         if fresh.is_null() {
@@ -1308,8 +1329,11 @@ unsafe fn export_set_sig(
             }
             return false;
         }
-        (*fresh).kind = kind;
-        (*fresh).ptr = ptr;
+        // SAFETY: export_take returned an owned, non-null row under the lock.
+        unsafe {
+            (*fresh).kind = kind;
+            (*fresh).ptr = ptr;
+        }
         unsafe { export_replace(e, old, fresh) };
         return true;
     }
@@ -1340,8 +1364,11 @@ unsafe fn export_set_sig(
         }
         return false;
     }
-    (*x).kind = kind;
-    (*x).ptr = ptr;
+    // SAFETY: export_take returned a non-null row owned by the locked table.
+    unsafe {
+        (*x).kind = kind;
+        (*x).ptr = ptr;
+    }
     unsafe { export_append(e, x) };
     true
 }
@@ -2258,8 +2285,10 @@ struct BenchBody {
 }
 
 unsafe fn run_test_body(b: *const TestBody) -> i32 {
-    if (*b).body_kind == BODY_NATIVE {
-        if let Some(f) = (*b).native {
+    // SAFETY: the caller passes its initialized stack snapshot; the runner
+    // cannot outlive that snapshot, and no lock is held while it executes.
+    if unsafe { (*b).body_kind } == BODY_NATIVE {
+        if let Some(f) = unsafe { (*b).native } {
             return unsafe { f() };
         }
         return -1;
@@ -2511,8 +2540,10 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_at(
 }
 
 unsafe fn run_bench_body(b: *const BenchBody, iterations: u64) -> i32 {
-    if (*b).body_kind == BODY_NATIVE {
-        if let Some(f) = (*b).native {
+    // SAFETY: the caller passes its initialized stack snapshot; the runner
+    // cannot outlive that snapshot, and no lock is held while it executes.
+    if unsafe { (*b).body_kind } == BODY_NATIVE {
+        if let Some(f) = unsafe { (*b).native } {
             return unsafe { f(iterations) };
         }
         return -1;
@@ -2649,22 +2680,25 @@ pub unsafe extern "C" fn pm_wasmmod_registry_bench_run(
 /* bench_run_all report lines, hand-formatted (no alloc::format! in the
  * subset): append helpers over the table's fixed out buffer. */
 unsafe fn out_reset(t: *mut Table) {
-    (*t).out_len = 0;
+    // SAFETY: caller holds the table lock and passes TABLE.
+    unsafe { (*t).out_len = 0 };
 }
 
 unsafe fn out_put(t: *mut Table, s: *const u8, n: usize) {
-    let at = (*t).out_len as usize;
-    if at + n > OUT_CAP {
-        return;
-    }
-    let mut i = 0usize;
-    while i < n {
-        unsafe {
-            *(*t).out.as_mut_ptr().add(at + i) = *s.add(i);
+    // SAFETY: caller holds the table lock and passes TABLE with out_len <=
+    // OUT_CAP; the capacity check keeps writes inside out, and s has n bytes.
+    unsafe {
+        let at = (*t).out_len as usize;
+        if at + n > OUT_CAP {
+            return;
         }
-        i += 1;
+        let mut i = 0usize;
+        while i < n {
+            *(*t).out.as_mut_ptr().add(at + i) = *s.add(i);
+            i += 1;
+        }
+        (*t).out_len += n as u32;
     }
-    (*t).out_len += n as u32;
 }
 
 unsafe fn out_puts(t: *mut Table, s: *const u8) {
