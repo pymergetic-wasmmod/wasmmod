@@ -1,5 +1,5 @@
 /*
- * Typed native invoke via registry resolve + C ABI (not Value-convention call).
+ * Typed invoke: resident exports use C ABI; loaded packs use registry adapters.
  * Used by wasmmod.call and pack/host export funobjs.
  */
 #ifndef PM_WASMMOD_PORTS_UPY_NATIVECALL_H

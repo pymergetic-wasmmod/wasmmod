@@ -49,6 +49,9 @@ include $(WASMMOD_ABS)/gen.mk
 
 
 QSTR_DEFS += $(TOP)/$(WASMMOD_DIR)/ports/micropython/qstrdefs.wasmmod
+# extmod.mk is included after py.mk has expanded the generated-header
+# prerequisites. Track this late-added definition file explicitly as well.
+$(HEADER_BUILD)/qstrdefs.generated.h: $(WASMMOD_ABS)/ports/micropython/qstrdefs.wasmmod
 
 ifdef PM_WASMMOD_BROWSER
 # Browser cell: RS loader + WAMR interp (wasm32) + same µPy finder/hook as unix.

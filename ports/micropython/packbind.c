@@ -487,12 +487,20 @@ static int32_t elf_adapter_invoke(unsigned idx, const pm_wasmmod_registry_value_
     if (idx >= MP_WASM_ELF_ADAPTER_SLOTS || !elf_adapters[idx].used || elf_adapters[idx].native == NULL) {
         return -1;
     }
+    if (nargs > 4 || (nargs != 0 && args == NULL) || nresults < 1 || results == NULL) {
+        return -1;
+    }
     uint8_t sig = elf_adapters[idx].sig;
     if (sig == MP_PACK_SIG_AUTO) {
         sig = (uint8_t)nargs;
     }
-    if (nargs < sig || nresults < 1) {
+    if (nargs != sig) {
         return -1;
+    }
+    for (uint32_t i = 0; i < nargs; ++i) {
+        if (args[i].kind != PM_WASMMOD_REGISTRY_VALKIND_I32) {
+            return -1;
+        }
     }
     int32_t r = 0;
     void *fn = elf_adapters[idx].native;

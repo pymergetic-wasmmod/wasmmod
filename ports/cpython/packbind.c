@@ -453,12 +453,22 @@ static int32_t elf_adapter_invoke(unsigned idx, const pm_wasmmod_registry_value_
         || elf_adapters[idx].native == NULL) {
         return -1;
     }
+    if (nargs > 4 || (nargs != 0 && args == NULL) || results == NULL || nresults < 1) {
+        return -1;
+    }
     uint8_t sig = elf_adapters[idx].sig;
     if (sig == MP_PACK_SIG_AUTO) {
+        /* Raw/auto ELF promises 0..4 int32 arguments and one int32 result.
+         * The caller supplies arity; no native prototype is inferred. */
         sig = (uint8_t)nargs;
     }
-    if (nargs < sig || nresults < 1) {
+    if (nargs != sig) {
         return -1;
+    }
+    for (uint32_t i = 0; i < nargs; ++i) {
+        if (args[i].kind != PM_WASMMOD_REGISTRY_VALKIND_I32) {
+            return -1;
+        }
     }
     int32_t r = 0;
     void *fn = elf_adapters[idx].native;

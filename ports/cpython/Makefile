@@ -12,14 +12,11 @@ EXT_SUFFIX := $(shell $(PYTHON) -c "import sysconfig; print(sysconfig.get_config
 PY_INCLUDES := $(shell $(PYTHON)-config --includes)
 PY_LDFLAGS := $(shell $(PYTHON)-config --ldflags --embed 2>/dev/null || $(PYTHON)-config --ldflags)
 
-CARGO_TARGET := $(shell cd $(WASMMOD_ROOT) && cargo metadata --no-deps --format-version 1 2>/dev/null | \
-	$(PYTHON) -c "import sys,json; print(json.load(sys.stdin)['target_directory']+'/release')")
-ifeq ($(CARGO_TARGET),)
-CARGO_TARGET := $(WASMMOD_ROOT)/target/release
-endif
+# CPython requires bundled TLS; do not reuse a µPy --no-default-features archive.
+CARGO_TARGET := $(BUILD)/cargo/release
 STATICLIB := $(CARGO_TARGET)/libpymergetic_wasmmod.a
-IWASM_A := $(firstword $(wildcard $(WASMMOD_ROOT)/target/release/build/*/out/vmlib/build/libiwasm.a) \
-	$(wildcard $(CARGO_TARGET)/build/*/out/vmlib/build/libiwasm.a))
+# Expand after Cargo runs so the first build can discover its WAMR archive.
+IWASM_A = $(firstword $(wildcard $(CARGO_TARGET)/build/*/out/vmlib/build/libiwasm.a))
 
 CFLAGS := -fPIC -O2 -Wall -Wextra \
 	-I$(WASMMOD_ROOT) -I$(WASMMOD_ROOT)/src \
@@ -69,21 +66,22 @@ CORE_OBJS := \
 	$(BUILD)/obj/pack/aot_section.o \
 	$(BUILD)/obj/pack/elf_section.o \
 	$(BUILD)/obj/pack/elf_load.o \
-	$(BUILD)/obj/uzlib/adler32.o \
-	$(BUILD)/obj/uzlib/crc32.o \
 	$(BUILD)/obj/uzlib/header.o \
 	$(BUILD)/obj/verify/impl.o
 
 OBJS := $(PORT_OBJS) $(COMMON_OBJS) $(CORE_OBJS)
 MOD := $(BUILD)/pymergetic/wasmmod$(EXT_SUFFIX)
 
-.PHONY: all clean smoke staticlib
+.PHONY: all clean smoke staticlib FORCE
 all: $(MOD)
 
 staticlib: $(STATICLIB)
 
-$(STATICLIB):
-	cd $(WASMMOD_ROOT) && cargo build --release --features upy-host,bundle-mbedtls
+FORCE:
+
+# Cargo tracks source/feature freshness; archive existence alone does not.
+$(STATICLIB): FORCE
+	cd $(WASMMOD_ROOT) && cargo build --release --features upy-host,bundle-mbedtls --target-dir $(BUILD)/cargo
 
 $(BUILD)/obj/port $(BUILD)/obj/common $(BUILD)/obj/pack $(BUILD)/obj/verify $(BUILD)/obj/uzlib $(BUILD)/pymergetic:
 	mkdir -p $@
@@ -111,10 +109,8 @@ $(BUILD)/obj/pack/elf_section.o: $(WASMMOD_ROOT)/src/pymergetic/wasmmod/pack/for
 	$(CC) $(CFLAGS) -c -o $@ $<
 $(BUILD)/obj/pack/elf_load.o: $(WASMMOD_ROOT)/src/pymergetic/wasmmod/pack/format/elf/load.c | $(BUILD)/obj/pack
 	$(CC) $(CFLAGS) -c -o $@ $<
-$(BUILD)/obj/uzlib/adler32.o: $(WASMMOD_ROOT)/../../lib/uzlib/adler32.c | $(BUILD)/obj/uzlib
-	$(CC) $(CFLAGS) -c -o $@ $<
-$(BUILD)/obj/uzlib/crc32.o: $(WASMMOD_ROOT)/../../lib/uzlib/crc32.c | $(BUILD)/obj/uzlib
-	$(CC) $(CFLAGS) -c -o $@ $<
+# The staticlib's util.zlib supplies inflate and Adler/CRC checksums once.
+# Only the pack header parser is specific to this host link.
 $(BUILD)/obj/uzlib/header.o: $(WASMMOD_ROOT)/../../lib/uzlib/header.c | $(BUILD)/obj/uzlib
 	$(CC) $(CFLAGS) -c -o $@ $<
 $(BUILD)/obj/verify/impl.o: $(WASMMOD_ROOT)/src/pymergetic/wasmmod/verify/__impl__.c | $(BUILD)/obj/verify

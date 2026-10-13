@@ -25,7 +25,8 @@
 
 /* Wasm/AOT exports are registry_fn_t trampolines (args/results), not a
  * C ABI symbol. Casting them to int32_t(void) returns the trampoline
- * status (-1) instead of the guest i32. ELF/resident stay a real C fn. */
+ * status (-1) instead of the guest i32. ELF adapters are dispatched before
+ * signature-based calls below; only resident exports use the direct C ABI. */
 static int wasm_container(const char *fqn) {
     int32_t k = pm_wasmmod_registry_container((const uint8_t *)fqn, (uint32_t)strlen(fqn));
     return k == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_WASM
@@ -223,7 +224,7 @@ static int32_t call_registry_i32(const char *fqn, const char *export_name,
     res.of.i32 = 0;
     st = pm_wasmmod_registry_call((const uint8_t *)fqn, (uint32_t)strlen(fqn),
         (const uint8_t *)export_name, (uint32_t)strlen(export_name), args, nargs, &res, 1u);
-    if (st < 0) {
+    if (st < 0 || res.kind != PM_WASMMOD_REGISTRY_VALKIND_I32) {
         mp_raise_OSError(MP_EINVAL);
     }
     return res.of.i32;
@@ -273,6 +274,22 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         (const uint8_t *)export_name, (uint32_t)strlen(export_name));
     if (p == NULL) {
         mp_raise_msg(&mp_type_LookupError, MP_ERROR_TEXT("resolve miss"));
+    }
+
+    /* ELF publish installs registry_fn_t adapters, never raw C pointers.
+     * Dispatch before signature inference: ELF signatures live in the adapter
+     * (including four-argument and AUTO exports), not registry metadata. */
+    if (pm_wasmmod_registry_container((const uint8_t *)fqn, (uint32_t)strlen(fqn))
+        == (int32_t)PM_WASMMOD_REGISTRY_CONTAINER_ELF) {
+        pm_wasmmod_registry_value_t values[4];
+        if (n_args > MP_ARRAY_SIZE(values)) {
+            mp_raise_TypeError(MP_ERROR_TEXT("ELF call supports at most four i32 args"));
+        }
+        for (size_t i = 0; i < n_args; ++i) {
+            values[i] = pm_wasmmod_registry_value_i32((int32_t)mp_obj_get_int(args[i]));
+        }
+        return mp_obj_new_int(call_registry_i32(fqn, export_name,
+            n_args ? values : NULL, (uint32_t)n_args));
     }
 
     char sig[256];
@@ -377,6 +394,15 @@ mp_obj_t mp_wasm_native_call(const char *fqn, const char *export_name,
         }
         return mp_obj_new_int(((int32_t (*)(uint16_t))p)(
             (uint16_t)mp_obj_get_int(args[0])));
+    }
+    if (strcmp(sig, "int32_t(uint32_t)") == 0) {
+        /* One unsigned id in, status out: ai.session.close(id) and friends
+         * whose handle is a counter, never a negative fd. */
+        if (n_args != 1) {
+            mp_raise_TypeError(MP_ERROR_TEXT("native call arity"));
+        }
+        return mp_obj_new_int(((int32_t (*)(uint32_t))p)(
+            (uint32_t)mp_obj_get_int(args[0])));
     }
     if (strcmp(sig, "int32_t(int32_t, int32_t, int32_t)") == 0 || (sig[0] == '\0' && n_args == 3)) {
         pm_wasmmod_registry_value_t a[3];

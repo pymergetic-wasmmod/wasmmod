@@ -42,6 +42,39 @@ static int get_buffer(PyObject *obj, Py_buffer *view) {
 }
 
 PyObject *pm_cpy_native_call(const char *fqn, const char *export_name, PyObject *args_tuple) {
+    Py_ssize_t n_args = args_tuple == NULL ? 0 : PyTuple_GET_SIZE(args_tuple);
+    if (pm_wasmmod_registry_container((const uint8_t *)fqn, (uint32_t)strlen(fqn))
+        == PM_WASMMOD_REGISTRY_CONTAINER_ELF) {
+        /* ELF exports resolve to registry_fn_t adapters, not typed C functions.
+         * Raw/auto ELF exports promise 0..4 int32 arguments and one int32 result;
+         * auto selects arity from the call, it cannot infer a native prototype. */
+        if (n_args > 4) {
+            PyErr_SetString(PyExc_TypeError, "ELF calls support at most four int32 arguments");
+            return NULL;
+        }
+        pm_wasmmod_registry_value_t args[4];
+        for (Py_ssize_t i = 0; i < n_args; ++i) {
+            long arg = PyLong_AsLong(PyTuple_GET_ITEM(args_tuple, i));
+            if (arg == -1 && PyErr_Occurred()) {
+                return NULL;
+            }
+            args[i] = pm_wasmmod_registry_value_i32((int32_t)arg);
+        }
+        pm_wasmmod_registry_value_t result = { .kind = PM_WASMMOD_REGISTRY_VALKIND_F64 };
+        int32_t status = pm_wasmmod_registry_call((const uint8_t *)fqn,
+            (uint32_t)strlen(fqn), (const uint8_t *)export_name,
+            (uint32_t)strlen(export_name), args, (uint32_t)n_args, &result, 1u);
+        if (status != 0) {
+            PyErr_Format(PyExc_RuntimeError, "ELF registry call failed (%d)", (int)status);
+            return NULL;
+        }
+        if (result.kind != PM_WASMMOD_REGISTRY_VALKIND_I32) {
+            PyErr_SetString(PyExc_TypeError, "ELF registry call returned a non-int32 result");
+            return NULL;
+        }
+        return PyLong_FromLong(result.of.i32);
+    }
+
     void *p = pm_wasmmod_registry_resolve_native((const uint8_t *)fqn, (uint32_t)strlen(fqn),
         (const uint8_t *)export_name, (uint32_t)strlen(export_name));
     if (p == NULL) {
@@ -49,7 +82,6 @@ PyObject *pm_cpy_native_call(const char *fqn, const char *export_name, PyObject 
         return NULL;
     }
 
-    Py_ssize_t n_args = args_tuple == NULL ? 0 : PyTuple_GET_SIZE(args_tuple);
     char sig[160];
     (void)fetch_sig(fqn, export_name, sig, sizeof(sig));
 
@@ -114,6 +146,19 @@ PyObject *pm_cpy_native_call(const char *fqn, const char *export_name, PyObject 
         }
         return PyLong_FromLong(((int32_t (*)(uint32_t, uint16_t))p)(
             (uint32_t)a0, (uint16_t)a1));
+    }
+    if (strcmp(sig, "int32_t(uint32_t)") == 0) {
+        /* One unsigned id in, status out: ai.session.close(id) and friends
+         * whose handle is a counter, never a negative fd. */
+        if (n_args != 1) {
+            PyErr_SetString(PyExc_TypeError, "native call arity");
+            return NULL;
+        }
+        long a0 = PyLong_AsLong(PyTuple_GET_ITEM(args_tuple, 0));
+        if (a0 == -1 && PyErr_Occurred()) {
+            return NULL;
+        }
+        return PyLong_FromLong(((int32_t (*)(uint32_t))p)((uint32_t)a0));
     }
     if (strcmp(sig, "int32_t(uint32_t, uint16_t, uint32_t)") == 0) {
         /* net.zenoh.peer: peer locator (addr_be, port, mode). */
