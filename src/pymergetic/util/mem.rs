@@ -7,3 +7,9 @@
 #[path = "mem/__exports__.rs"]
 mod export;
 pub use export::*;
+
+// Module tests — the same `__tests__.rs` face every sibling wires in; kept out
+// of the non-test build so the export mirror stays a pure declaration.
+#[cfg(test)]
+#[path = "mem/__tests__.rs"]
+mod __tests__;
